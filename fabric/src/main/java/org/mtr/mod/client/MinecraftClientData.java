@@ -38,6 +38,7 @@ public final class MinecraftClientData extends ClientData {
 
 	private static MinecraftClientData instance = new MinecraftClientData();
 	private static MinecraftClientData dashboardInstance = new MinecraftClientData();
+	private static ClientData interchangeData = new ClientData();
 
 	public static String DASHBOARD_SEARCH = "";
 	public static String ROUTES_PLATFORMS_SEARCH = "";
@@ -147,10 +148,21 @@ public final class MinecraftClientData extends ClientData {
 		return dashboardInstance;
 	}
 
+	public static ClientData getInterchangeData() {
+		return interchangeData;
+	}
+
+	@Nullable
+	public static Station getInterchangeStation(long stationId) {
+		final Station localStation = instance.stationIdMap.get(stationId);
+		return localStation == null ? interchangeData.stationIdMap.get(stationId) : localStation;
+	}
+
 	public static void reset() {
 		DefaultRailMeshCache.clear();
 		MinecraftClientData.instance = new MinecraftClientData();
 		MinecraftClientData.dashboardInstance = new MinecraftClientData();
+		MinecraftClientData.interchangeData = new ClientData();
 	}
 
 	public static boolean hasPermission() {

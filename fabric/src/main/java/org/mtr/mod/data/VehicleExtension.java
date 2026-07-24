@@ -141,7 +141,7 @@ public class VehicleExtension extends Vehicle implements Utilities {
 						final ObjectArrayList<MutableText> chatTextThisStation = new ObjectArrayList<>();
 						final ObjectArrayList<MutableText> chatTextOtherStations = new ObjectArrayList<>();
 
-						final Station nextStation = MinecraftClientData.getInstance().stationIdMap.get(nextStationId);
+						final Station nextStation = MinecraftClientData.getInterchangeStation(nextStationId);
 						if (nextStation != null) {
 							final LongAVLTreeSet excludedRouteIds = new LongAVLTreeSet();
 							excludedRouteIds.add(thisRouteId);

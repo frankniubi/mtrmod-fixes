@@ -31,6 +31,7 @@ import org.mtr.mod.generated.lang.TranslationProvider;
 import org.mtr.mod.item.ItemBlockClickingBase;
 import org.mtr.mod.item.ItemDriverKey;
 import org.mtr.mod.packet.PacketRequestData;
+import org.mtr.mod.packet.PacketRequestInterchangeData;
 import org.mtr.mod.render.*;
 import org.mtr.mod.resource.CachedResource;
 import org.mtr.mod.screen.BetaWarningScreen;
@@ -425,6 +426,7 @@ public final class InitClient {
 				if (lastClientWorld == null || !lastClientWorld.equals(clientWorld)) {
 					lastClientWorld = clientWorld;
 					MinecraftClientData.reset();
+					REGISTRY_CLIENT.sendPacketToServer(new PacketRequestInterchangeData());
 				}
 			}
 

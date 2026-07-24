@@ -489,7 +489,7 @@ public class RouteMapGenerator implements IGui {
 						if (!stationPosition.isCommon || stationPositionsGrouped.getOrDefault(key, new ObjectOpenHashSet<>()).stream().noneMatch(stationPosition2 -> stationPosition2.stationPosition.x == stationPosition.x)) {
 							final IntArrayList interchangeColors = new IntArrayList();
 							final ObjectArrayList<String> interchangeNames = new ObjectArrayList<>();
-							final Station station = MinecraftClientData.getInstance().stationIdMap.get(simplifiedRoutePlatform.getStationId());
+							final Station station = MinecraftClientData.getInterchangeStation(simplifiedRoutePlatform.getStationId());
 							if (station != null) {
 								InterchangeRouteDisplay.flattenForRouteMap(InterchangeRouteDisplay.getStationGroups(station, excludedRouteIds)).forEach(entry -> {
 									interchangeColors.add(entry.getColor());

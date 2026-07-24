@@ -41,6 +41,7 @@ public final class PacketDeleteData extends PacketRequestResponseBase {
 		final DeleteDataResponse deleteDataResponse = new DeleteDataResponse(jsonReader);
 		deleteDataResponse.write(MinecraftClientData.getInstance());
 		deleteDataResponse.write(MinecraftClientData.getDashboardInstance());
+		deleteDataResponse.write(MinecraftClientData.getInterchangeData());
 	}
 
 	@Override
