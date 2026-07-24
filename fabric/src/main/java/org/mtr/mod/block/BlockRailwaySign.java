@@ -171,12 +171,14 @@ public class BlockRailwaySign extends BlockExtension implements IBlock, Directio
 
 		private final LongAVLTreeSet selectedIds;
 		private final String[] signIds;
+		private final RailwaySignTextData railwaySignTextData;
 		private static final String KEY_SELECTED_IDS = "selected_ids";
 		private static final String KEY_SIGN_LENGTH = "sign_length";
 
 		public BlockEntity(int length, boolean isOdd, BlockPos pos, BlockState state) {
 			super(getType(length, isOdd), pos, state);
 			signIds = new String[length];
+			railwaySignTextData = new RailwaySignTextData(length);
 			selectedIds = new LongAVLTreeSet();
 		}
 
@@ -188,6 +190,7 @@ public class BlockRailwaySign extends BlockExtension implements IBlock, Directio
 				final String signId = compoundTag.getString(KEY_SIGN_LENGTH + i);
 				signIds[i] = signId.isEmpty() ? null : Arrays.asList(legacySigns).contains(signId) ? signId.toLowerCase(Locale.ENGLISH) : signId;
 			}
+			railwaySignTextData.read(compoundTag, signIds);
 		}
 
 		@Override
@@ -196,14 +199,17 @@ public class BlockRailwaySign extends BlockExtension implements IBlock, Directio
 			for (int i = 0; i < signIds.length; i++) {
 				compoundTag.putString(KEY_SIGN_LENGTH + i, signIds[i] == null ? "" : signIds[i]);
 			}
+			railwaySignTextData.write(compoundTag);
 		}
 
-		public void setData(LongAVLTreeSet selectedIds, String[] signTypes) {
+		public void setData(LongAVLTreeSet selectedIds, String[] signTypes, String[] customTexts) {
+			if (signIds.length != signTypes.length || signIds.length != customTexts.length) {
+				return;
+			}
 			this.selectedIds.clear();
 			this.selectedIds.addAll(selectedIds);
-			if (signIds.length == signTypes.length) {
-				System.arraycopy(signTypes, 0, signIds, 0, signTypes.length);
-			}
+			System.arraycopy(signTypes, 0, signIds, 0, signTypes.length);
+			railwaySignTextData.replace(signTypes, customTexts);
 			markDirty2();
 		}
 
@@ -213,6 +219,10 @@ public class BlockRailwaySign extends BlockExtension implements IBlock, Directio
 
 		public String[] getSignIds() {
 			return signIds;
+		}
+
+		public String[] getCustomTexts() {
+			return railwaySignTextData.getTexts();
 		}
 
 		private static BlockEntityType<? extends BlockEntityExtension> getType(int length, boolean isOdd) {

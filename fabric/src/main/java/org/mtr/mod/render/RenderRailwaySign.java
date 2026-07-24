@@ -16,6 +16,7 @@ import org.mtr.mod.InitClient;
 import org.mtr.mod.block.BlockRailwaySign;
 import org.mtr.mod.block.BlockStationNameBase;
 import org.mtr.mod.block.IBlock;
+import org.mtr.mod.block.RailwaySignTextData;
 import org.mtr.mod.client.CustomResourceLoader;
 import org.mtr.mod.client.DynamicTextureCache;
 import org.mtr.mod.client.IDrawing;
@@ -99,6 +100,7 @@ public class RenderRailwaySign<T extends BlockRailwaySign.BlockEntity> extends B
 						storedMatrixTransformations,
 						pos,
 						signIds[i],
+						entity.getCustomTexts()[i],
 						0.5F * i,
 						0,
 						0.5F,
@@ -119,7 +121,7 @@ public class RenderRailwaySign<T extends BlockRailwaySign.BlockEntity> extends B
 		graphicsHolder.pop();
 	}
 
-	public static void drawSign(GraphicsHolder graphicsHolder, @Nullable StoredMatrixTransformations storedMatrixTransformations, BlockPos pos, String signId, float x, float y, float size, float maxWidthLeft, float maxWidthRight, LongAVLTreeSet selectedIds, Direction facing, int backgroundColor, DrawTexture drawTexture) {
+	public static void drawSign(GraphicsHolder graphicsHolder, @Nullable StoredMatrixTransformations storedMatrixTransformations, BlockPos pos, String signId, @Nullable String customText, float x, float y, float size, float maxWidthLeft, float maxWidthRight, LongAVLTreeSet selectedIds, Direction facing, int backgroundColor, DrawTexture drawTexture) {
 		final SignResource sign = getSign(signId);
 		if (sign == null) {
 			return;
@@ -135,8 +137,20 @@ public class RenderRailwaySign<T extends BlockRailwaySign.BlockEntity> extends B
 		final boolean isLine = signId.equals("line") || signId.equals("line_flipped");
 		final boolean isPlatform = signId.equals("platform") || signId.equals("platform_flipped");
 		final boolean isStation = signId.equals("station") || signId.equals("station_flipped");
+		final boolean isFreeText = RailwaySignTextData.isFreeText(signId);
 
-		if (storedMatrixTransformations != null && isExit) {
+		if (isFreeText) {
+			final String text = customText == null ? sign.getCustomText().getString() : customText;
+			if (!text.isEmpty()) {
+				final FreeTextLayout layout = getFreeTextLayout(x, size, maxWidthLeft, maxWidthRight, flipCustomText);
+				if (storedMatrixTransformations == null) {
+					final float fixedMargin = size * (1 - BlockRailwaySign.SMALL_SIGN_PERCENTAGE) / 2;
+					IDrawing.drawStringWithFont(graphicsHolder, text, flipCustomText ? HorizontalAlignment.RIGHT : HorizontalAlignment.LEFT, VerticalAlignment.TOP, layout.start, y + fixedMargin, layout.maxWidth, size - fixedMargin * 2, 0.01F, ARGB_WHITE, false, GraphicsHolder.getDefaultLight(), null);
+				} else {
+					renderCustomText(text, storedMatrixTransformations, facing, size, layout.start, flipCustomText, layout.maxWidth, backgroundColor);
+				}
+			}
+		} else if (storedMatrixTransformations != null && isExit) {
 			final Station station = InitClient.findStation(pos);
 			if (station == null) {
 				return;
@@ -314,6 +328,32 @@ public class RenderRailwaySign<T extends BlockRailwaySign.BlockEntity> extends B
 		}
 
 		return maxWidthLeft;
+	}
+
+	public static FreeTextLayout getFreeTextLayout(float x, float size, float maxWidthLeft, float maxWidthRight, boolean flipped) {
+		final float fixedMargin = size * (1 - BlockRailwaySign.SMALL_SIGN_PERCENTAGE) / 2;
+		final float start = flipped ? x + size - fixedMargin : x + fixedMargin;
+		final float maxWidth = Math.max(0, ((flipped ? maxWidthLeft : maxWidthRight) + 1) * size - fixedMargin * 2);
+		return new FreeTextLayout(start, maxWidth);
+	}
+
+	public static final class FreeTextLayout {
+
+		private final float start;
+		private final float maxWidth;
+
+		private FreeTextLayout(float start, float maxWidth) {
+			this.start = start;
+			this.maxWidth = maxWidth;
+		}
+
+		public float getStart() {
+			return start;
+		}
+
+		public float getMaxWidth() {
+			return maxWidth;
+		}
 	}
 
 	@FunctionalInterface
