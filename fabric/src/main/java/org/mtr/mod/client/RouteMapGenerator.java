@@ -3,8 +3,8 @@ package org.mtr.mod.client;
 import org.mtr.core.data.*;
 import org.mtr.core.tool.Utilities;
 import org.mtr.libraries.it.unimi.dsi.fastutil.ints.Int2ObjectAVLTreeMap;
-import org.mtr.libraries.it.unimi.dsi.fastutil.ints.IntAVLTreeSet;
 import org.mtr.libraries.it.unimi.dsi.fastutil.ints.IntArrayList;
+import org.mtr.libraries.it.unimi.dsi.fastutil.longs.LongAVLTreeSet;
 import org.mtr.libraries.it.unimi.dsi.fastutil.longs.LongArrayList;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
@@ -16,6 +16,7 @@ import org.mtr.mapping.mapper.ResourceManagerHelper;
 import org.mtr.mod.Init;
 import org.mtr.mod.config.Config;
 import org.mtr.mod.data.IGui;
+import org.mtr.mod.data.InterchangeRouteDisplay;
 import org.mtr.mod.generated.lang.TranslationProvider;
 
 import java.util.Locale;
@@ -381,7 +382,11 @@ public class RouteMapGenerator implements IGui {
 
 		try {
 			final ObjectArrayList<ObjectIntImmutablePair<SimplifiedRoute>> routeDetails = new ObjectArrayList<>();
-			getRouteStream(platformId, (simplifiedRoute, currentStationIndex) -> routeDetails.add(new ObjectIntImmutablePair<>(simplifiedRoute, currentStationIndex)));
+			final LongAVLTreeSet excludedRouteIds = new LongAVLTreeSet();
+			getRouteStream(platformId, (simplifiedRoute, currentStationIndex) -> {
+				routeDetails.add(new ObjectIntImmutablePair<>(simplifiedRoute, currentStationIndex));
+				excludedRouteIds.add(simplifiedRoute.getId());
+			});
 			final int routeCount = routeDetails.size();
 
 			if (routeCount > 0) {
@@ -389,7 +394,6 @@ public class RouteMapGenerator implements IGui {
 				final ObjectArrayList<LongArrayList> stationsIdsBefore = new ObjectArrayList<>();
 				final ObjectArrayList<LongArrayList> stationsIdsAfter = new ObjectArrayList<>();
 				final ObjectArrayList<Int2ObjectAVLTreeMap<StationPosition>> stationPositions = new ObjectArrayList<>();
-				final IntAVLTreeSet colors = new IntAVLTreeSet();
 				final int[] colorIndices = new int[routeCount];
 				int colorIndex = -1;
 				int previousColor = -1;
@@ -413,7 +417,6 @@ public class RouteMapGenerator implements IGui {
 					}
 
 					final int color = routeDetail.left().getColor();
-					colors.add(color);
 					if (color != previousColor) {
 						colorIndex++;
 						previousColor = color;
@@ -486,12 +489,13 @@ public class RouteMapGenerator implements IGui {
 						if (!stationPosition.isCommon || stationPositionsGrouped.getOrDefault(key, new ObjectOpenHashSet<>()).stream().noneMatch(stationPosition2 -> stationPosition2.stationPosition.x == stationPosition.x)) {
 							final IntArrayList interchangeColors = new IntArrayList();
 							final ObjectArrayList<String> interchangeNames = new ObjectArrayList<>();
-							simplifiedRoutePlatform.forEach((color, interchangeRouteNamesForColor) -> {
-								if (!colors.contains(color)) {
-									interchangeColors.add(color);
-									interchangeRouteNamesForColor.forEach(interchangeNames::add);
-								}
-							});
+							final Station station = MinecraftClientData.getInstance().stationIdMap.get(simplifiedRoutePlatform.getStationId());
+							if (station != null) {
+								InterchangeRouteDisplay.flattenForRouteMap(InterchangeRouteDisplay.getStationGroups(station, excludedRouteIds)).forEach(entry -> {
+									interchangeColors.add(entry.getColor());
+									interchangeNames.add(entry.getText());
+								});
+							}
 							Data.put(stationPositionsGrouped, key, new StationPositionGrouped(stationPosition, stationIndex - currentIndex, interchangeColors, interchangeNames), ObjectOpenHashSet::new);
 						}
 					}

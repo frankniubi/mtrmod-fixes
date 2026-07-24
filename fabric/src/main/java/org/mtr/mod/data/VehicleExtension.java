@@ -8,6 +8,7 @@ import org.mtr.core.tool.Vector;
 import org.mtr.libraries.com.google.gson.JsonObject;
 import org.mtr.libraries.it.unimi.dsi.fastutil.doubles.DoubleDoubleImmutablePair;
 import org.mtr.libraries.it.unimi.dsi.fastutil.doubles.DoubleObjectImmutablePair;
+import org.mtr.libraries.it.unimi.dsi.fastutil.longs.LongAVLTreeSet;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectObjectImmutablePair;
 import org.mtr.mapping.holder.*;
@@ -79,6 +80,7 @@ public class VehicleExtension extends Vehicle implements Utilities {
 		final String thisRouteDestination = vehicleExtraData.getThisRouteDestination();
 		final String nextRouteDestination = vehicleExtraData.getNextRouteDestination();
 		final long thisRouteId = vehicleExtraData.getThisRouteId();
+		final long nextStationId = vehicleExtraData.getNextStationId();
 
 		if (VehicleRidingMovement.isRiding(id)) {
 			// Render client action bar floating text
@@ -139,46 +141,41 @@ public class VehicleExtension extends Vehicle implements Utilities {
 						final ObjectArrayList<MutableText> chatTextThisStation = new ObjectArrayList<>();
 						final ObjectArrayList<MutableText> chatTextOtherStations = new ObjectArrayList<>();
 
-						vehicleExtraData.iterateInterchanges((stationName, interchangeColors) -> {
-							final ObjectArrayList<String> combinedRouteNames = new ObjectArrayList<>();
-							final ObjectArrayList<String> globalVisitedRouteNames = new ObjectArrayList<>();
-							final boolean isThisStation = stationName.equals(nextStationName);
-							final boolean[] addedStationName = {false};
+						final Station nextStation = MinecraftClientData.getInstance().stationIdMap.get(nextStationId);
+						if (nextStation != null) {
+							final LongAVLTreeSet excludedRouteIds = new LongAVLTreeSet();
+							excludedRouteIds.add(thisRouteId);
+							excludedRouteIds.add(vehicleExtraData.getNextRouteId());
+							InterchangeRouteDisplay.getStationGroups(nextStation, excludedRouteIds).forEach(stationGroup -> {
+								final String stationName = stationGroup.getStationName();
+								final ObjectArrayList<String> combinedRouteNames = new ObjectArrayList<>();
+								final ObjectArrayList<String> globalVisitedRouteNames = new ObjectArrayList<>();
+								final boolean isThisStation = stationGroup.getStationId() == nextStationId;
 
-							interchangeColors.forEach((color, routeNames) -> {
-								final ObjectArrayList<String> visitedRouteNames = new ObjectArrayList<>();
+								if (!isThisStation) {
+									chatTextOtherStations.add(TextHelper.literal(IGui.formatStationName(IGui.insertTranslation(TranslationProvider.GUI_MTR_CONNECTING_STATION_ANNOUNCEMENT_CJK, TranslationProvider.GUI_MTR_CONNECTING_STATION_ANNOUNCEMENT, 1, stationName))));
+								}
 
-								routeNames.forEach(routeName -> {
-									final String routeNameFormatted = formatRouteName(routeName);
-									if (!routeName.isEmpty() && !visitedRouteNames.contains(routeNameFormatted) && (color != thisRouteColor || !routeNameFormatted.equals(thisRouteName)) && (color != nextRouteColor || !routeNameFormatted.equals(nextRouteName))) {
-										if (!isThisStation && !addedStationName[0]) {
-											chatTextOtherStations.add(TextHelper.literal(IGui.formatStationName(IGui.insertTranslation(TranslationProvider.GUI_MTR_CONNECTING_STATION_ANNOUNCEMENT_CJK, TranslationProvider.GUI_MTR_CONNECTING_STATION_ANNOUNCEMENT, 1, stationName))));
-										}
-
-										if (!globalVisitedRouteNames.contains(routeNameFormatted)) {
-											combinedRouteNames.add(routeNameFormatted);
-										}
-
-										(isThisStation ? chatTextThisStation : chatTextOtherStations).add(TextHelper.append(
-												TextHelper.setStyle(TextHelper.literal("-"), Style.getEmptyMapped().withColor(TextColor.fromRgb(color))),
-												TextHelper.setStyle(TextHelper.literal(" " + IGui.formatStationName(routeNameFormatted)), Style.getEmptyMapped().withColor(TextFormatting.getWhiteMapped()))
-										));
-
-										addedStationName[0] = true;
+								stationGroup.getEntries().forEach(entry -> {
+									final String routeNameFormatted = entry.getText();
+									if (!globalVisitedRouteNames.contains(routeNameFormatted)) {
+										combinedRouteNames.add(routeNameFormatted);
 										globalVisitedRouteNames.add(routeNameFormatted);
-										visitedRouteNames.add(routeNameFormatted);
 									}
-								});
-							});
 
-							if (addedStationName[0]) {
+									(isThisStation ? chatTextThisStation : chatTextOtherStations).add(TextHelper.append(
+											TextHelper.setStyle(TextHelper.literal("-"), Style.getEmptyMapped().withColor(TextColor.fromRgb(entry.getColor()))),
+											TextHelper.setStyle(TextHelper.literal(" " + IGui.formatStationName(routeNameFormatted)), Style.getEmptyMapped().withColor(TextFormatting.getWhiteMapped()))
+									));
+								});
+
 								if (isThisStation) {
 									narrateTextThisStation.add(IGui.insertTranslation(TranslationProvider.GUI_MTR_INTERCHANGE_ANNOUNCEMENT_CJK, TranslationProvider.GUI_MTR_INTERCHANGE_ANNOUNCEMENT, 1, getInterchangeText(combinedRouteNames)));
 								} else {
 									narrateTextOtherStations.add(IGui.insertTranslation(TranslationProvider.GUI_MTR_CONNECTING_STATION_PART_CJK, TranslationProvider.GUI_MTR_CONNECTING_STATION_PART, 1, IGui.insertTranslation(TranslationProvider.GUI_MTR_CONNECTING_STATION_INTERCHANGE_ANNOUNCEMENT_PART_CJK, TranslationProvider.GUI_MTR_CONNECTING_STATION_INTERCHANGE_ANNOUNCEMENT_PART, 2, getInterchangeText(combinedRouteNames), stationName)));
 								}
-							}
-						});
+							});
+						}
 
 						narrateText.addAll(narrateTextThisStation);
 						narrateText.addAll(narrateTextOtherStations);
