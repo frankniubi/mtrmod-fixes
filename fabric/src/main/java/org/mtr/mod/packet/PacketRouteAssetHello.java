@@ -31,6 +31,7 @@ public final class PacketRouteAssetHello extends PacketHandler {
 				RouteAssetPacketCodec.readBoundedString(receiver, 64, 64),
 				receiver.readBoolean(),
 				receiver.readBoolean(),
+				receiver.readLong(),
 				receiver.readLong()
 		);
 	}
@@ -50,6 +51,7 @@ public final class PacketRouteAssetHello extends PacketHandler {
 		sender.writeBoolean(hello.isHttpSupported());
 		sender.writeBoolean(hello.isPacketFallbackSupported());
 		sender.writeLong(hello.getMaximumRevisionDownloadBytes());
+		sender.writeLong(hello.getRequestNonce());
 	}
 
 	@Override
@@ -57,7 +59,7 @@ public final class PacketRouteAssetHello extends PacketHandler {
 		final RouteAssetServerManager manager = Init.getRouteAssetServerManager();
 		final PacketRouteAssetManifest.ManifestPayload payload;
 		if (manager == null) {
-			payload = PacketRouteAssetManifest.ManifestPayload.fallback("server-disabled", EMPTY_FINGERPRINT);
+			payload = PacketRouteAssetManifest.ManifestPayload.fallback("server-disabled", EMPTY_FINGERPRINT, hello.getRequestNonce());
 		} else {
 			manager.handleHello(serverPlayerEntity, hello);
 			payload = negotiate(manager);
@@ -69,7 +71,7 @@ public final class PacketRouteAssetHello extends PacketHandler {
 		try {
 			final RouteAssetNegotiation negotiation = manager.negotiate(hello);
 			if (negotiation.getMode() == RouteAssetNegotiation.Mode.FALLBACK || negotiation.getMode() == RouteAssetNegotiation.Mode.DISABLED) {
-				return PacketRouteAssetManifest.ManifestPayload.fallback(negotiation.getMode() == RouteAssetNegotiation.Mode.DISABLED ? "no-revision" : "incompatible", manager.getResourceFingerprint());
+				return PacketRouteAssetManifest.ManifestPayload.fallback(negotiation.getMode() == RouteAssetNegotiation.Mode.DISABLED ? "no-revision" : "incompatible", manager.getResourceFingerprint(), hello.getRequestNonce());
 			}
 			long documentLength = 0;
 			String documentPath = "";
@@ -89,10 +91,11 @@ public final class PacketRouteAssetHello extends PacketHandler {
 					documentPath,
 					RouteAssetProtocol.RENDERER_VERSION,
 					manager.getResourceFingerprint(),
-					""
+					"",
+					hello.getRequestNonce()
 			);
 		} catch (Exception exception) {
-			return PacketRouteAssetManifest.ManifestPayload.fallback("negotiation-failed", manager.getResourceFingerprint());
+			return PacketRouteAssetManifest.ManifestPayload.fallback("negotiation-failed", manager.getResourceFingerprint(), hello.getRequestNonce());
 		}
 	}
 

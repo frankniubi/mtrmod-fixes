@@ -23,6 +23,7 @@ import org.mtr.mod.client.CustomResourceLoader;
 import org.mtr.mod.client.DynamicTextureCache;
 import org.mtr.mod.client.IDrawing;
 import org.mtr.mod.client.MinecraftClientData;
+import org.mtr.mod.client.asset.ClientRouteAssetManager;
 import org.mtr.mod.config.Config;
 import org.mtr.mod.data.IGui;
 import org.mtr.mod.entity.EntityRendering;
@@ -30,6 +31,7 @@ import org.mtr.mod.generated.WebserverResources;
 import org.mtr.mod.generated.lang.TranslationProvider;
 import org.mtr.mod.item.ItemBlockClickingBase;
 import org.mtr.mod.item.ItemDriverKey;
+import org.mtr.mod.packet.ClientPacketHelper;
 import org.mtr.mod.packet.PacketRequestData;
 import org.mtr.mod.packet.PacketRequestInterchangeData;
 import org.mtr.mod.render.*;
@@ -45,6 +47,7 @@ import javax.annotation.Nullable;
 import java.util.Comparator;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 public final class InitClient {
 
@@ -56,6 +59,7 @@ public final class InitClient {
 	private static long lastUpdatePacketMillis = 0;
 	private static Runnable movePlayer;
 	private static ClientWorld lastClientWorld;
+	private static Supplier<String> multiplayerAddressSupplier = () -> "";
 
 	public static final RegistryClient REGISTRY_CLIENT = new RegistryClient(Init.REGISTRY);
 	public static final int MILLIS_PER_SPEED_SOUND = 200;
@@ -372,6 +376,7 @@ public final class InitClient {
 			gameMillis = 0;
 			lastUpdatePacketMillis = 0;
 			DynamicTextureCache.instance.refresh();
+			ClientRouteAssetManager.getInstance().onJoin(multiplayerAddressSupplier.get());
 
 			// Clientside webserver for locally hosting the online system map
 			// Only start clientside webserver if not in singleplayer
@@ -393,6 +398,7 @@ public final class InitClient {
 		});
 
 		REGISTRY_CLIENT.eventRegistryClient.registerClientDisconnect(() -> {
+			ClientRouteAssetManager.getInstance().onDisconnect();
 			DefaultRailMeshCache.clear();
 			if (webserver != null) {
 				webserver.stop();
@@ -403,6 +409,7 @@ public final class InitClient {
 
 		REGISTRY_CLIENT.eventRegistryClient.registerStartClientTick(() -> {
 			final long currentMillis = System.currentTimeMillis();
+			ClientRouteAssetManager.getInstance().tick(currentMillis);
 			final long millisElapsed = currentMillis - lastMillis;
 			lastMillis = currentMillis;
 			gameMillis += millisElapsed;
@@ -463,6 +470,7 @@ public final class InitClient {
 		REGISTRY_CLIENT.eventRegistryClient.registerGuiRendering(DrivingGuiRenderer::render);
 
 		Config.init(MinecraftClient.getInstance().getRunDirectoryMapped());
+		ClientPacketHelper.setRouteAssetManifestHandler(payload -> ClientRouteAssetManager.getInstance().handleManifest(payload));
 
 		BlockTactileMap.BlockEntity.updateSoundSource = TACTILE_MAP_SOUND_INSTANCE::setPos;
 		BlockTactileMap.BlockEntity.onUse = blockPos -> {
@@ -475,6 +483,10 @@ public final class InitClient {
 
 		// Finish registration
 		REGISTRY_CLIENT.init();
+	}
+
+	public static void setMultiplayerAddressSupplier(Supplier<String> supplier) {
+		multiplayerAddressSupplier = supplier == null ? () -> "" : supplier;
 	}
 
 	public static int getStationColor(@Nullable BlockPos blockPos) {

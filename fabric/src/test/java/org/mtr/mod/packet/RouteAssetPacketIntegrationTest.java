@@ -2,6 +2,7 @@ package org.mtr.mod.packet;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.mtr.mod.route.RouteAssetHello;
 import org.mtr.mod.route.RouteAssetKey;
 import org.mtr.mod.route.RouteAssetNegotiation;
 import org.mtr.mod.route.RouteAssetProtocol;
@@ -60,11 +61,25 @@ public final class RouteAssetPacketIntegrationTest {
 
 	@Test
 	public void fallbackPayloadCannotAuthorizeADocument() {
-		final PacketRouteAssetManifest.ManifestPayload payload = PacketRouteAssetManifest.ManifestPayload.fallback("disabled", "f".repeat(64));
+		final PacketRouteAssetManifest.ManifestPayload payload = PacketRouteAssetManifest.ManifestPayload.fallback("disabled", "f".repeat(64), 7);
 		Assertions.assertEquals(RouteAssetNegotiation.Mode.FALLBACK, payload.getMode());
 		Assertions.assertEquals("", payload.getDocumentHash());
 		Assertions.assertEquals(0, payload.getDocumentLength());
 		Assertions.assertEquals("", payload.getDocumentPath());
+		Assertions.assertEquals(7, payload.getRequestNonce());
+	}
+
+	@Test
+	public void requestNonceIsMandatoryAndEncodedAsAPrimitive() throws Exception {
+		final RouteAssetHello hello = new RouteAssetHello(RouteAssetProtocol.PROTOCOL_VERSION, RouteAssetProtocol.RENDERER_VERSION, 2, "NORMAL", "f".repeat(64), "", true, false, RouteAssetProtocol.MAX_REVISION_DOWNLOAD_BYTES, 41);
+		Assertions.assertEquals(41, hello.getRequestNonce());
+		Assertions.assertThrows(IllegalArgumentException.class, () -> new RouteAssetHello(RouteAssetProtocol.PROTOCOL_VERSION, RouteAssetProtocol.RENDERER_VERSION, 2, "NORMAL", "f".repeat(64), "", true, false, RouteAssetProtocol.MAX_REVISION_DOWNLOAD_BYTES, 0));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> PacketRouteAssetManifest.ManifestPayload.fallback("disabled", "f".repeat(64), 0));
+		final String helloPacket = Files.readString(sourcePath("packet", "PacketRouteAssetHello.java"));
+		final String manifestPacket = Files.readString(sourcePath("packet", "PacketRouteAssetManifest.java"));
+		Assertions.assertTrue(helloPacket.contains("sender.writeLong(hello.getRequestNonce())"));
+		Assertions.assertTrue(manifestPacket.contains("sender.writeLong(manifestPayload.requestNonce)"));
+		Assertions.assertTrue(helloPacket.contains("hello.getRequestNonce()"), "every server response path must echo the hello nonce");
 	}
 
 	private static Path sourcePath(String packageName, String fileName) {

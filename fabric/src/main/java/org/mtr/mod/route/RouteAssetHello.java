@@ -14,12 +14,13 @@ public final class RouteAssetHello {
 	private final boolean httpSupported;
 	private final boolean packetFallbackSupported;
 	private final long maximumRevisionDownloadBytes;
+	private final long requestNonce;
 
-	public RouteAssetHello(int protocolVersion, int rendererVersion, int resolution, String language, String resourceFingerprint, String cachedRevision, boolean httpSupported, boolean packetFallbackSupported, long maximumRevisionDownloadBytes) {
+	public RouteAssetHello(int protocolVersion, int rendererVersion, int resolution, String language, String resourceFingerprint, String cachedRevision, boolean httpSupported, boolean packetFallbackSupported, long maximumRevisionDownloadBytes, long requestNonce) {
 		if (protocolVersion < 0 || rendererVersion < 0 || resolution < 0 || resolution > 8) {
 			throw new IllegalArgumentException("Invalid route asset capability version or resolution");
 		}
-		if (maximumRevisionDownloadBytes < 0 || maximumRevisionDownloadBytes > RouteAssetProtocol.MAX_REVISION_DOWNLOAD_BYTES) {
+		if (maximumRevisionDownloadBytes < 0 || maximumRevisionDownloadBytes > RouteAssetProtocol.MAX_REVISION_DOWNLOAD_BYTES || requestNonce == 0) {
 			throw new IllegalArgumentException("Invalid route asset revision download limit");
 		}
 		this.protocolVersion = protocolVersion;
@@ -34,6 +35,7 @@ public final class RouteAssetHello {
 		this.httpSupported = httpSupported;
 		this.packetFallbackSupported = packetFallbackSupported;
 		this.maximumRevisionDownloadBytes = maximumRevisionDownloadBytes;
+		this.requestNonce = requestNonce;
 	}
 
 	public int getProtocolVersion() { return protocolVersion; }
@@ -45,17 +47,18 @@ public final class RouteAssetHello {
 	public boolean isHttpSupported() { return httpSupported; }
 	public boolean isPacketFallbackSupported() { return packetFallbackSupported; }
 	public long getMaximumRevisionDownloadBytes() { return maximumRevisionDownloadBytes; }
+	public long getRequestNonce() { return requestNonce; }
 
 	@Override
 	public boolean equals(Object object) {
 		if (this == object) return true;
 		if (!(object instanceof RouteAssetHello)) return false;
 		final RouteAssetHello that = (RouteAssetHello) object;
-		return protocolVersion == that.protocolVersion && rendererVersion == that.rendererVersion && resolution == that.resolution && httpSupported == that.httpSupported && packetFallbackSupported == that.packetFallbackSupported && maximumRevisionDownloadBytes == that.maximumRevisionDownloadBytes && language.equals(that.language) && resourceFingerprint.equals(that.resourceFingerprint) && cachedRevision.equals(that.cachedRevision);
+		return protocolVersion == that.protocolVersion && rendererVersion == that.rendererVersion && resolution == that.resolution && httpSupported == that.httpSupported && packetFallbackSupported == that.packetFallbackSupported && maximumRevisionDownloadBytes == that.maximumRevisionDownloadBytes && requestNonce == that.requestNonce && language.equals(that.language) && resourceFingerprint.equals(that.resourceFingerprint) && cachedRevision.equals(that.cachedRevision);
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(protocolVersion, rendererVersion, resolution, language, resourceFingerprint, cachedRevision, httpSupported, packetFallbackSupported, maximumRevisionDownloadBytes);
+		return Objects.hash(protocolVersion, rendererVersion, resolution, language, resourceFingerprint, cachedRevision, httpSupported, packetFallbackSupported, maximumRevisionDownloadBytes, requestNonce);
 	}
 }

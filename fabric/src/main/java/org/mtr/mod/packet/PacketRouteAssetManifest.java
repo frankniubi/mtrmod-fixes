@@ -25,7 +25,8 @@ public final class PacketRouteAssetManifest extends PacketHandler {
 				RouteAssetPacketCodec.readBoundedString(receiver, RouteAssetProtocol.MAX_KEY_UTF8_BYTES, RouteAssetProtocol.MAX_KEY_UTF8_BYTES),
 				receiver.readInt(),
 				RouteAssetPacketCodec.readBoundedString(receiver, 64, 64),
-				RouteAssetPacketCodec.readBoundedString(receiver, 256, 512)
+				RouteAssetPacketCodec.readBoundedString(receiver, 256, 512),
+				receiver.readLong()
 		);
 	}
 
@@ -46,6 +47,7 @@ public final class PacketRouteAssetManifest extends PacketHandler {
 		sender.writeInt(manifestPayload.rendererVersion);
 		RouteAssetPacketCodec.writeBoundedString(sender, manifestPayload.resourceFingerprint, 64, 64);
 		RouteAssetPacketCodec.writeBoundedString(sender, manifestPayload.fallbackReason, 256, 512);
+		sender.writeLong(manifestPayload.requestNonce);
 	}
 
 	@Override
@@ -69,11 +71,12 @@ public final class PacketRouteAssetManifest extends PacketHandler {
 		private final int rendererVersion;
 		private final String resourceFingerprint;
 		private final String fallbackReason;
+		private final long requestNonce;
 
-		public ManifestPayload(RouteAssetNegotiation.Mode mode, String serverId, int originPort, String publicBaseUrl, String authoritativeRevision, String documentHash, long documentLength, String documentPath, int rendererVersion, String resourceFingerprint, String fallbackReason) {
+		public ManifestPayload(RouteAssetNegotiation.Mode mode, String serverId, int originPort, String publicBaseUrl, String authoritativeRevision, String documentHash, long documentLength, String documentPath, int rendererVersion, String resourceFingerprint, String fallbackReason, long requestNonce) {
 			this.mode = Objects.requireNonNull(mode);
 			this.serverId = RouteAssetPacketCodec.requireBounded(serverId, 64, 64);
-			if (originPort < 0 || originPort > 65535 || rendererVersion < 0 || documentLength < 0 || documentLength > RouteAssetProtocol.MAX_MANIFEST_BYTES) throw new IllegalArgumentException("Invalid route asset manifest payload bounds");
+			if (originPort < 0 || originPort > 65535 || rendererVersion < 0 || documentLength < 0 || documentLength > RouteAssetProtocol.MAX_MANIFEST_BYTES || requestNonce == 0) throw new IllegalArgumentException("Invalid route asset manifest payload bounds");
 			this.originPort = originPort;
 			this.publicBaseUrl = RouteAssetPacketCodec.requireBounded(publicBaseUrl, 2048, 4096).trim();
 			this.authoritativeRevision = authoritativeRevision.isEmpty() ? "" : RouteAssetHash.requireValid(authoritativeRevision);
@@ -83,14 +86,15 @@ public final class PacketRouteAssetManifest extends PacketHandler {
 			this.rendererVersion = rendererVersion;
 			this.resourceFingerprint = RouteAssetHash.requireValid(resourceFingerprint);
 			this.fallbackReason = RouteAssetPacketCodec.requireBounded(fallbackReason, 256, 512);
+			this.requestNonce = requestNonce;
 			final boolean hasDocument = !this.documentHash.isEmpty() || documentLength != 0 || !this.documentPath.isEmpty();
 			if ((mode == RouteAssetNegotiation.Mode.DIFF || mode == RouteAssetNegotiation.Mode.SNAPSHOT) != hasDocument || hasDocument && (this.documentHash.isEmpty() || documentLength <= 0 || this.documentPath.isEmpty())) {
 				throw new IllegalArgumentException("Route asset manifest document authorization is inconsistent");
 			}
 		}
 
-		public static ManifestPayload fallback(String reason, String resourceFingerprint) {
-			return new ManifestPayload(RouteAssetNegotiation.Mode.FALLBACK, "", 0, "", "", "", 0, "", RouteAssetProtocol.RENDERER_VERSION, resourceFingerprint, reason);
+		public static ManifestPayload fallback(String reason, String resourceFingerprint, long requestNonce) {
+			return new ManifestPayload(RouteAssetNegotiation.Mode.FALLBACK, "", 0, "", "", "", 0, "", RouteAssetProtocol.RENDERER_VERSION, resourceFingerprint, reason, requestNonce);
 		}
 
 		public RouteAssetNegotiation.Mode getMode() { return mode; }
@@ -104,5 +108,6 @@ public final class PacketRouteAssetManifest extends PacketHandler {
 		public int getRendererVersion() { return rendererVersion; }
 		public String getResourceFingerprint() { return resourceFingerprint; }
 		public String getFallbackReason() { return fallbackReason; }
+		public long getRequestNonce() { return requestNonce; }
 	}
 }
