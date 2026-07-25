@@ -16,6 +16,15 @@ import java.util.function.Predicate;
  * Since packets are registered serverside, they will fail if any client classes are used (e.g. screens).
  */
 public final class ClientPacketHelper {
+	private static Consumer<PacketRouteAssetManifest.ManifestPayload> routeAssetManifestHandler = payload -> { };
+
+	public static void setRouteAssetManifestHandler(Consumer<PacketRouteAssetManifest.ManifestPayload> handler) {
+		routeAssetManifestHandler = handler;
+	}
+
+	public static void handleRouteAssetManifest(PacketRouteAssetManifest.ManifestPayload manifestPayload) {
+		routeAssetManifestHandler.accept(manifestPayload);
+	}
 
 	public static void openBlockEntityScreen(BlockPos blockPos) {
 		getBlockEntity(blockPos, blockEntity -> {

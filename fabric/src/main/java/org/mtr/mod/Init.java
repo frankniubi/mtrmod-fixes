@@ -111,6 +111,9 @@ public final class Init implements Utilities {
 		REGISTRY.registerPacket(PacketPressLiftButton.class, PacketPressLiftButton::new);
 		REGISTRY.registerPacket(PacketRequestData.class, PacketRequestData::new);
 		REGISTRY.registerPacket(PacketRequestInterchangeData.class, PacketRequestInterchangeData::new);
+		REGISTRY.registerPacket(PacketRouteAssetHello.class, PacketRouteAssetHello::new);
+		REGISTRY.registerPacket(PacketRouteAssetManifest.class, PacketRouteAssetManifest::new);
+		REGISTRY.registerPacket(PacketRouteAssetObservedKeys.class, PacketRouteAssetObservedKeys::new);
 		REGISTRY.registerPacket(PacketSetRouteIdHasDisabledAnnouncements.class, PacketSetRouteIdHasDisabledAnnouncements::new);
 		REGISTRY.registerPacket(PacketTurnOnBlockEntity.class, PacketTurnOnBlockEntity::new);
 		REGISTRY.registerPacket(PacketUpdateData.class, PacketUpdateData::new);
