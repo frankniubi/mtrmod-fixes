@@ -1,5 +1,6 @@
 package org.mtr.mod.client;
 
+import org.apache.commons.io.IOUtils;
 import org.mtr.core.data.*;
 import org.mtr.core.tool.Utilities;
 import org.mtr.libraries.it.unimi.dsi.fastutil.ints.Int2ObjectAVLTreeMap;
@@ -18,7 +19,10 @@ import org.mtr.mod.config.Config;
 import org.mtr.mod.data.IGui;
 import org.mtr.mod.data.InterchangeRouteDisplay;
 import org.mtr.mod.generated.lang.TranslationProvider;
+import org.mtr.mod.route.RouteAssetImage;
+import org.mtr.mod.route.RouteAssetSourceImages;
 
+import java.io.IOException;
 import java.util.Locale;
 import java.util.List;
 import java.util.function.BiConsumer;
@@ -40,6 +44,7 @@ public class RouteMapGenerator implements IGui {
 	private static final String RAILWAY_INTERCHANGE_RESOURCE = "textures/block/sign/railway_interchange.png";
 	private static final String AIRPORT_INTERCHANGE_RESOURCE = "textures/block/sign/airplane.png";
 	private static final int RAILWAY_INTERCHANGE_COLOR = 0x21679F;
+	private static final RouteAssetSourceImages ROUTE_ASSET_SOURCE_IMAGES = new RouteAssetSourceImages(RouteMapGenerator::loadRouteAssetSource);
 	private static final String TEMP_CIRCULAR_MARKER_CLOCKWISE = String.format("temp_circular_marker_%s_clockwise", Init.randomString());
 	private static final String TEMP_CIRCULAR_MARKER_ANTICLOCKWISE = String.format("temp_circular_marker_%s_anticlockwise", Init.randomString());
 	private static final int PIXEL_RESOLUTION = 24;
@@ -840,21 +845,19 @@ public class RouteMapGenerator implements IGui {
 	}
 
 	private static void drawPhysicalResource(NativeImage nativeImage, int physicalWidth, String resource, int x, int y, int width, int height, int color) {
-		ResourceManagerHelper.readResource(new Identifier(Init.MOD_ID, resource), inputStream -> {
-			try {
-				final NativeImage resourceImage = NativeImage.read(NativeImageFormat.getAbgrMapped(), inputStream);
-				for (int drawX = 0; drawX < width; drawX++) {
-					for (int drawY = 0; drawY < height; drawY++) {
-						final int sourceX = MathHelper.clamp(drawX * resourceImage.getWidth() / width, 0, resourceImage.getWidth() - 1);
-						final int sourceY = MathHelper.clamp(drawY * resourceImage.getHeight() / height, 0, resourceImage.getHeight() - 1);
-						final int alpha = resourceImage.getColor(sourceX, sourceY) >>> 24;
-						blendPhysicalPixel(nativeImage, physicalWidth, x + drawX, y + drawY, (alpha << 24) | (color & RGB_WHITE));
-					}
+		try {
+			final RouteAssetImage resourceImage = ROUTE_ASSET_SOURCE_IMAGES.get(resource);
+			for (int drawX = 0; drawX < width; drawX++) {
+				for (int drawY = 0; drawY < height; drawY++) {
+					final int sourceX = MathHelper.clamp(drawX * resourceImage.getWidth() / width, 0, resourceImage.getWidth() - 1);
+					final int sourceY = MathHelper.clamp(drawY * resourceImage.getHeight() / height, 0, resourceImage.getHeight() - 1);
+					final int alpha = resourceImage.getPixel(sourceX, sourceY) >>> 24;
+					blendPhysicalPixel(nativeImage, physicalWidth, x + drawX, y + drawY, (alpha << 24) | (color & RGB_WHITE));
 				}
-			} catch (Exception e) {
-				Init.LOGGER.error("", e);
 			}
-		});
+		} catch (Exception e) {
+			Init.LOGGER.error("", e);
+		}
 	}
 
 	private static void drawPhysicalPixel(NativeImage nativeImage, int physicalWidth, int physicalX, int physicalY, int color) {
@@ -1095,44 +1098,65 @@ public class RouteMapGenerator implements IGui {
 	}
 
 	private static void drawResource(NativeImage nativeImage, String resource, int x, int y, int width, int height, boolean flipX, float v1, float v2, int color, boolean useActualColor) {
+		try {
+			final RouteAssetImage nativeImageResource = ROUTE_ASSET_SOURCE_IMAGES.get(resource);
+			final int resourceWidth = nativeImageResource.getWidth();
+			final int resourceHeight = nativeImageResource.getHeight();
+			for (int drawX = 0; drawX < width; drawX++) {
+				for (int drawY = Math.round(v1 * height); drawY < Math.round(v2 * height); drawY++) {
+					final float pixelX = (float) drawX / width * resourceWidth;
+					final float pixelY = (float) drawY / height * resourceHeight;
+					final int floorX = (int) pixelX;
+					final int floorY = (int) pixelY;
+					final int ceilX = floorX + 1;
+					final int ceilY = floorY + 1;
+					final float percentX1 = ceilX - pixelX;
+					final float percentY1 = ceilY - pixelY;
+					final float percentX2 = pixelX - floorX;
+					final float percentY2 = pixelY - floorY;
+					final int pixel1 = nativeImageResource.getPixel(MathHelper.clamp(floorX, 0, resourceWidth - 1), MathHelper.clamp(floorY, 0, resourceHeight - 1));
+					final int pixel2 = nativeImageResource.getPixel(MathHelper.clamp(ceilX, 0, resourceWidth - 1), MathHelper.clamp(floorY, 0, resourceHeight - 1));
+					final int pixel3 = nativeImageResource.getPixel(MathHelper.clamp(floorX, 0, resourceWidth - 1), MathHelper.clamp(ceilY, 0, resourceHeight - 1));
+					final int pixel4 = nativeImageResource.getPixel(MathHelper.clamp(ceilX, 0, resourceWidth - 1), MathHelper.clamp(ceilY, 0, resourceHeight - 1));
+					final int newColor;
+					if (useActualColor) {
+						newColor = invertColor(pixel1);
+					} else {
+						final float luminance1 = ((pixel1 >> 24) & 0xFF) * percentX1 * percentY1;
+						final float luminance2 = ((pixel2 >> 24) & 0xFF) * percentX2 * percentY1;
+						final float luminance3 = ((pixel3 >> 24) & 0xFF) * percentX1 * percentY2;
+						final float luminance4 = ((pixel4 >> 24) & 0xFF) * percentX2 * percentY2;
+						newColor = (color & RGB_WHITE) + ((int) (luminance1 + luminance2 + luminance3 + luminance4) << 24);
+					}
+					blendPixel(nativeImage, (flipX ? width - drawX - 1 : drawX) + x, drawY + y, newColor);
+				}
+			}
+		} catch (Exception e) {
+			Init.LOGGER.error("", e);
+		}
+	}
+
+	public static void clearSourceImages() {
+		ROUTE_ASSET_SOURCE_IMAGES.clear();
+	}
+
+	private static byte[] loadRouteAssetSource(String resource) throws IOException {
+		final byte[][] bytes = {null};
+		final IOException[] exception = {null};
 		ResourceManagerHelper.readResource(new Identifier(Init.MOD_ID, resource), inputStream -> {
 			try {
-				final NativeImage nativeImageResource = NativeImage.read(NativeImageFormat.getAbgrMapped(), inputStream);
-				final int resourceWidth = nativeImageResource.getWidth();
-				final int resourceHeight = nativeImageResource.getHeight();
-				for (int drawX = 0; drawX < width; drawX++) {
-					for (int drawY = Math.round(v1 * height); drawY < Math.round(v2 * height); drawY++) {
-						final float pixelX = (float) drawX / width * resourceWidth;
-						final float pixelY = (float) drawY / height * resourceHeight;
-						final int floorX = (int) pixelX;
-						final int floorY = (int) pixelY;
-						final int ceilX = floorX + 1;
-						final int ceilY = floorY + 1;
-						final float percentX1 = ceilX - pixelX;
-						final float percentY1 = ceilY - pixelY;
-						final float percentX2 = pixelX - floorX;
-						final float percentY2 = pixelY - floorY;
-						final int pixel1 = nativeImageResource.getColor(MathHelper.clamp(floorX, 0, resourceWidth - 1), MathHelper.clamp(floorY, 0, resourceHeight - 1));
-						final int pixel2 = nativeImageResource.getColor(MathHelper.clamp(ceilX, 0, resourceWidth - 1), MathHelper.clamp(floorY, 0, resourceHeight - 1));
-						final int pixel3 = nativeImageResource.getColor(MathHelper.clamp(floorX, 0, resourceWidth - 1), MathHelper.clamp(ceilY, 0, resourceHeight - 1));
-						final int pixel4 = nativeImageResource.getColor(MathHelper.clamp(ceilX, 0, resourceWidth - 1), MathHelper.clamp(ceilY, 0, resourceHeight - 1));
-						final int newColor;
-						if (useActualColor) {
-							newColor = invertColor(pixel1);
-						} else {
-							final float luminance1 = ((pixel1 >> 24) & 0xFF) * percentX1 * percentY1;
-							final float luminance2 = ((pixel2 >> 24) & 0xFF) * percentX2 * percentY1;
-							final float luminance3 = ((pixel3 >> 24) & 0xFF) * percentX1 * percentY2;
-							final float luminance4 = ((pixel4 >> 24) & 0xFF) * percentX2 * percentY2;
-							newColor = (color & RGB_WHITE) + ((int) (luminance1 + luminance2 + luminance3 + luminance4) << 24);
-						}
-						blendPixel(nativeImage, (flipX ? width - drawX - 1 : drawX) + x, drawY + y, newColor);
-					}
-				}
-			} catch (Exception e) {
-				Init.LOGGER.error("", e);
+				bytes[0] = IOUtils.toByteArray(inputStream);
+			} catch (IOException ioException) {
+				exception[0] = ioException;
 			}
 		});
+		if (exception[0] != null) {
+			throw exception[0];
+		}
+		if (bytes[0] == null) {
+			throw new IOException("Missing route asset source: " + resource);
+		}
+		return bytes[0];
 	}
 
 	private static void blendPixel(NativeImage nativeImage, int x, int y, int color) {

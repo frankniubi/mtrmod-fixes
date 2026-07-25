@@ -87,6 +87,7 @@ public class CustomResourceLoader {
 		OBJECTS_CACHE.clear();
 		LIFTS.clear();
 		LIFTS_CACHE.clear();
+		RouteMapGenerator.clearSourceImages();
 		DynamicTextureCache.instance.reload();
 		TEST_DURATION = 0;
 
