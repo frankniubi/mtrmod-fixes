@@ -9,6 +9,29 @@
 			"type": "integer",
 			"default": 8888
 		},
+		"routeTextureAssetsEnabled": {
+			"type": "boolean",
+			"default": true
+		},
+		"routeTexturePublicBaseUrl": {
+			"type": "string"
+		},
+		"routeTextureOutputDirectory": {
+			"type": "string",
+			"default": "route-textures"
+		},
+		"routeTextureGenerationThreads": {
+			"type": "integer",
+			"default": 1
+		},
+		"routeTextureRetainedRevisions": {
+			"type": "integer",
+			"default": 32
+		},
+		"routeTextureStaleAssetDays": {
+			"type": "integer",
+			"default": 7
+		},
 		"useThreadedSimulation": {
 			"type": "boolean"
 		},

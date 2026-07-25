@@ -35,6 +35,22 @@ public final class Client extends ClientSchema {
 		return (int) dynamicTextureResolution;
 	}
 
+	public boolean getServerRouteTexturesEnabled() {
+		return serverRouteTexturesEnabled;
+	}
+
+	public int getRouteTextureCacheMiB() {
+		return Utilities.clamp((int) routeTextureCacheMiB, 256, 8192);
+	}
+
+	public int getRouteTextureStartupTimeoutSeconds() {
+		return Utilities.clamp((int) routeTextureStartupTimeoutSeconds, 1, 30);
+	}
+
+	public int getRouteTextureDownloadConcurrency() {
+		return Utilities.clamp((int) routeTextureDownloadConcurrency, 1, 8);
+	}
+
 	public double getVehicleOscillationMultiplier() {
 		return vehicleOscillationMultiplier;
 	}

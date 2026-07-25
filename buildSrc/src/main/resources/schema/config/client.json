@@ -27,6 +27,22 @@
 			"type": "integer",
 			"default": 2
 		},
+		"serverRouteTexturesEnabled": {
+			"type": "boolean",
+			"default": true
+		},
+		"routeTextureCacheMiB": {
+			"type": "integer",
+			"default": 2048
+		},
+		"routeTextureStartupTimeoutSeconds": {
+			"type": "integer",
+			"default": 30
+		},
+		"routeTextureDownloadConcurrency": {
+			"type": "integer",
+			"default": 4
+		},
 		"defaultRail3D": {
 			"type": "boolean",
 			"default": true
