@@ -8,7 +8,7 @@ import org.mtr.core.tool.Vector;
 import org.mtr.libraries.com.google.gson.JsonObject;
 import org.mtr.libraries.it.unimi.dsi.fastutil.doubles.DoubleDoubleImmutablePair;
 import org.mtr.libraries.it.unimi.dsi.fastutil.doubles.DoubleObjectImmutablePair;
-import org.mtr.libraries.it.unimi.dsi.fastutil.longs.LongAVLTreeSet;
+import org.mtr.libraries.it.unimi.dsi.fastutil.ints.IntAVLTreeSet;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectObjectImmutablePair;
 import org.mtr.mapping.holder.*;
@@ -143,10 +143,12 @@ public class VehicleExtension extends Vehicle implements Utilities {
 
 						final Station nextStation = MinecraftClientData.getInterchangeStation(nextStationId);
 						if (nextStation != null) {
-							final LongAVLTreeSet excludedRouteIds = new LongAVLTreeSet();
-							excludedRouteIds.add(thisRouteId);
-							excludedRouteIds.add(vehicleExtraData.getNextRouteId());
-							InterchangeRouteDisplay.deduplicateForBroadcast(InterchangeRouteDisplay.getStationGroups(nextStation, excludedRouteIds), nextStationId).forEach(stationGroup -> {
+							final IntAVLTreeSet excludedRouteColors = new IntAVLTreeSet();
+							excludedRouteColors.add(InterchangeRouteDisplay.normalizeColor(thisRouteColor));
+							if (!nextRouteName.isEmpty()) {
+								excludedRouteColors.add(InterchangeRouteDisplay.normalizeColor(nextRouteColor));
+							}
+							InterchangeRouteDisplay.deduplicateForBroadcast(InterchangeRouteDisplay.getStationGroups(nextStation, excludedRouteColors), nextStationId).forEach(stationGroup -> {
 								final String stationName = stationGroup.getStationName();
 								final ObjectArrayList<String> combinedRouteNames = new ObjectArrayList<>();
 								final boolean isThisStation = stationGroup.getStationId() == nextStationId;

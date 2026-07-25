@@ -3,7 +3,7 @@ package org.mtr.mod.data;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mtr.core.data.*;
-import org.mtr.libraries.it.unimi.dsi.fastutil.longs.LongAVLTreeSet;
+import org.mtr.libraries.it.unimi.dsi.fastutil.ints.IntAVLTreeSet;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
 
 public final class InterchangeRouteDisplayTest {
@@ -27,7 +27,7 @@ public final class InterchangeRouteDisplayTest {
 		addRoutes(data, railway, TransportMode.TRAIN, highSpeed1, highSpeed2);
 		addRoutes(data, airport, TransportMode.AIRPLANE, airplane1, airplane2);
 
-		final ObjectArrayList<InterchangeRouteDisplay.StationGroup> groups = InterchangeRouteDisplay.getStationGroups(metro, new LongAVLTreeSet());
+		final ObjectArrayList<InterchangeRouteDisplay.StationGroup> groups = InterchangeRouteDisplay.getStationGroups(metro, new IntAVLTreeSet());
 		final InterchangeRouteDisplay.StationGroup metroGroup = findGroup(groups, metro.getId());
 		final InterchangeRouteDisplay.StationGroup railwayGroup = findGroup(groups, railway.getId());
 		final InterchangeRouteDisplay.StationGroup airportGroup = findGroup(groups, airport.getId());
@@ -48,23 +48,25 @@ public final class InterchangeRouteDisplayTest {
 	}
 
 	@Test
-	public void exclusionsUseRouteIdsInsteadOfColors() {
+	public void exclusionsUseNormalizedRgbColorsInsteadOfRouteIds() {
 		final ClientData data = new ClientData();
 		final Station station = station(data, "Shared Colour", 0);
 		final Route excluded = route(data, TransportMode.TRAIN, RouteType.NORMAL, "Excluded", 0xABCDEF);
-		final Route retained = route(data, TransportMode.TRAIN, RouteType.NORMAL, "Retained", 0xABCDEF);
-		addRoutes(data, station, TransportMode.TRAIN, excluded, retained);
-		final LongAVLTreeSet excludedIds = new LongAVLTreeSet();
-		excludedIds.add(excluded.getId());
+		final Route oppositeDirection = route(data, TransportMode.TRAIN, RouteType.NORMAL, "Opposite Direction", 0xABCDEF);
+		final Route retained = route(data, TransportMode.TRAIN, RouteType.NORMAL, "Retained", 0xABCDEE);
+		addRoutes(data, station, TransportMode.TRAIN, excluded, oppositeDirection, retained);
+		final IntAVLTreeSet excludedColors = new IntAVLTreeSet();
+		excludedColors.add(0x12ABCDEF);
 
-		final ObjectArrayList<InterchangeRouteDisplay.Entry> entries = InterchangeRouteDisplay.getStationGroups(station, excludedIds).get(0).getEntries();
+		final ObjectArrayList<InterchangeRouteDisplay.Entry> entries = InterchangeRouteDisplay.getStationGroups(station, excludedColors).get(0).getEntries();
 		Assertions.assertEquals(1, entries.size());
 		Assertions.assertEquals(retained.getId(), entries.get(0).getSourceRouteId());
 		Assertions.assertEquals("Retained", entries.get(0).getText());
+		Assertions.assertEquals(0xABCDEF, InterchangeRouteDisplay.normalizeColor(0x12ABCDEF));
 	}
 
 	@Test
-	public void routeMapFlattensRailwayButKeepsDistinctAirportNames() {
+	public void routeMapFlattensRailwayAndAirportIntoIconFlags() {
 		final ClientData data = new ClientData();
 		final Station metro = station(data, "Metro", 0);
 		final Station railway1 = station(data, "Railway One", 100);
@@ -81,14 +83,14 @@ public final class InterchangeRouteDisplayTest {
 		addRoutes(data, airport2, TransportMode.AIRPLANE, route(data, TransportMode.AIRPLANE, RouteType.NORMAL, "Air 2", 4));
 
 		final InterchangeRouteDisplay.RouteMapDisplay routeMapDisplay = InterchangeRouteDisplay.getRouteMapDisplay(
-				InterchangeRouteDisplay.getStationGroups(metro, new LongAVLTreeSet())
+				InterchangeRouteDisplay.getStationGroups(metro, new IntAVLTreeSet())
 		);
 		final ObjectArrayList<InterchangeRouteDisplay.Entry> entries = routeMapDisplay.getEntries();
 		Assertions.assertTrue(routeMapDisplay.hasRailwayInterchange());
+		Assertions.assertTrue(routeMapDisplay.hasAirportInterchange());
 		Assertions.assertEquals(0, entries.stream().filter(entry -> entry.getCategory() == InterchangeRouteDisplay.Category.RAILWAY).count());
-		Assertions.assertEquals(2, entries.stream().filter(entry -> entry.getCategory() == InterchangeRouteDisplay.Category.AIRPORT).count());
-		Assertions.assertTrue(entries.stream().anyMatch(entry -> entry.getText().equals("機場-Airport：Airport One")));
-		Assertions.assertTrue(entries.stream().anyMatch(entry -> entry.getText().equals("機場-Airport：Airport Two")));
+		Assertions.assertEquals(0, entries.stream().filter(entry -> entry.getCategory() == InterchangeRouteDisplay.Category.AIRPORT).count());
+		Assertions.assertTrue(entries.isEmpty());
 	}
 
 	@Test
@@ -103,9 +105,10 @@ public final class InterchangeRouteDisplayTest {
 				route(data, TransportMode.TRAIN, RouteType.HIGH_SPEED, "HSR South", 0x445566));
 
 		final InterchangeRouteDisplay.RouteMapDisplay display = InterchangeRouteDisplay.getRouteMapDisplay(
-				InterchangeRouteDisplay.getStationGroups(metro, new LongAVLTreeSet())
+				InterchangeRouteDisplay.getStationGroups(metro, new IntAVLTreeSet())
 		);
 		Assertions.assertTrue(display.hasRailwayInterchange());
+		Assertions.assertFalse(display.hasAirportInterchange());
 		Assertions.assertEquals(1, display.getEntries().size());
 		Assertions.assertEquals("Circular Line", display.getEntries().get(0).getText());
 		Assertions.assertEquals(0xF2C500, display.getEntries().get(0).getColor());
@@ -121,7 +124,7 @@ public final class InterchangeRouteDisplayTest {
 		addRoutes(data, connected, TransportMode.TRAIN, route(data, TransportMode.TRAIN, RouteType.NORMAL, "Shared Line", 0x654321));
 
 		final ObjectArrayList<InterchangeRouteDisplay.StationGroup> groups = InterchangeRouteDisplay.deduplicateForBroadcast(
-				InterchangeRouteDisplay.getStationGroups(metro, new LongAVLTreeSet()), metro.getId()
+				InterchangeRouteDisplay.getStationGroups(metro, new IntAVLTreeSet()), metro.getId()
 		);
 		Assertions.assertEquals(1, groups.size());
 		Assertions.assertEquals(metro.getId(), groups.get(0).getStationId());

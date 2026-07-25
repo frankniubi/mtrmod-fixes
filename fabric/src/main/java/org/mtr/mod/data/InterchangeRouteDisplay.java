@@ -4,6 +4,7 @@ import org.mtr.core.data.Route;
 import org.mtr.core.data.RouteType;
 import org.mtr.core.data.Station;
 import org.mtr.core.data.TransportMode;
+import org.mtr.libraries.it.unimi.dsi.fastutil.ints.IntAVLTreeSet;
 import org.mtr.libraries.it.unimi.dsi.fastutil.longs.LongAVLTreeSet;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
@@ -18,7 +19,9 @@ public final class InterchangeRouteDisplay {
 	private InterchangeRouteDisplay() {
 	}
 
-	public static ObjectArrayList<StationGroup> getStationGroups(Station station, LongAVLTreeSet excludedRouteIds) {
+	public static ObjectArrayList<StationGroup> getStationGroups(Station station, IntAVLTreeSet excludedRouteColors) {
+		final IntAVLTreeSet normalizedExcludedRouteColors = new IntAVLTreeSet();
+		excludedRouteColors.forEach(color -> normalizedExcludedRouteColors.add(normalizeColor(color)));
 		final ObjectArrayList<StationGroup> stationGroups = new ObjectArrayList<>();
 		station.getInterchangeStationToColorToRoutesMap(true).forEach((interchangeStation, colorToRoutes) -> {
 			final ObjectArrayList<Entry> entries = new ObjectArrayList<>();
@@ -28,7 +31,7 @@ public final class InterchangeRouteDisplay {
 
 			colorToRoutes.forEach((color, routes) -> routes.forEach(route -> {
 				final long routeId = route.getId();
-				if (route.getHidden() || route.getName().isEmpty() || excludedRouteIds.contains(routeId)) {
+				if (route.getHidden() || route.getName().isEmpty() || normalizedExcludedRouteColors.contains(normalizeColor(route.getColor()))) {
 					return;
 				}
 
@@ -86,15 +89,13 @@ public final class InterchangeRouteDisplay {
 	public static RouteMapDisplay getRouteMapDisplay(ObjectArrayList<StationGroup> stationGroups) {
 		final ObjectArrayList<Entry> entries = new ObjectArrayList<>();
 		final LongAVLTreeSet addedNormalRouteIds = new LongAVLTreeSet();
-		final LongAVLTreeSet addedAirportStationIds = new LongAVLTreeSet();
 		boolean hasRailwayInterchange = false;
+		boolean hasAirportInterchange = false;
 		for (final StationGroup stationGroup : stationGroups) {
 			for (final Entry entry : stationGroup.entries) {
 				switch (entry.category) {
 					case AIRPORT:
-						if (addedAirportStationIds.add(entry.stationId)) {
-							entries.add(entry);
-						}
+						hasAirportInterchange = true;
 						break;
 					case RAILWAY:
 						hasRailwayInterchange = true;
@@ -107,7 +108,11 @@ public final class InterchangeRouteDisplay {
 				}
 			}
 		}
-		return new RouteMapDisplay(entries, hasRailwayInterchange);
+		return new RouteMapDisplay(entries, hasRailwayInterchange, hasAirportInterchange);
+	}
+
+	public static int normalizeColor(int color) {
+		return color & 0xFFFFFF;
 	}
 
 	private static Category classify(Route route) {
@@ -135,10 +140,12 @@ public final class InterchangeRouteDisplay {
 
 		private final ObjectArrayList<Entry> entries;
 		private final boolean hasRailwayInterchange;
+		private final boolean hasAirportInterchange;
 
-		private RouteMapDisplay(ObjectArrayList<Entry> entries, boolean hasRailwayInterchange) {
+		private RouteMapDisplay(ObjectArrayList<Entry> entries, boolean hasRailwayInterchange, boolean hasAirportInterchange) {
 			this.entries = entries;
 			this.hasRailwayInterchange = hasRailwayInterchange;
+			this.hasAirportInterchange = hasAirportInterchange;
 		}
 
 		public ObjectArrayList<Entry> getEntries() {
@@ -147,6 +154,10 @@ public final class InterchangeRouteDisplay {
 
 		public boolean hasRailwayInterchange() {
 			return hasRailwayInterchange;
+		}
+
+		public boolean hasAirportInterchange() {
+			return hasAirportInterchange;
 		}
 	}
 

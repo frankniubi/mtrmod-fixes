@@ -4,7 +4,7 @@ import org.mtr.core.data.*;
 import org.mtr.core.tool.Utilities;
 import org.mtr.libraries.it.unimi.dsi.fastutil.ints.Int2ObjectAVLTreeMap;
 import org.mtr.libraries.it.unimi.dsi.fastutil.ints.IntArrayList;
-import org.mtr.libraries.it.unimi.dsi.fastutil.longs.LongAVLTreeSet;
+import org.mtr.libraries.it.unimi.dsi.fastutil.ints.IntAVLTreeSet;
 import org.mtr.libraries.it.unimi.dsi.fastutil.longs.LongArrayList;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
@@ -20,6 +20,7 @@ import org.mtr.mod.data.InterchangeRouteDisplay;
 import org.mtr.mod.generated.lang.TranslationProvider;
 
 import java.util.Locale;
+import java.util.List;
 import java.util.function.BiConsumer;
 
 public class RouteMapGenerator implements IGui {
@@ -37,6 +38,7 @@ public class RouteMapGenerator implements IGui {
 	private static final String ARROW_RESOURCE = "textures/block/sign/arrow.png";
 	private static final String CIRCLE_RESOURCE = "textures/block/sign/circle.png";
 	private static final String RAILWAY_INTERCHANGE_RESOURCE = "textures/block/sign/railway_interchange.png";
+	private static final String AIRPORT_INTERCHANGE_RESOURCE = "textures/block/sign/airplane.png";
 	private static final int RAILWAY_INTERCHANGE_COLOR = 0x21679F;
 	private static final String TEMP_CIRCULAR_MARKER_CLOCKWISE = String.format("temp_circular_marker_%s_clockwise", Init.randomString());
 	private static final String TEMP_CIRCULAR_MARKER_ANTICLOCKWISE = String.format("temp_circular_marker_%s_anticlockwise", Init.randomString());
@@ -384,14 +386,19 @@ public class RouteMapGenerator implements IGui {
 
 		try {
 			final ObjectArrayList<ObjectIntImmutablePair<SimplifiedRoute>> routeDetails = new ObjectArrayList<>();
-			final LongAVLTreeSet excludedRouteIds = new LongAVLTreeSet();
+			final IntAVLTreeSet excludedRouteColors = new IntAVLTreeSet();
 			getRouteStream(platformId, (simplifiedRoute, currentStationIndex) -> {
 				routeDetails.add(new ObjectIntImmutablePair<>(simplifiedRoute, currentStationIndex));
-				excludedRouteIds.add(simplifiedRoute.getId());
+				excludedRouteColors.add(InterchangeRouteDisplay.normalizeColor(simplifiedRoute.getColor()));
 			});
 			final int routeCount = routeDetails.size();
 
 			if (routeCount > 0) {
+				final DenseRouteMapLayout.Layout denseLayout = buildDenseRouteMapLayout(routeDetails);
+				final DenseRouteMapLayout.PlatformType platformType = classifyDensePlatform(platformId);
+				if (DenseRouteMapLayout.shouldUseDenseLayout(vertical, platformType, denseLayout)) {
+					return generateDenseVerticalRouteMap(denseLayout, aspectRatio, transparentWhite, excludedRouteColors);
+				}
 				final DynamicTextureCache clientCache = DynamicTextureCache.instance;
 				final ObjectArrayList<LongArrayList> stationsIdsBefore = new ObjectArrayList<>();
 				final ObjectArrayList<LongArrayList> stationsIdsAfter = new ObjectArrayList<>();
@@ -493,17 +500,20 @@ public class RouteMapGenerator implements IGui {
 							final ObjectArrayList<String> interchangeNames = new ObjectArrayList<>();
 							final Station station = MinecraftClientData.getInterchangeStation(simplifiedRoutePlatform.getStationId());
 							final boolean hasRailwayInterchange;
+							final boolean hasAirportInterchange;
 							if (station != null) {
-								final InterchangeRouteDisplay.RouteMapDisplay routeMapDisplay = InterchangeRouteDisplay.getRouteMapDisplay(InterchangeRouteDisplay.getStationGroups(station, excludedRouteIds));
+								final InterchangeRouteDisplay.RouteMapDisplay routeMapDisplay = InterchangeRouteDisplay.getRouteMapDisplay(InterchangeRouteDisplay.getStationGroups(station, excludedRouteColors));
 								routeMapDisplay.getEntries().forEach(entry -> {
 									interchangeColors.add(entry.getColor());
 									interchangeNames.add(entry.getText());
 								});
 								hasRailwayInterchange = routeMapDisplay.hasRailwayInterchange();
+								hasAirportInterchange = routeMapDisplay.hasAirportInterchange();
 							} else {
 								hasRailwayInterchange = false;
+								hasAirportInterchange = false;
 							}
-							Data.put(stationPositionsGrouped, key, new StationPositionGrouped(stationPosition, stationIndex - currentIndex, interchangeColors, interchangeNames, hasRailwayInterchange), ObjectOpenHashSet::new);
+							Data.put(stationPositionsGrouped, key, new StationPositionGrouped(stationPosition, stationIndex - currentIndex, interchangeColors, interchangeNames, hasRailwayInterchange, hasAirportInterchange), ObjectOpenHashSet::new);
 						}
 					}
 				}
@@ -537,20 +547,29 @@ public class RouteMapGenerator implements IGui {
 					drawStation(nativeImage, x, y, heightScale, lines, passed);
 
 					final boolean showRailwayIcon = stationPositionGrouped.hasRailwayInterchange && !currentStation;
+					final boolean showAirportIcon = stationPositionGrouped.hasAirportInterchange && !currentStation;
+					final int iconCount = (showRailwayIcon ? 1 : 0) + (showAirportIcon ? 1 : 0);
 					final int railwayIconSize = lineSize * 3 / 2;
 					final int railwayIconGap = Math.max(1, lineSize / 2);
 					final int stationNameY = y + (textBelow ? lines * lineSpacing : -1) + (textBelow ? 1 : -1) * lineSize * 5 / 4;
 					final int[] dimensions = new int[2];
-					final int stationNameMaxWidth = Math.max(1, maxStringWidth - (showRailwayIcon ? railwayIconSize + railwayIconGap : 0));
+					final int stationNameMaxWidth = Math.max(1, maxStringWidth - iconCount * (railwayIconSize + railwayIconGap));
 					final byte[] pixels = clientCache.getTextPixels(key.split("\\|\\|")[0], dimensions, stationNameMaxWidth, (int) ((fontSizeBig + fontSizeSmall) * DynamicTextureCache.LINE_HEIGHT_MULTIPLIER), fontSizeBig, fontSizeSmall, fontSizeSmall / 4, vertical ? HorizontalAlignment.RIGHT : HorizontalAlignment.CENTER);
 
 					int stationNameX = x;
 					int adjustedStationNameY = stationNameY;
-					if (showRailwayIcon) {
-						final RouteMapStationNameLayout.Layout layout = vertical ? RouteMapStationNameLayout.getVertical(nativeImage.getWidth(), nativeImage.getHeight(), x, stationNameY, dimensions[0], dimensions[1], railwayIconSize, railwayIconGap) : RouteMapStationNameLayout.getHorizontal(nativeImage.getWidth(), nativeImage.getHeight(), x, stationNameY, dimensions[0], dimensions[1], railwayIconSize, railwayIconGap, textBelow);
+					if (iconCount > 0) {
+						final RouteMapStationNameLayout.Layout layout = vertical ? RouteMapStationNameLayout.getVertical(nativeImage.getWidth(), nativeImage.getHeight(), x, stationNameY, dimensions[0], dimensions[1], iconCount, railwayIconSize, railwayIconGap) : RouteMapStationNameLayout.getHorizontal(nativeImage.getWidth(), nativeImage.getHeight(), x, stationNameY, dimensions[0], dimensions[1], iconCount, railwayIconSize, railwayIconGap, textBelow);
 						stationNameX = layout.getTextX();
 						adjustedStationNameY = layout.getTextY();
-						drawResource(nativeImage, RAILWAY_INTERCHANGE_RESOURCE, layout.getIconX(), layout.getIconY(), railwayIconSize, railwayIconSize, false, 0, 1, passed ? ARGB_LIGHT_GRAY : RAILWAY_INTERCHANGE_COLOR, false);
+						int iconIndex = 0;
+						if (showRailwayIcon) {
+							drawResource(nativeImage, RAILWAY_INTERCHANGE_RESOURCE, layout.getIconX(iconIndex), layout.getIconY(iconIndex), railwayIconSize, railwayIconSize, false, 0, 1, passed ? ARGB_LIGHT_GRAY : RAILWAY_INTERCHANGE_COLOR, false);
+							iconIndex++;
+						}
+						if (showAirportIcon) {
+							drawResource(nativeImage, AIRPORT_INTERCHANGE_RESOURCE, layout.getIconX(iconIndex), layout.getIconY(iconIndex), railwayIconSize, railwayIconSize, false, 0, 1, passed ? ARGB_LIGHT_GRAY : RAILWAY_INTERCHANGE_COLOR, false);
+						}
 					}
 					drawString(nativeImage, pixels, stationNameX, adjustedStationNameY, dimensions, HorizontalAlignment.CENTER, textBelow ? VerticalAlignment.TOP : VerticalAlignment.BOTTOM, currentStation ? ARGB_BLACK : 0, passed ? ARGB_LIGHT_GRAY : currentStation ? ARGB_WHITE : ARGB_BLACK, vertical);
 				}));
@@ -569,6 +588,285 @@ public class RouteMapGenerator implements IGui {
 		}
 
 		return null;
+	}
+
+	private static DenseRouteMapLayout.Layout buildDenseRouteMapLayout(ObjectArrayList<ObjectIntImmutablePair<SimplifiedRoute>> routeDetails) {
+		final ObjectArrayList<DenseRouteMapLayout.RouteInput> routeInputs = new ObjectArrayList<>();
+		for (final ObjectIntImmutablePair<SimplifiedRoute> routeDetail : routeDetails) {
+			final SimplifiedRoute route = routeDetail.left();
+			final ObjectArrayList<DenseRouteMapLayout.StationInput> stations = new ObjectArrayList<>();
+			for (int stationIndex = routeDetail.rightInt(); stationIndex < route.getPlatforms().size(); stationIndex++) {
+				final SimplifiedRoutePlatform platform = route.getPlatforms().get(stationIndex);
+				stations.add(new DenseRouteMapLayout.StationInput(platform.getStationId(), platform.getStationName()));
+			}
+			routeInputs.add(new DenseRouteMapLayout.RouteInput(route.getName().split("\\|\\|")[0], route.getColor(), stations));
+		}
+		return DenseRouteMapLayout.build(routeInputs);
+	}
+
+	private static DenseRouteMapLayout.PlatformType classifyDensePlatform(long platformId) {
+		final ObjectArrayList<DenseRouteMapLayout.RouteType> routeTypes = new ObjectArrayList<>();
+		for (final SimplifiedRoute simplifiedRoute : MinecraftClientData.getInstance().simplifiedRoutes) {
+			if (simplifiedRoute.getPlatformIndex(platformId) >= 0 && !simplifiedRoute.getName().isEmpty()) {
+				final long routeId = simplifiedRoute.getId();
+				Route route = MinecraftClientData.getInstance().routeIdMap.get(routeId);
+				if (route == null) {
+					route = MinecraftClientData.getInterchangeData().routeIdMap.get(routeId);
+				}
+				if (route == null) {
+					routeTypes.add(DenseRouteMapLayout.RouteType.UNRESOLVED);
+				} else if (route.getTransportMode() == TransportMode.TRAIN && route.getRouteType() == org.mtr.core.data.RouteType.HIGH_SPEED) {
+					routeTypes.add(DenseRouteMapLayout.RouteType.HIGH_SPEED);
+				} else {
+					routeTypes.add(DenseRouteMapLayout.RouteType.METRO);
+				}
+			}
+		}
+		return DenseRouteMapLayout.classifyPlatform(routeTypes);
+	}
+
+	private static NativeImage generateDenseVerticalRouteMap(DenseRouteMapLayout.Layout layout, float aspectRatio, boolean transparentWhite, IntAVLTreeSet excludedRouteColors) {
+		final int physicalWidth = scale * MIN_VERTICAL_SIZE;
+		final int physicalHeight = Math.max(1, Math.round(physicalWidth * aspectRatio));
+		final NativeImage nativeImage = new NativeImage(NativeImageFormat.getAbgrMapped(), physicalHeight, physicalWidth, false);
+		nativeImage.fillRect(0, 0, nativeImage.getWidth(), nativeImage.getHeight(), ARGB_WHITE);
+
+		final int margin = denseScale(10, physicalWidth);
+		final int gap = denseScale(5, physicalWidth);
+		final int labelHeight = denseScale(16, physicalWidth);
+		final int currentHeight = denseScale(48, physicalWidth);
+		final int routeCount = layout.getRoutes().size();
+		final int chipRows = Math.max(1, (routeCount + 3) / 4);
+		final int serviceBandHeight = denseScale(chipRows == 1 ? 36 : 61, physicalWidth);
+		final boolean hasPrefixes = layout.getRoutes().stream().anyMatch(route -> !route.getPrefixStations().isEmpty());
+		final boolean hasCommonStations = !layout.getCommonStations().isEmpty();
+		final int prefixHeight = hasPrefixes ? denseScale(Math.max(78, routeCount * 28), physicalWidth) : 0;
+		final int commonHeight = hasCommonStations ? denseScale(Math.max(68, layout.getCommonStations().size() * 38), physicalWidth) : 0;
+		final int sectionLabelCount = (hasPrefixes ? 1 : 0) + (hasCommonStations ? 1 : 0) + 1;
+		final int tailHeight = Math.max(denseScale(routeCount * 42, physicalWidth), physicalHeight - serviceBandHeight - currentHeight - prefixHeight - commonHeight - labelHeight * sectionLabelCount);
+
+		int y = 0;
+		drawDenseServiceBand(nativeImage, physicalWidth, layout.getRoutes(), y, serviceBandHeight, margin, gap);
+		y += serviceBandHeight;
+		drawPhysicalRect(nativeImage, physicalWidth, 0, y, physicalWidth, currentHeight, ARGB_WHITE);
+		drawPhysicalStationCircle(nativeImage, physicalWidth, margin + denseScale(7, physicalWidth), y + currentHeight / 2, denseScale(7, physicalWidth), ARGB_BLACK);
+		drawPhysicalString(nativeImage, physicalWidth, layout.getCurrentStation().getName(), margin + denseScale(25, physicalWidth), y + denseScale(4, physicalWidth), physicalWidth - margin * 2 - denseScale(25, physicalWidth), currentHeight - denseScale(8, physicalWidth), denseScale(14, physicalWidth), denseScale(8, physicalWidth), ARGB_BLACK, false);
+		y += currentHeight;
+
+		if (hasPrefixes) {
+			drawDenseSectionLabel(nativeImage, physicalWidth, "汇合前|Before convergence", y, labelHeight);
+			y += labelHeight;
+			drawDenseRouteRows(nativeImage, physicalWidth, layout.getRoutes(), true, y, prefixHeight, margin, gap, excludedRouteColors);
+			y += prefixHeight;
+		}
+
+		if (hasCommonStations) {
+			drawDenseSectionLabel(nativeImage, physicalWidth, "共同经过|All services", y, labelHeight);
+			y += labelHeight;
+			drawDenseCommonStations(nativeImage, physicalWidth, layout.getCommonStations(), layout.getRoutes(), y, commonHeight, margin, excludedRouteColors);
+			y += commonHeight;
+		}
+
+		drawDenseSectionLabel(nativeImage, physicalWidth, "其后各线|Route-specific stops", y, labelHeight);
+		y += labelHeight;
+		drawDenseRouteRows(nativeImage, physicalWidth, layout.getRoutes(), false, y, Math.min(tailHeight, physicalHeight - y), margin, gap, excludedRouteColors);
+
+		if (transparentWhite) {
+			clearColor(nativeImage, ARGB_WHITE);
+		}
+		return nativeImage;
+	}
+
+	private static void drawDenseServiceBand(NativeImage nativeImage, int physicalWidth, List<DenseRouteMapLayout.RouteSummary> routes, int y, int height, int margin, int gap) {
+		drawPhysicalRect(nativeImage, physicalWidth, 0, y, physicalWidth, height, 0xFFE7EAEC);
+		final int columns = Math.min(4, routes.size());
+		final int rows = Math.max(1, (routes.size() + columns - 1) / columns);
+		final int chipHeight = (height - margin - gap * (rows - 1)) / rows;
+		final int chipWidth = (physicalWidth - margin * 2 - gap * (columns - 1)) / columns;
+		for (int index = 0; index < routes.size(); index++) {
+			final int row = index / columns;
+			final int column = index % columns;
+			final int x = margin + column * (chipWidth + gap);
+			final int chipY = y + margin / 2 + row * (chipHeight + gap);
+			final DenseRouteMapLayout.RouteSummary route = routes.get(index);
+			drawPhysicalRect(nativeImage, physicalWidth, x, chipY, chipWidth, chipHeight, ARGB_BLACK | route.getColor());
+			drawPhysicalString(nativeImage, physicalWidth, route.getName(), x + denseScale(3, physicalWidth), chipY, chipWidth - denseScale(6, physicalWidth), chipHeight, denseScale(9, physicalWidth), denseScale(7, physicalWidth), ARGB_WHITE, true);
+		}
+	}
+
+	private static void drawDenseSectionLabel(NativeImage nativeImage, int physicalWidth, String text, int y, int height) {
+		drawPhysicalRect(nativeImage, physicalWidth, 0, y, physicalWidth, height, 0xFFC4C9CC);
+		drawPhysicalString(nativeImage, physicalWidth, text, denseScale(10, physicalWidth), y, physicalWidth - denseScale(20, physicalWidth), height, denseScale(8, physicalWidth), denseScale(6, physicalWidth), 0xFF596269, false);
+	}
+
+	private static void drawDenseRouteRows(NativeImage nativeImage, int physicalWidth, List<DenseRouteMapLayout.RouteSummary> routes, boolean prefixes, int y, int height, int margin, int gap, IntAVLTreeSet excludedRouteColors) {
+		if (routes.isEmpty() || height <= 0) {
+			return;
+		}
+		final int rowHeight = Math.max(1, (height - gap * (routes.size() + 1)) / routes.size());
+		for (int index = 0; index < routes.size(); index++) {
+			final DenseRouteMapLayout.RouteSummary route = routes.get(index);
+			final List<DenseRouteMapLayout.StationInput> stations = prefixes ? route.getPrefixStations() : route.getSuffixStations();
+			final int rowY = y + gap + index * (rowHeight + gap);
+			drawPhysicalRect(nativeImage, physicalWidth, margin, rowY, physicalWidth - margin * 2, rowHeight, 0xFFF6F7F7);
+			final int badgeWidth = denseScale(38, physicalWidth);
+			drawPhysicalRect(nativeImage, physicalWidth, margin + denseScale(5, physicalWidth), rowY + denseScale(5, physicalWidth), badgeWidth, rowHeight - denseScale(10, physicalWidth), ARGB_BLACK | route.getColor());
+			drawPhysicalString(nativeImage, physicalWidth, route.getName(), margin + denseScale(7, physicalWidth), rowY + denseScale(5, physicalWidth), badgeWidth - denseScale(4, physicalWidth), rowHeight - denseScale(10, physicalWidth), denseScale(8, physicalWidth), denseScale(6, physicalWidth), ARGB_WHITE, true);
+			final int ruleX = margin + denseScale(49, physicalWidth);
+			drawPhysicalRect(nativeImage, physicalWidth, ruleX, rowY + denseScale(5, physicalWidth), denseScale(4, physicalWidth), rowHeight - denseScale(10, physicalWidth), ARGB_BLACK | route.getColor());
+			final DenseStationInfo aggregateInfo = getDenseStationInfo(stations, excludedRouteColors);
+			final int iconSize = denseScale(13, physicalWidth);
+			final int iconGap = denseScale(3, physicalWidth);
+			final int iconCount = (aggregateInfo.hasRailwayInterchange ? 1 : 0) + (aggregateInfo.hasAirportInterchange ? 1 : 0);
+			int textX = ruleX + denseScale(9, physicalWidth);
+			if (iconCount > 0) {
+				int iconIndex = 0;
+				if (aggregateInfo.hasRailwayInterchange) {
+					drawPhysicalResource(nativeImage, physicalWidth, RAILWAY_INTERCHANGE_RESOURCE, textX, rowY + (rowHeight - iconSize) / 2, iconSize, iconSize, RAILWAY_INTERCHANGE_COLOR);
+					iconIndex++;
+				}
+				if (aggregateInfo.hasAirportInterchange) {
+					drawPhysicalResource(nativeImage, physicalWidth, AIRPORT_INTERCHANGE_RESOURCE, textX + iconIndex * (iconSize + iconGap), rowY + (rowHeight - iconSize) / 2, iconSize, iconSize, RAILWAY_INTERCHANGE_COLOR);
+				}
+				textX += iconCount * (iconSize + iconGap);
+			}
+			final String stationText = stations.isEmpty() ? "—" : joinDenseStationNames(stations);
+			drawPhysicalString(nativeImage, physicalWidth, stationText, textX, rowY + denseScale(3, physicalWidth), physicalWidth - margin - textX - denseScale(5, physicalWidth), rowHeight - denseScale(6, physicalWidth), denseScale(9, physicalWidth), denseScale(6, physicalWidth), stations.isEmpty() ? 0xFF8B9195 : ARGB_BLACK, false);
+		}
+	}
+
+	private static void drawDenseCommonStations(NativeImage nativeImage, int physicalWidth, List<DenseRouteMapLayout.StationInput> stations, List<DenseRouteMapLayout.RouteSummary> routes, int y, int height, int margin, IntAVLTreeSet excludedRouteColors) {
+		drawPhysicalRect(nativeImage, physicalWidth, 0, y, physicalWidth, height, 0xFFD7D9DA);
+		final int rowHeight = Math.max(1, height / stations.size());
+		final int lineX = margin + denseScale(7, physicalWidth);
+		final int stripeWidth = Math.max(1, denseScale(6, physicalWidth) / routes.size());
+		for (int routeIndex = 0; routeIndex < routes.size(); routeIndex++) {
+			drawPhysicalRect(nativeImage, physicalWidth, lineX - stripeWidth * routes.size() / 2 + routeIndex * stripeWidth, y, stripeWidth, height, ARGB_BLACK | routes.get(routeIndex).getColor());
+		}
+		for (int index = 0; index < stations.size(); index++) {
+			final DenseRouteMapLayout.StationInput station = stations.get(index);
+			final int rowY = y + index * rowHeight;
+			final int centerY = rowY + rowHeight / 2;
+			drawPhysicalStationCircle(nativeImage, physicalWidth, lineX, centerY, denseScale(7, physicalWidth), ARGB_BLACK);
+			final DenseStationInfo info = getDenseStationInfo(List.of(station), excludedRouteColors);
+			final int iconSize = denseScale(14, physicalWidth);
+			final int iconGap = denseScale(3, physicalWidth);
+			int nameX = margin + denseScale(24, physicalWidth);
+			if (info.hasRailwayInterchange) {
+				drawPhysicalResource(nativeImage, physicalWidth, RAILWAY_INTERCHANGE_RESOURCE, nameX, centerY - iconSize / 2, iconSize, iconSize, RAILWAY_INTERCHANGE_COLOR);
+				nameX += iconSize + iconGap;
+			}
+			if (info.hasAirportInterchange) {
+				drawPhysicalResource(nativeImage, physicalWidth, AIRPORT_INTERCHANGE_RESOURCE, nameX, centerY - iconSize / 2, iconSize, iconSize, RAILWAY_INTERCHANGE_COLOR);
+				nameX += iconSize + iconGap;
+			}
+			final int interchangeWidth = info.normalInterchangeText.isEmpty() ? 0 : denseScale(62, physicalWidth);
+			drawPhysicalString(nativeImage, physicalWidth, station.getName(), nameX, rowY + denseScale(3, physicalWidth), physicalWidth - margin - nameX - interchangeWidth, rowHeight - denseScale(6, physicalWidth), denseScale(12, physicalWidth), denseScale(7, physicalWidth), ARGB_BLACK, false);
+			if (!info.normalInterchangeText.isEmpty()) {
+				drawPhysicalString(nativeImage, physicalWidth, info.normalInterchangeText, physicalWidth - margin - interchangeWidth, rowY + denseScale(3, physicalWidth), interchangeWidth, rowHeight - denseScale(6, physicalWidth), denseScale(7, physicalWidth), denseScale(5, physicalWidth), 0xFF596269, false);
+			}
+		}
+	}
+
+	private static DenseStationInfo getDenseStationInfo(List<DenseRouteMapLayout.StationInput> stations, IntAVLTreeSet excludedRouteColors) {
+		boolean hasRailwayInterchange = false;
+		boolean hasAirportInterchange = false;
+		final ObjectArrayList<String> normalInterchangeNames = new ObjectArrayList<>();
+		for (final DenseRouteMapLayout.StationInput stationInput : stations) {
+			final Station station = MinecraftClientData.getInterchangeStation(stationInput.getId());
+			if (station != null) {
+				final InterchangeRouteDisplay.RouteMapDisplay display = InterchangeRouteDisplay.getRouteMapDisplay(InterchangeRouteDisplay.getStationGroups(station, excludedRouteColors));
+				hasRailwayInterchange |= display.hasRailwayInterchange();
+				hasAirportInterchange |= display.hasAirportInterchange();
+				display.getEntries().forEach(entry -> normalInterchangeNames.add(entry.getText()));
+			}
+		}
+		return new DenseStationInfo(hasRailwayInterchange, hasAirportInterchange, IGui.mergeStations(normalInterchangeNames));
+	}
+
+	private static String joinDenseStationNames(List<DenseRouteMapLayout.StationInput> stations) {
+		final StringBuilder primary = new StringBuilder();
+		final StringBuilder secondary = new StringBuilder();
+		for (final DenseRouteMapLayout.StationInput station : stations) {
+			final String[] nameParts = station.getName().split("\\|", -1);
+			if (primary.length() > 0) {
+				primary.append(" · ");
+				secondary.append(" · ");
+			}
+			primary.append(nameParts[0]);
+			secondary.append(nameParts.length > 1 ? nameParts[1] : nameParts[0]);
+		}
+		return primary + "|" + secondary;
+	}
+
+	private static void drawPhysicalString(NativeImage nativeImage, int physicalWidth, String text, int x, int y, int width, int height, int cjkSize, int latinSize, int color, boolean centered) {
+		if (width <= 0 || height <= 0 || text.isEmpty()) {
+			return;
+		}
+		final int[] dimensions = new int[2];
+		final byte[] pixels = DynamicTextureCache.instance.getTextPixels(text, dimensions, width, height, cjkSize, latinSize, 0, centered ? HorizontalAlignment.CENTER : HorizontalAlignment.LEFT);
+		final int left = x + (centered ? Math.max(0, (width - dimensions[0]) / 2) : 0);
+		final int top = y + Math.max(0, (height - dimensions[1]) / 2);
+		int sourceX = 0;
+		int sourceY = 0;
+		for (final byte pixel : pixels) {
+			blendPhysicalPixel(nativeImage, physicalWidth, left + sourceX, top + sourceY, ((pixel & 0xFF) << 24) | (color & RGB_WHITE));
+			sourceX++;
+			if (sourceX == dimensions[0]) {
+				sourceX = 0;
+				sourceY++;
+			}
+		}
+	}
+
+	private static void drawPhysicalRect(NativeImage nativeImage, int physicalWidth, int x, int y, int width, int height, int color) {
+		for (int drawX = 0; drawX < width; drawX++) {
+			for (int drawY = 0; drawY < height; drawY++) {
+				drawPhysicalPixel(nativeImage, physicalWidth, x + drawX, y + drawY, color);
+			}
+		}
+	}
+
+	private static void drawPhysicalStationCircle(NativeImage nativeImage, int physicalWidth, int centerX, int centerY, int radius, int outlineColor) {
+		final int innerRadius = Math.max(0, radius - denseScale(3, physicalWidth));
+		for (int offsetX = -radius; offsetX <= radius; offsetX++) {
+			for (int offsetY = -radius; offsetY <= radius; offsetY++) {
+				final int distance = offsetX * offsetX + offsetY * offsetY;
+				if (distance <= radius * radius) {
+					drawPhysicalPixel(nativeImage, physicalWidth, centerX + offsetX, centerY + offsetY, distance <= innerRadius * innerRadius ? ARGB_WHITE : outlineColor);
+				}
+			}
+		}
+	}
+
+	private static void drawPhysicalResource(NativeImage nativeImage, int physicalWidth, String resource, int x, int y, int width, int height, int color) {
+		ResourceManagerHelper.readResource(new Identifier(Init.MOD_ID, resource), inputStream -> {
+			try {
+				final NativeImage resourceImage = NativeImage.read(NativeImageFormat.getAbgrMapped(), inputStream);
+				for (int drawX = 0; drawX < width; drawX++) {
+					for (int drawY = 0; drawY < height; drawY++) {
+						final int sourceX = MathHelper.clamp(drawX * resourceImage.getWidth() / width, 0, resourceImage.getWidth() - 1);
+						final int sourceY = MathHelper.clamp(drawY * resourceImage.getHeight() / height, 0, resourceImage.getHeight() - 1);
+						final int alpha = resourceImage.getColor(sourceX, sourceY) >>> 24;
+						blendPhysicalPixel(nativeImage, physicalWidth, x + drawX, y + drawY, (alpha << 24) | (color & RGB_WHITE));
+					}
+				}
+			} catch (Exception e) {
+				Init.LOGGER.error("", e);
+			}
+		});
+	}
+
+	private static void drawPhysicalPixel(NativeImage nativeImage, int physicalWidth, int physicalX, int physicalY, int color) {
+		drawPixelSafe(nativeImage, physicalY, physicalWidth - physicalX - 1, color);
+	}
+
+	private static void blendPhysicalPixel(NativeImage nativeImage, int physicalWidth, int physicalX, int physicalY, int color) {
+		blendPixel(nativeImage, physicalY, physicalWidth - physicalX - 1, color);
+	}
+
+	private static int denseScale(int pixelsAtDefaultResolution, int physicalWidth) {
+		return Math.max(1, Math.round((float) pixelsAtDefaultResolution * physicalWidth / 320));
 	}
 
 	public static void scrollTextLightRail(GraphicsHolder graphicsHolder, int rows, float availableWidth, float availableHeight, int imageWidth, int imageHeight) {
@@ -889,6 +1187,19 @@ public class RouteMapGenerator implements IGui {
 		}
 	}
 
+	private static final class DenseStationInfo {
+
+		private final boolean hasRailwayInterchange;
+		private final boolean hasAirportInterchange;
+		private final String normalInterchangeText;
+
+		private DenseStationInfo(boolean hasRailwayInterchange, boolean hasAirportInterchange, String normalInterchangeText) {
+			this.hasRailwayInterchange = hasRailwayInterchange;
+			this.hasAirportInterchange = hasAirportInterchange;
+			this.normalInterchangeText = normalInterchangeText;
+		}
+	}
+
 	private static class StationPositionGrouped {
 
 		private final StationPosition stationPosition;
@@ -896,13 +1207,15 @@ public class RouteMapGenerator implements IGui {
 		private final IntArrayList interchangeColors;
 		private final ObjectArrayList<String> interchangeNames;
 		private final boolean hasRailwayInterchange;
+		private final boolean hasAirportInterchange;
 
-		private StationPositionGrouped(StationPosition stationPosition, int stationOffset, IntArrayList interchangeColors, ObjectArrayList<String> interchangeNames, boolean hasRailwayInterchange) {
+		private StationPositionGrouped(StationPosition stationPosition, int stationOffset, IntArrayList interchangeColors, ObjectArrayList<String> interchangeNames, boolean hasRailwayInterchange, boolean hasAirportInterchange) {
 			this.stationPosition = stationPosition;
 			this.stationOffset = stationOffset;
 			this.interchangeColors = interchangeColors;
 			this.interchangeNames = interchangeNames;
 			this.hasRailwayInterchange = hasRailwayInterchange;
+			this.hasAirportInterchange = hasAirportInterchange;
 		}
 	}
 }

@@ -14,21 +14,30 @@ public final class InterchangeConsumerIntegrationTest {
 		Assertions.assertTrue(source.contains("InterchangeRouteDisplay.getStationGroups"));
 		Assertions.assertTrue(source.contains("InterchangeRouteDisplay.deduplicateForBroadcast"));
 		Assertions.assertTrue(source.contains("vehicleExtraData.getNextStationId()"));
+		Assertions.assertTrue(source.contains("vehicleExtraData.getThisRouteColor()"));
+		Assertions.assertTrue(source.contains("vehicleExtraData.getNextRouteColor()"));
+		Assertions.assertTrue(source.contains("IntAVLTreeSet excludedRouteColors"));
 		Assertions.assertTrue(source.contains("MinecraftClientData.getInterchangeStation(nextStationId)"));
 		Assertions.assertFalse(source.contains("vehicleExtraData.iterateInterchanges"), "untyped route-name data cannot classify high-speed and airplane routes");
 	}
 
 	@Test
-	public void routeMapUsesTypedEntriesAndRouteIdExclusions() throws Exception {
+	public void routeMapUsesTypedEntriesAndRgbExclusions() throws Exception {
 		final String source = readMainSource("org", "mtr", "mod", "client", "RouteMapGenerator.java");
 		Assertions.assertTrue(source.contains("InterchangeRouteDisplay.getRouteMapDisplay"));
 		Assertions.assertTrue(source.contains("routeMapDisplay.hasRailwayInterchange()"));
+		Assertions.assertTrue(source.contains("routeMapDisplay.hasAirportInterchange()"));
 		Assertions.assertTrue(source.contains("RouteMapStationNameLayout"));
 		Assertions.assertTrue(source.contains("RAILWAY_INTERCHANGE_RESOURCE"));
+		Assertions.assertTrue(source.contains("AIRPORT_INTERCHANGE_RESOURCE"));
+		Assertions.assertTrue(source.contains("DenseRouteMapLayout.shouldUseDenseLayout"));
+		Assertions.assertTrue(source.contains("DenseRouteMapLayout.classifyPlatform"));
+		Assertions.assertTrue(source.contains("classifyDensePlatform(long platformId)"));
+		Assertions.assertTrue(source.contains("simplifiedRoute.getPlatformIndex(platformId) >= 0"), "platform classification must include terminating routes, not only drawable route details");
+		Assertions.assertTrue(source.contains("generateDenseVerticalRouteMap"));
 		Assertions.assertFalse(source.contains("InterchangeRouteDisplay.flattenForRouteMap"));
 		Assertions.assertFalse(source.contains("InterchangeRouteDisplay.deduplicateForBroadcast"));
-		Assertions.assertTrue(source.contains("excludedRouteIds.add"));
-		Assertions.assertFalse(source.contains("colors.contains(color)"), "same-colored routes must be filtered by route ID, not color");
+		Assertions.assertTrue(source.contains("excludedRouteColors.add(InterchangeRouteDisplay.normalizeColor"));
 	}
 
 	private static String readMainSource(String... pathParts) throws Exception {
