@@ -18,6 +18,7 @@ import org.mtr.libraries.com.google.gson.JsonParser;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.Object2ObjectAVLTreeMap;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.Object2ObjectArrayMap;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import org.mtr.libraries.org.eclipse.jetty.servlet.ServletHolder;
 import org.mtr.mapping.holder.*;
 import org.mtr.mapping.mapper.GameRule;
 import org.mtr.mapping.mapper.MinecraftServerHelper;
@@ -33,6 +34,9 @@ import org.mtr.mod.generated.lang.TranslationProvider;
 import org.mtr.mod.packet.*;
 import org.mtr.mod.servlet.MinecraftOperationProcessor;
 import org.mtr.mod.servlet.RequestHelper;
+import org.mtr.mod.servlet.RouteAssetServlet;
+import org.mtr.mod.route.RouteAssetProtocol;
+import org.mtr.mod.route.RouteAssetServerManager;
 
 import javax.annotation.Nullable;
 import java.io.InputStream;
@@ -52,6 +56,7 @@ public final class Init implements Utilities {
 
 	private static Main main;
 	private static int serverPort;
+	private static RouteAssetServerManager routeAssetServerManager;
 	private static Runnable sendWorldTimeUpdate;
 	private static boolean canSendWorldTimeUpdate = true;
 	private static boolean isDedicatedServer = true;
@@ -182,7 +187,22 @@ public final class Init implements Utilities {
 			Config.init(minecraftServer.getRunDirectory());
 			final int defaultPort = Config.getServer().getWebserverPort();
 			serverPort = defaultPort <= 0 ? -1 : findFreePort(defaultPort);
-			main = new Main(minecraftServer.getSavePath(WorldSavePath.getRootMapped()).resolve("mtr"), serverPort, Config.getServer().getUseThreadedSimulation(), Config.getServer().getUseThreadedFileLoading(), webserverSetup, WORLD_ID_LIST.toArray(new String[0]));
+			final Path mtrRoot = minecraftServer.getSavePath(WorldSavePath.getRootMapped()).resolve("mtr");
+			if (Config.getServer().getRouteTextureAssetsEnabled()) {
+				try {
+					routeAssetServerManager = new RouteAssetServerManager(mtrRoot.resolve(Config.getServer().getRouteTextureOutputDirectory()), Config.getServer().getRouteTextureGenerationThreads(), Config.getServer().getRouteTextureRetainedRevisions());
+				} catch (Exception exception) {
+					routeAssetServerManager = null;
+					LOGGER.error("Unable to initialize server route texture assets", exception);
+				}
+			}
+			main = new Main(mtrRoot, serverPort, Config.getServer().getUseThreadedSimulation(), Config.getServer().getUseThreadedFileLoading(), Init::setupWebserver, WORLD_ID_LIST.toArray(new String[0]));
+			if (routeAssetServerManager != null) {
+				if (serverPort >= 0) {
+					routeAssetServerManager.setOriginPort(serverPort);
+				}
+				routeAssetServerManager.start(minecraftServer);
+			}
 
 			serverTick = 0;
 			lastSavedMillis = System.currentTimeMillis();
@@ -220,8 +240,13 @@ public final class Init implements Utilities {
 		});
 
 		REGISTRY.eventRegistry.registerServerStopping(minecraftServer -> {
+			if (routeAssetServerManager != null) {
+				routeAssetServerManager.close();
+				routeAssetServerManager = null;
+			}
 			if (main != null) {
 				main.stop();
+				main = null;
 			}
 			serverPort = 0;
 			RIDING_PLAYERS.clear();
@@ -263,7 +288,12 @@ public final class Init implements Utilities {
 		});
 
 		REGISTRY.eventRegistry.registerPlayerJoin((minecraftServer, serverPlayerEntity) -> updatePlayer(serverPlayerEntity, false));
-		REGISTRY.eventRegistry.registerPlayerDisconnect((minecraftServer, serverPlayerEntity) -> RIDING_PLAYERS.remove(serverPlayerEntity.getUuid()));
+		REGISTRY.eventRegistry.registerPlayerDisconnect((minecraftServer, serverPlayerEntity) -> {
+			RIDING_PLAYERS.remove(serverPlayerEntity.getUuid());
+			if (routeAssetServerManager != null) {
+				routeAssetServerManager.onPlayerDisconnect(serverPlayerEntity.getUuid());
+			}
+		});
 
 		// Finish registration
 		REGISTRY.init();
@@ -369,6 +399,19 @@ public final class Init implements Utilities {
 
 	public static void createWebserverSetup(Consumer<Webserver> webserverSetup) {
 		Init.webserverSetup = webserverSetup;
+	}
+
+	public static RouteAssetServerManager getRouteAssetServerManager() {
+		return routeAssetServerManager;
+	}
+
+	private static void setupWebserver(Webserver webserver) {
+		if (routeAssetServerManager != null) {
+			webserver.addServlet(new ServletHolder(new RouteAssetServlet(routeAssetServerManager.getRepository().getCas(), RouteAssetProtocol.RENDERER_VERSION)), RouteAssetProtocol.HTTP_PATH + "*");
+		}
+		if (webserverSetup != null) {
+			webserverSetup.accept(webserver);
+		}
 	}
 
 	public static String randomString() {

@@ -231,7 +231,7 @@ public final class RouteAssetCas {
 		public String getExtension() { return extension; }
 		public String getContentType() { return contentType; }
 
-		static MediaType fromExtension(String extension) {
+		public static MediaType fromExtension(String extension) {
 			for (final MediaType value : values()) {
 				if (value.extension.equals(extension)) return value;
 			}
