@@ -36,6 +36,8 @@ public class RouteMapGenerator implements IGui {
 	private static final String EXIT_RESOURCE = "textures/block/sign/exit_letter_blank.png";
 	private static final String ARROW_RESOURCE = "textures/block/sign/arrow.png";
 	private static final String CIRCLE_RESOURCE = "textures/block/sign/circle.png";
+	private static final String RAILWAY_INTERCHANGE_RESOURCE = "textures/block/sign/railway_interchange.png";
+	private static final int RAILWAY_INTERCHANGE_COLOR = 0x21679F;
 	private static final String TEMP_CIRCULAR_MARKER_CLOCKWISE = String.format("temp_circular_marker_%s_clockwise", Init.randomString());
 	private static final String TEMP_CIRCULAR_MARKER_ANTICLOCKWISE = String.format("temp_circular_marker_%s_anticlockwise", Init.randomString());
 	private static final int PIXEL_RESOLUTION = 24;
@@ -490,13 +492,18 @@ public class RouteMapGenerator implements IGui {
 							final IntArrayList interchangeColors = new IntArrayList();
 							final ObjectArrayList<String> interchangeNames = new ObjectArrayList<>();
 							final Station station = MinecraftClientData.getInterchangeStation(simplifiedRoutePlatform.getStationId());
+							final boolean hasRailwayInterchange;
 							if (station != null) {
-								InterchangeRouteDisplay.flattenForRouteMap(InterchangeRouteDisplay.getStationGroups(station, excludedRouteIds)).forEach(entry -> {
+								final InterchangeRouteDisplay.RouteMapDisplay routeMapDisplay = InterchangeRouteDisplay.getRouteMapDisplay(InterchangeRouteDisplay.getStationGroups(station, excludedRouteIds));
+								routeMapDisplay.getEntries().forEach(entry -> {
 									interchangeColors.add(entry.getColor());
 									interchangeNames.add(entry.getText());
 								});
+								hasRailwayInterchange = routeMapDisplay.hasRailwayInterchange();
+							} else {
+								hasRailwayInterchange = false;
 							}
-							Data.put(stationPositionsGrouped, key, new StationPositionGrouped(stationPosition, stationIndex - currentIndex, interchangeColors, interchangeNames), ObjectOpenHashSet::new);
+							Data.put(stationPositionsGrouped, key, new StationPositionGrouped(stationPosition, stationIndex - currentIndex, interchangeColors, interchangeNames, hasRailwayInterchange), ObjectOpenHashSet::new);
 						}
 					}
 				}
@@ -529,9 +536,23 @@ public class RouteMapGenerator implements IGui {
 
 					drawStation(nativeImage, x, y, heightScale, lines, passed);
 
+					final boolean showRailwayIcon = stationPositionGrouped.hasRailwayInterchange && !currentStation;
+					final int railwayIconSize = lineSize * 3 / 2;
+					final int railwayIconGap = Math.max(1, lineSize / 2);
+					final int stationNameY = y + (textBelow ? lines * lineSpacing : -1) + (textBelow ? 1 : -1) * lineSize * 5 / 4;
 					final int[] dimensions = new int[2];
-					final byte[] pixels = clientCache.getTextPixels(key.split("\\|\\|")[0], dimensions, maxStringWidth, (int) ((fontSizeBig + fontSizeSmall) * DynamicTextureCache.LINE_HEIGHT_MULTIPLIER), fontSizeBig, fontSizeSmall, fontSizeSmall / 4, vertical ? HorizontalAlignment.RIGHT : HorizontalAlignment.CENTER);
-					drawString(nativeImage, pixels, x, y + (textBelow ? lines * lineSpacing : -1) + (textBelow ? 1 : -1) * lineSize * 5 / 4, dimensions, HorizontalAlignment.CENTER, textBelow ? VerticalAlignment.TOP : VerticalAlignment.BOTTOM, currentStation ? ARGB_BLACK : 0, passed ? ARGB_LIGHT_GRAY : currentStation ? ARGB_WHITE : ARGB_BLACK, vertical);
+					final int stationNameMaxWidth = Math.max(1, maxStringWidth - (showRailwayIcon ? railwayIconSize + railwayIconGap : 0));
+					final byte[] pixels = clientCache.getTextPixels(key.split("\\|\\|")[0], dimensions, stationNameMaxWidth, (int) ((fontSizeBig + fontSizeSmall) * DynamicTextureCache.LINE_HEIGHT_MULTIPLIER), fontSizeBig, fontSizeSmall, fontSizeSmall / 4, vertical ? HorizontalAlignment.RIGHT : HorizontalAlignment.CENTER);
+
+					int stationNameX = x;
+					int adjustedStationNameY = stationNameY;
+					if (showRailwayIcon) {
+						final RouteMapStationNameLayout.Layout layout = vertical ? RouteMapStationNameLayout.getVertical(nativeImage.getWidth(), nativeImage.getHeight(), x, stationNameY, dimensions[0], dimensions[1], railwayIconSize, railwayIconGap) : RouteMapStationNameLayout.getHorizontal(nativeImage.getWidth(), nativeImage.getHeight(), x, stationNameY, dimensions[0], dimensions[1], railwayIconSize, railwayIconGap, textBelow);
+						stationNameX = layout.getTextX();
+						adjustedStationNameY = layout.getTextY();
+						drawResource(nativeImage, RAILWAY_INTERCHANGE_RESOURCE, layout.getIconX(), layout.getIconY(), railwayIconSize, railwayIconSize, false, 0, 1, passed ? ARGB_LIGHT_GRAY : RAILWAY_INTERCHANGE_COLOR, false);
+					}
+					drawString(nativeImage, pixels, stationNameX, adjustedStationNameY, dimensions, HorizontalAlignment.CENTER, textBelow ? VerticalAlignment.TOP : VerticalAlignment.BOTTOM, currentStation ? ARGB_BLACK : 0, passed ? ARGB_LIGHT_GRAY : currentStation ? ARGB_WHITE : ARGB_BLACK, vertical);
 				}));
 
 				if (transparentWhite) {
@@ -874,12 +895,14 @@ public class RouteMapGenerator implements IGui {
 		private final int stationOffset;
 		private final IntArrayList interchangeColors;
 		private final ObjectArrayList<String> interchangeNames;
+		private final boolean hasRailwayInterchange;
 
-		private StationPositionGrouped(StationPosition stationPosition, int stationOffset, IntArrayList interchangeColors, ObjectArrayList<String> interchangeNames) {
+		private StationPositionGrouped(StationPosition stationPosition, int stationOffset, IntArrayList interchangeColors, ObjectArrayList<String> interchangeNames, boolean hasRailwayInterchange) {
 			this.stationPosition = stationPosition;
 			this.stationOffset = stationOffset;
 			this.interchangeColors = interchangeColors;
 			this.interchangeNames = interchangeNames;
+			this.hasRailwayInterchange = hasRailwayInterchange;
 		}
 	}
 }

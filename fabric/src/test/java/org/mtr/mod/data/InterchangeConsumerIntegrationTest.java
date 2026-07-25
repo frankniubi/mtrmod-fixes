@@ -21,7 +21,11 @@ public final class InterchangeConsumerIntegrationTest {
 	@Test
 	public void routeMapUsesTypedEntriesAndRouteIdExclusions() throws Exception {
 		final String source = readMainSource("org", "mtr", "mod", "client", "RouteMapGenerator.java");
-		Assertions.assertTrue(source.contains("InterchangeRouteDisplay.flattenForRouteMap"));
+		Assertions.assertTrue(source.contains("InterchangeRouteDisplay.getRouteMapDisplay"));
+		Assertions.assertTrue(source.contains("routeMapDisplay.hasRailwayInterchange()"));
+		Assertions.assertTrue(source.contains("RouteMapStationNameLayout"));
+		Assertions.assertTrue(source.contains("RAILWAY_INTERCHANGE_RESOURCE"));
+		Assertions.assertFalse(source.contains("InterchangeRouteDisplay.flattenForRouteMap"));
 		Assertions.assertFalse(source.contains("InterchangeRouteDisplay.deduplicateForBroadcast"));
 		Assertions.assertTrue(source.contains("excludedRouteIds.add"));
 		Assertions.assertFalse(source.contains("colors.contains(color)"), "same-colored routes must be filtered by route ID, not color");

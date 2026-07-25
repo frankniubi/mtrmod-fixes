@@ -83,36 +83,6 @@ public final class InterchangeRouteDisplay {
 		return deduplicatedGroups;
 	}
 
-	public static ObjectArrayList<Entry> flattenForRouteMap(ObjectArrayList<StationGroup> stationGroups) {
-		final ObjectArrayList<Entry> entries = new ObjectArrayList<>();
-		final LongAVLTreeSet addedNormalRouteIds = new LongAVLTreeSet();
-		final LongAVLTreeSet addedAirportStationIds = new LongAVLTreeSet();
-		boolean addedRailway = false;
-		for (final StationGroup stationGroup : stationGroups) {
-			for (final Entry entry : stationGroup.entries) {
-				switch (entry.category) {
-					case AIRPORT:
-						if (addedAirportStationIds.add(entry.stationId)) {
-							entries.add(entry);
-						}
-						break;
-					case RAILWAY:
-						if (!addedRailway) {
-							entries.add(entry);
-							addedRailway = true;
-						}
-						break;
-					default:
-						if (addedNormalRouteIds.add(entry.sourceRouteId)) {
-							entries.add(entry);
-						}
-						break;
-				}
-			}
-		}
-		return entries;
-	}
-
 	public static RouteMapDisplay getRouteMapDisplay(ObjectArrayList<StationGroup> stationGroups) {
 		final ObjectArrayList<Entry> entries = new ObjectArrayList<>();
 		final LongAVLTreeSet addedNormalRouteIds = new LongAVLTreeSet();
