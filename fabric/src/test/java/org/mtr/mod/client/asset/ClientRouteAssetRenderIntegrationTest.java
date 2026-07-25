@@ -59,6 +59,28 @@ public final class ClientRouteAssetRenderIntegrationTest {
 		);
 	}
 
+	@Test
+	public void clientSignedIdsDoNotUseNegativeSentinels() throws IOException {
+		final String adapter = readSource("client", "RouteAssetClientSnapshotAdapter.java");
+		final String manager = readSource("client", "asset", "ClientRouteAssetManager.java");
+
+		Assertions.assertFalse(adapter.contains("found < 0"), "negative route and platform IDs are valid in MTR Core");
+		Assertions.assertFalse(manager.contains("nearestPlatformId[0] < 0"), "negative platform IDs must still be prewarmed");
+	}
+
+	@Test
+	public void changedClientDataLazilyInvalidatesRouteDependencies() throws IOException {
+		final String source = readSource("packet", "PacketRequestData.java");
+		final int write = source.indexOf("new DataResponse(jsonReader, clientData).write();");
+		final int invalidate = source.indexOf("DynamicTextureCache.instance.onRouteDataChanged();", write);
+
+		Assertions.assertTrue(write >= 0 && invalidate > write);
+		Assertions.assertTrue(source.contains("iterateReaderArray(\"stations\""));
+		Assertions.assertTrue(source.contains("iterateReaderArray(\"platforms\""));
+		Assertions.assertTrue(source.contains("iterateReaderArray(\"simplifiedRoutes\""));
+		Assertions.assertTrue(source.contains("routeDataReceived[0] ||"), "same-sized route edits must not retain stale textures");
+	}
+
 	private static String readSource(String... pathParts) throws IOException {
 		Path path = Path.of("src", "main", "java", "org", "mtr", "mod");
 		for (final String pathPart : pathParts) path = path.resolve(pathPart);

@@ -15,6 +15,16 @@ public final class RouteAssetCanonicalKeyFactoryTest {
 	}
 
 	@Test
+	public void signedCoreIdsRoundTripThroughCanonicalKeys() {
+		final long platformId = Long.MIN_VALUE + 17;
+		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", platformId, 2, "NORMAL", true, false, 37F / 22, false);
+
+		Assertions.assertEquals(platformId, key.getPrimaryId());
+		Assertions.assertEquals(key, RouteAssetKey.parse(key.toString()));
+		Assertions.assertEquals(key, key.withPrimaryId(platformId));
+	}
+
+	@Test
 	public void everyPixelAffectingArrowInputChangesTheKey() {
 		final RouteAssetKey base = arrow(false, false, RouteAssetTextRasterizer.Alignment.LEFT, false, 0.125F, 2, 0xFF010203, 0xFF040506, 0);
 		Assertions.assertNotEquals(base, arrow(true, false, RouteAssetTextRasterizer.Alignment.LEFT, false, 0.125F, 2, 0xFF010203, 0xFF040506, 0));

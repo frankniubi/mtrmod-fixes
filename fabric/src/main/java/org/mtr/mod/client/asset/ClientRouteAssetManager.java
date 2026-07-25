@@ -777,10 +777,14 @@ public final class ClientRouteAssetManager {
 			final ClientWorld clientWorld = minecraftClient.getWorldMapped();
 			if (clientWorld == null) return;
 			final String dimension = Init.getWorldId(new World(clientWorld.data));
-			final long[] nearestPlatformId = {-1};
+			final long[] nearestPlatformId = {0};
+			final boolean[] foundPlatform = {false};
 			final long radiusBlocks = Math.max(16L, (long) MinecraftClientHelper.getRenderDistance() * 16);
-			InitClient.findClosePlatform(minecraftClient.getGameRendererMapped().getCamera().getBlockPos(), (int) Math.min(Integer.MAX_VALUE, radiusBlocks), platform -> nearestPlatformId[0] = platform.getId());
-			if (nearestPlatformId[0] < 0) return;
+			InitClient.findClosePlatform(minecraftClient.getGameRendererMapped().getCamera().getBlockPos(), (int) Math.min(Integer.MAX_VALUE, radiusBlocks), platform -> {
+				nearestPlatformId[0] = platform.getId();
+				foundPlatform[0] = true;
+			});
+			if (!foundPlatform[0]) return;
 			int requested = 0;
 			for (final RouteAssetKey key : prewarmIndex.find(dimension, nearestPlatformId[0])) {
 				if (requested++ >= MAX_NEARBY_PREWARM_ASSETS) break;

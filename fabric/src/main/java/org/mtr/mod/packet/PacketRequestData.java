@@ -30,11 +30,14 @@ public final class PacketRequestData extends PacketRequestResponseBase {
 	protected void runClientInbound(JsonReader jsonReader) {
 		final MinecraftClientData clientData = MinecraftClientData.getInstance();
 		final int simplifiedRouteCount = clientData.simplifiedRoutes.size();
-		final int routeCount = clientData.routeIdMap.size();
 		final int platformCount = clientData.platformIdMap.size();
 		final int stationCount = clientData.stationIdMap.size();
+		final boolean[] routeDataReceived = {false};
+		jsonReader.iterateReaderArray("stations", () -> { }, ignored -> routeDataReceived[0] = true);
+		jsonReader.iterateReaderArray("platforms", () -> { }, ignored -> routeDataReceived[0] = true);
+		jsonReader.iterateReaderArray("simplifiedRoutes", () -> { }, ignored -> routeDataReceived[0] = true);
 		new DataResponse(jsonReader, clientData).write();
-		if (simplifiedRouteCount != clientData.simplifiedRoutes.size() || routeCount != clientData.routeIdMap.size() || platformCount != clientData.platformIdMap.size() || stationCount != clientData.stationIdMap.size()) {
+		if (routeDataReceived[0] || simplifiedRouteCount != clientData.simplifiedRoutes.size() || platformCount != clientData.platformIdMap.size() || stationCount != clientData.stationIdMap.size()) {
 			DynamicTextureCache.instance.onRouteDataChanged();
 		}
 	}

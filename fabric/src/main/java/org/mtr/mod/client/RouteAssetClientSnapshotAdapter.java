@@ -22,9 +22,9 @@ public final class RouteAssetClientSnapshotAdapter {
 		final MinecraftClientData data = MinecraftClientData.getInstance();
 		final long platformId;
 		if (key.getType() == org.mtr.mod.route.RouteAssetType.ROUTE_SQUARE) {
-			long found = -1;
+			Long found = null;
 			for (final SimplifiedRoute route : data.simplifiedRoutes) if (route.getId() == key.getPrimaryId() && !route.getPlatforms().isEmpty()) { found = route.getPlatforms().get(0).getPlatformId(); break; }
-			if (found < 0) return Optional.empty();
+			if (found == null) return Optional.empty();
 			platformId = found;
 		} else platformId = key.getPrimaryId();
 		final RouteAssetDataMirror.PlatformSnapshot platform = RouteAssetDataMirror.materializePlatform(data, platformId, MinecraftClientData::getInterchangeStation);

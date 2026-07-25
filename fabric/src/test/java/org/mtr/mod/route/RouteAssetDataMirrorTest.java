@@ -3,10 +3,18 @@ package org.mtr.mod.route;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mtr.core.data.ClientData;
+import org.mtr.core.data.Platform;
+import org.mtr.core.data.Position;
+import org.mtr.core.data.Route;
+import org.mtr.core.data.RoutePlatformData;
+import org.mtr.core.data.SimplifiedRoute;
+import org.mtr.core.data.Station;
+import org.mtr.core.data.TransportMode;
 import org.mtr.core.operation.DeleteDataResponse;
 import org.mtr.core.operation.ListDataResponse;
 import org.mtr.core.operation.UpdateDataResponse;
 import org.mtr.core.tool.Utilities;
+import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
 
 import java.util.List;
 import java.util.Map;
@@ -41,6 +49,69 @@ public final class RouteAssetDataMirrorTest {
 		Assertions.assertTrue(mirror.applyUpdateJson("minecraft/overworld", Utilities.getJsonObjectFromData(new UpdateDataResponse(new ClientData()))));
 		Assertions.assertTrue(mirror.applyDeleteJson("minecraft/overworld", Utilities.getJsonObjectFromData(new DeleteDataResponse())));
 		Assertions.assertTrue(mirror.currentSnapshot().getDimensions().get("minecraft/overworld").getEpoch() >= initialEpoch + 2);
+	}
+
+	@Test
+	public void fullListDataRoutesBecomeRenderOccurrences() {
+		final ClientData initialData = new ClientData();
+		Station firstStation;
+		do firstStation = new Station(initialData); while (firstStation.getId() < 0);
+		firstStation.setName("First");
+		firstStation.setCorners(new Position(0, 0, 0), new Position(5, 5, 5));
+		Station secondStation;
+		do secondStation = new Station(initialData); while (secondStation.getId() < 0);
+		secondStation.setName("Second");
+		secondStation.setCorners(new Position(10, 0, 0), new Position(15, 5, 5));
+		Platform first;
+		do first = new Platform(new Position(0, 0, 0), new Position(1, 0, 0), TransportMode.TRAIN, initialData); while (first.getId() < 0);
+		Platform second;
+		do second = new Platform(new Position(10, 0, 0), new Position(11, 0, 0), TransportMode.TRAIN, initialData); while (second.getId() < 0);
+		firstStation.savedRails.add(first);
+		secondStation.savedRails.add(second);
+		initialData.stations.add(firstStation);
+		initialData.stations.add(secondStation);
+		initialData.platforms.add(first);
+		initialData.platforms.add(second);
+		initialData.sync();
+
+		Route route;
+		do route = new Route(TransportMode.TRAIN, initialData); while (route.getId() < 0);
+		route.setName("Server Route");
+		route.setColor(0x14755E);
+		route.getRoutePlatforms().add(new RoutePlatformData(first.getId()));
+		route.getRoutePlatforms().add(new RoutePlatformData(second.getId()));
+		initialData.routes.add(route);
+		initialData.sync();
+		Assertions.assertTrue(initialData.simplifiedRoutes.isEmpty(), "LIST_DATA carries full routes, not client simplified routes");
+
+		final RouteAssetDataMirror mirror = new RouteAssetDataMirror();
+		final long generation = mirror.beginGeneration(Set.of("minecraft/overworld"));
+		Assertions.assertTrue(mirror.acceptListJson(generation, "minecraft/overworld", Utilities.getJsonObjectFromData(new ListDataResponse(initialData).list())));
+		final RouteAssetDataMirror.DimensionSnapshot dimension = mirror.snapshot(generation).orElseThrow().getDimensions().get("minecraft/overworld");
+
+		Assertions.assertEquals(1, dimension.getPlatforms().get(first.getId()).getRoutes().size());
+		Assertions.assertEquals(route.getId(), dimension.getPlatforms().get(first.getId()).getRoutes().get(0).getId());
+	}
+
+	@Test
+	public void serverMaterializationIgnoresPartialClientRouteSubsets() {
+		final FullRouteFixture fixture = fullRouteFixture(0x14755E, 0x7D2E68);
+		final ObjectArrayList<SimplifiedRoute> partialRoutes = new ObjectArrayList<>();
+		SimplifiedRoute.addToList(partialRoutes, fixture.routes.get(0));
+		fixture.data.simplifiedRoutes.addAll(partialRoutes);
+
+		final RouteAssetDataMirror.DimensionSnapshot dimension = RouteAssetDataMirror.materializeDimension("minecraft/overworld", fixture.data, 1, fixture.data.stationIdMap::get);
+		final Set<Long> renderedRouteIds = dimension.getPlatforms().get(fixture.firstPlatform.getId()).getRoutes().stream().map(RouteAssetRenderSnapshot.Route::getId).collect(Collectors.toSet());
+
+		Assertions.assertEquals(fixture.routes.stream().map(Route::getId).collect(Collectors.toSet()), renderedRouteIds);
+	}
+
+	@Test
+	public void serverDerivedRoutesUseTheOriginalClientSortOrder() {
+		final FullRouteFixture fixture = fullRouteFixture(0x100001, 0x200002, 0x100001);
+		final RouteAssetDataMirror.DimensionSnapshot dimension = RouteAssetDataMirror.materializeDimension("minecraft/overworld", fixture.data, 1, fixture.data.stationIdMap::get);
+
+		Assertions.assertEquals(List.of(0x100001, 0x100001, 0x200002), dimension.getPlatforms().get(fixture.firstPlatform.getId()).getRoutes().stream().map(RouteAssetRenderSnapshot.Route::getColor).collect(Collectors.toList()));
 	}
 
 	@Test
@@ -167,6 +238,21 @@ public final class RouteAssetDataMirrorTest {
 		Assertions.assertTrue(platform.getRoutes().get(0).getStations().get(0).getInterchange().hasAirport());
 	}
 
+	@Test
+	public void signedCoreIdsRemainOpaqueInRenderSnapshots() {
+		final long platformId = Long.MIN_VALUE + 101;
+		final long stationId = Long.MIN_VALUE + 102;
+		final long routeId = Long.MIN_VALUE + 103;
+		final RouteAssetRenderSnapshot.Station station = new RouteAssetRenderSnapshot.Station(platformId, stationId, "Signed", "", RouteAssetRenderSnapshot.Interchange.empty());
+		final RouteAssetRenderSnapshot.Route route = new RouteAssetRenderSnapshot.Route(routeId, "Signed Route", 0x14755E, RouteAssetRenderSnapshot.CircularState.NONE, RouteAssetRenderSnapshot.RouteKind.METRO, 0, List.of(station));
+		final RouteAssetDataMirror.PlatformSnapshot platform = new RouteAssetDataMirror.PlatformSnapshot(platformId, "Signed Platform", List.of(route));
+		final RouteAssetDataMirror.Snapshot snapshot = snapshot(dimension("minecraft/overworld", platform));
+
+		Assertions.assertEquals(platformId, platform.getId());
+		Assertions.assertEquals(stationId, platform.getRoutes().get(0).getStations().get(0).getStationId());
+		Assertions.assertTrue(new RouteAssetDependencyCatalog().enumerateFixed(snapshot, "a".repeat(64), "NORMAL").keySet().stream().anyMatch(key -> key.getPrimaryId() == platformId));
+	}
+
 	private static RouteAssetDataMirror.Snapshot snapshot(RouteAssetDataMirror.DimensionSnapshot dimension) {
 		return new RouteAssetDataMirror.Snapshot(1, Map.of(dimension.getDimension(), dimension));
 	}
@@ -182,5 +268,48 @@ public final class RouteAssetDataMirrorTest {
 		);
 		final RouteAssetRenderSnapshot.Route route = new RouteAssetRenderSnapshot.Route(id * 100, "R" + id, 0x14755E, stations);
 		return new RouteAssetDataMirror.PlatformSnapshot(id, name, List.of(route));
+	}
+
+	private static FullRouteFixture fullRouteFixture(int... colors) {
+		final ClientData data = new ClientData();
+		final Station firstStation = new Station(data);
+		firstStation.setName("First");
+		firstStation.setCorners(new Position(0, 0, 0), new Position(5, 5, 5));
+		final Station secondStation = new Station(data);
+		secondStation.setName("Second");
+		secondStation.setCorners(new Position(10, 0, 0), new Position(15, 5, 5));
+		final Platform firstPlatform = new Platform(new Position(0, 0, 0), new Position(1, 0, 0), TransportMode.TRAIN, data);
+		final Platform secondPlatform = new Platform(new Position(10, 0, 0), new Position(11, 0, 0), TransportMode.TRAIN, data);
+		firstStation.savedRails.add(firstPlatform);
+		secondStation.savedRails.add(secondPlatform);
+		data.stations.add(firstStation);
+		data.stations.add(secondStation);
+		data.platforms.add(firstPlatform);
+		data.platforms.add(secondPlatform);
+		data.sync();
+		final List<Route> routes = new java.util.ArrayList<>();
+		for (int index = 0; index < colors.length; index++) {
+			final Route route = new Route(TransportMode.TRAIN, data);
+			route.setName("Route " + index);
+			route.setColor(colors[index]);
+			route.getRoutePlatforms().add(new RoutePlatformData(firstPlatform.getId()));
+			route.getRoutePlatforms().add(new RoutePlatformData(secondPlatform.getId()));
+			data.routes.add(route);
+			routes.add(route);
+		}
+		data.sync();
+		return new FullRouteFixture(data, firstPlatform, routes);
+	}
+
+	private static final class FullRouteFixture {
+		private final ClientData data;
+		private final Platform firstPlatform;
+		private final List<Route> routes;
+
+		private FullRouteFixture(ClientData data, Platform firstPlatform, List<Route> routes) {
+			this.data = data;
+			this.firstPlatform = firstPlatform;
+			this.routes = routes;
+		}
 	}
 }

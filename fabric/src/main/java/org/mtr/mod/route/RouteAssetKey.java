@@ -21,9 +21,6 @@ public final class RouteAssetKey implements Comparable<RouteAssetKey> {
 		if (!DIMENSION_PATTERN.matcher(this.dimension).matches() || this.dimension.startsWith("/") || this.dimension.contains("..")) {
 			throw new IllegalArgumentException("Invalid route asset dimension");
 		}
-		if (primaryId < 0) {
-			throw new IllegalArgumentException("Route asset primary ID cannot be negative");
-		}
 		this.primaryId = primaryId;
 		canonicalValue = this.dimension + '|' + type.name() + '|' + primaryId + '|' + variant.getResolution() + '|' + variant.getLanguage() + '|' + variant.getCanonicalParameters();
 		if (canonicalValue.getBytes(StandardCharsets.UTF_8).length > RouteAssetProtocol.MAX_KEY_UTF8_BYTES) {

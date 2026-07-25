@@ -179,7 +179,6 @@ public final class RouteAssetRenderSnapshot {
 		}
 
 		private Station(long platformId, long stationId, String name, String destination, Interchange interchange, boolean passed, boolean current) {
-			if (platformId < 0 || stationId < 0) throw new IllegalArgumentException("Station and platform IDs cannot be negative");
 			this.platformId = platformId;
 			this.stationId = stationId;
 			this.name = Objects.requireNonNull(name, "name");
@@ -211,7 +210,7 @@ public final class RouteAssetRenderSnapshot {
 		private final List<Station> stations;
 
 		public Route(long id, String name, int color, CircularState circularState, RouteKind routeKind, int currentStationIndex, List<Station> stations) {
-			if (id < 0 || stations.isEmpty() || stations.size() > 4096 || currentStationIndex < 0 || currentStationIndex >= stations.size()) throw new IllegalArgumentException("Invalid route occurrence snapshot");
+			if (stations.isEmpty() || stations.size() > 4096 || currentStationIndex < 0 || currentStationIndex >= stations.size()) throw new IllegalArgumentException("Invalid route occurrence snapshot");
 			this.id = id;
 			this.name = Objects.requireNonNull(name, "name");
 			this.color = color & 0xFFFFFF;
