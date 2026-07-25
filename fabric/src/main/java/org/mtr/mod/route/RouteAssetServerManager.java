@@ -12,11 +12,15 @@ import org.mtr.mapping.holder.ServerPlayerEntity;
 import org.mtr.mapping.holder.World;
 import org.mtr.mapping.mapper.MinecraftServerHelper;
 import org.mtr.mod.Init;
+import org.mtr.mod.packet.PacketRouteAssetChunk;
+import org.mtr.mod.packet.PacketRouteAssetChunkRequest;
+import org.mtr.mod.packet.PacketRouteAssetRefresh;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -26,7 +30,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -48,18 +54,27 @@ public final class RouteAssetServerManager implements AutoCloseable {
 	private final ExecutorService workers;
 	private final Object stateLock = new Object();
 	private final Set<String> generatedLanguages = new HashSet<>();
-	private final TreeMap<RouteAssetKey, RouteAssetDependencyCatalog.Entry> observedEntries = new TreeMap<>();
+	private final Set<RouteAssetKey> observedKeys = new TreeSet<>();
 	private final Map<RouteAssetKey, String> dependencyFingerprints = new HashMap<>();
 	private final Map<UUID, RouteAssetHello> playerCapabilities = new HashMap<>();
+	private final Map<UUID, ServerPlayerEntity> connectedPlayers = new HashMap<>();
+	private final Set<String> publishedLanguages = new HashSet<>();
+	private final RefreshNotificationSender refreshNotificationSender;
 	private final Map<UUID, RateWindow> observedRateWindows = new HashMap<>();
+	private final Map<UUID, PacketFallbackAuthorization> packetFallbackAuthorizations = new HashMap<>();
+	private final Map<UUID, PacketFallbackConnection> packetFallbackConnections = new HashMap<>();
 	private volatile int originPort;
+	private volatile MinecraftServer activeServer;
 	private volatile boolean closed;
 	private boolean coordinatorScheduled;
 	private long desiredGeneration;
 	private GenerationRequest pending;
 	private String fullRefreshCause = "refresh";
+	private long nextPeriodicRefreshMillis;
 
 	private static final AtomicInteger THREAD_COUNTER = new AtomicInteger();
+	private static final int MAX_TRACKED_PACKET_FALLBACK_TRANSFERS = 1024;
+	private static final long PERIODIC_REFRESH_MILLIS = 60_000;
 	private static final SerializedDataBase EMPTY_REQUEST = new SerializedDataBase() {
 		@Override public void updateData(ReaderBase readerBase) { }
 		@Override public void serializeData(WriterBase writerBase) { }
@@ -70,6 +85,10 @@ public final class RouteAssetServerManager implements AutoCloseable {
 	}
 
 	public RouteAssetServerManager(RouteAssetRepository repository, RouteAssetDataMirror mirror, RouteAssetDependencyCatalog catalog, RenderFunction renderer, int generationThreads, String resourceFingerprint, RouteAssetMetrics metrics) {
+		this(repository, mirror, catalog, renderer, generationThreads, resourceFingerprint, metrics, null);
+	}
+
+	public RouteAssetServerManager(RouteAssetRepository repository, RouteAssetDataMirror mirror, RouteAssetDependencyCatalog catalog, RenderFunction renderer, int generationThreads, String resourceFingerprint, RouteAssetMetrics metrics, RefreshNotificationSender refreshNotificationSender) {
 		this.repository = Objects.requireNonNull(repository, "repository");
 		this.mirror = Objects.requireNonNull(mirror, "mirror");
 		this.catalog = Objects.requireNonNull(catalog, "catalog");
@@ -77,16 +96,34 @@ public final class RouteAssetServerManager implements AutoCloseable {
 		this.generationThreads = Math.max(1, Math.min(4, generationThreads));
 		this.resourceFingerprint = RouteAssetHash.requireValid(resourceFingerprint);
 		this.metrics = Objects.requireNonNull(metrics, "metrics");
+		this.refreshNotificationSender = refreshNotificationSender == null ? this::sendRefreshNotification : refreshNotificationSender;
 		coordinator = Executors.newSingleThreadExecutor(threadFactory("mtr-route-assets-coordinator-"));
 		workers = Executors.newFixedThreadPool(this.generationThreads, threadFactory("mtr-route-assets-worker-"));
 		generatedLanguages.add("NORMAL");
+		try {
+			dependencyFingerprints.putAll(repository.loadDependencyFingerprints());
+			final RouteAssetRepository.RouteAssetHead head = repository.loadHead();
+			if (!head.getRevision().isEmpty()) repository.loadManifest(head.getRevision()).getEntries().keySet().forEach(key -> publishedLanguages.add(key.getVariant().getLanguage()));
+			generatedLanguages.addAll(publishedLanguages);
+		} catch (IOException exception) {
+			Init.LOGGER.warn("Unable to load persisted route texture dependency fingerprints", exception);
+		}
 	}
 
 	public void start(MinecraftServer server) {
+		activeServer = Objects.requireNonNull(server, "server");
+		nextPeriodicRefreshMillis = saturatingAdd(System.currentTimeMillis(), PERIODIC_REFRESH_MILLIS);
 		requestRefresh(server, "startup");
 	}
 
-	public void tick(MinecraftServer server) {
+	public void tick() {
+		final MinecraftServer server = activeServer;
+		if (server == null) return;
+		final long now = System.currentTimeMillis();
+		if (now >= nextPeriodicRefreshMillis) {
+			nextPeriodicRefreshMillis = saturatingAdd(now, PERIODIC_REFRESH_MILLIS);
+			requestRefresh(server, "periodic-core-poll");
+		}
 	}
 
 	public void requestRefresh(MinecraftServer server, String cause) {
@@ -120,9 +157,20 @@ public final class RouteAssetServerManager implements AutoCloseable {
 	}
 
 	public void handleHello(ServerPlayerEntity player, RouteAssetHello hello) {
-		final UUID uuid = player.getUuid();
+		handleHello(player.getUuid(), hello, player);
+	}
+
+	private void handleHello(UUID uuid, RouteAssetHello hello) {
+		handleHello(uuid, hello, null);
+	}
+
+	private void handleHello(UUID uuid, RouteAssetHello hello, ServerPlayerEntity player) {
 		synchronized (stateLock) {
 			playerCapabilities.put(uuid, hello);
+			if (compatible(hello) && player != null) connectedPlayers.put(uuid, player);
+			else if (!compatible(hello)) connectedPlayers.remove(uuid);
+			packetFallbackAuthorizations.remove(uuid);
+			packetFallbackConnections.computeIfAbsent(uuid, ignored -> new PacketFallbackConnection()).advanceGeneration(hello.getRequestNonce());
 			if (compatible(hello) && generatedLanguages.add(hello.getLanguage())) {
 				submitSnapshot(mirror.currentSnapshot(), "language:" + hello.getLanguage());
 			}
@@ -137,9 +185,9 @@ public final class RouteAssetServerManager implements AutoCloseable {
 			final long now = System.currentTimeMillis();
 			final RateWindow rateWindow = observedRateWindows.computeIfAbsent(uuid, ignored -> new RateWindow(now));
 			for (final RouteAssetKey key : keys) {
-				if (!rateWindow.tryAcquire(now) || observedEntries.size() >= RouteAssetProtocol.MAX_QUEUED_OBSERVED_KEYS) break;
+				if (!rateWindow.tryAcquire(now) || observedKeys.size() >= RouteAssetProtocol.MAX_QUEUED_OBSERVED_KEYS) break;
 				final java.util.Optional<RouteAssetDependencyCatalog.Entry> entry = catalog.resolveObserved(key, snapshot, resourceFingerprint);
-				if (entry.isPresent() && observedEntries.put(key, entry.get()) == null) changed = true;
+				if (entry.isPresent() && observedKeys.add(key)) changed = true;
 			}
 		}
 		if (changed) submitSnapshot(snapshot, "observed:" + uuid);
@@ -148,7 +196,10 @@ public final class RouteAssetServerManager implements AutoCloseable {
 	public void onPlayerDisconnect(UUID uuid) {
 		synchronized (stateLock) {
 			playerCapabilities.remove(uuid);
+			connectedPlayers.remove(uuid);
 			observedRateWindows.remove(uuid);
+			packetFallbackAuthorizations.remove(uuid);
+			packetFallbackConnections.remove(uuid);
 		}
 	}
 
@@ -181,9 +232,71 @@ public final class RouteAssetServerManager implements AutoCloseable {
 
 	public RouteAssetNegotiation negotiate(RouteAssetHello hello) throws IOException {
 		if (!compatible(hello)) return new RouteAssetNegotiation(RouteAssetNegotiation.Mode.FALLBACK, RouteAssetProtocol.RENDERER_VERSION, "", "", "", originPort);
+		synchronized (stateLock) {
+			if (!publishedLanguages.contains(hello.getLanguage())) return new RouteAssetNegotiation(RouteAssetNegotiation.Mode.FALLBACK, RouteAssetProtocol.RENDERER_VERSION, "", "", "", originPort);
+		}
 		final RouteAssetVariant variant = RouteAssetVariant.parse(Math.min(3, hello.getResolution()), hello.getLanguage(), "align=LEFT");
 		final RouteAssetNegotiation negotiation = repository.negotiate(hello.getCachedRevision(), variant);
 		return new RouteAssetNegotiation(negotiation.getMode(), negotiation.getRendererVersion(), negotiation.getAuthoritativeRevision(), negotiation.getDocumentHash(), negotiation.getPublicBaseUrl(), originPort);
+	}
+
+	public RouteAssetNegotiation negotiate(UUID playerId, RouteAssetHello hello) throws IOException {
+		Objects.requireNonNull(playerId, "playerId");
+		Objects.requireNonNull(hello, "hello");
+		handleHello(playerId, hello);
+		return authorizePacketFallback(playerId, hello, negotiate(hello));
+	}
+
+	private RouteAssetNegotiation authorizePacketFallback(UUID playerId, RouteAssetHello hello, RouteAssetNegotiation negotiation) throws IOException {
+		if (!hello.isHttpSupported() || !hello.isPacketFallbackSupported() || negotiation.getMode() == RouteAssetNegotiation.Mode.FALLBACK || negotiation.getMode() == RouteAssetNegotiation.Mode.DISABLED) return negotiation;
+		final RouteAssetManifest manifest = repository.loadManifest(negotiation.getAuthoritativeRevision());
+		final Set<String> activeHashes = new HashSet<>();
+		for (final Map.Entry<RouteAssetKey, RouteAssetManifest.Entry> entry : manifest.getEntries().entrySet()) {
+			if (entry.getKey().getVariant().getResolution() == hello.getResolution() && entry.getKey().getVariant().getLanguage().equals(hello.getLanguage())) activeHashes.add(entry.getValue().getHash());
+		}
+		final PacketFallbackAuthorization authorization = new PacketFallbackAuthorization(hello.getRequestNonce(), negotiation.getDocumentHash(), activeHashes);
+		synchronized (stateLock) {
+			if (hello.equals(playerCapabilities.get(playerId))) packetFallbackAuthorizations.put(playerId, authorization);
+		}
+		return negotiation;
+	}
+
+	public RouteAssetNegotiation negotiate(ServerPlayerEntity player, RouteAssetHello hello) throws IOException {
+		Objects.requireNonNull(player, "player");
+		Objects.requireNonNull(hello, "hello");
+		handleHello(player, hello);
+		return authorizePacketFallback(player.getUuid(), hello, negotiate(hello));
+	}
+
+	public List<PacketRouteAssetChunk.ChunkPayload> handlePacketFallbackRequest(UUID playerId, PacketRouteAssetChunkRequest.RequestPayload request) {
+		Objects.requireNonNull(playerId, "playerId");
+		Objects.requireNonNull(request, "request");
+		final PacketFallbackAuthorization authorization;
+		synchronized (stateLock) {
+			authorization = packetFallbackAuthorizations.get(playerId);
+			if (authorization == null || !authorization.allows(request)) return Collections.emptyList();
+		}
+		try {
+			final RouteAssetCas.MediaType mediaType = request.getObjectType() == PacketRouteAssetChunkRequest.ObjectType.PNG ? RouteAssetCas.MediaType.PNG : RouteAssetCas.MediaType.JSON;
+			final RouteAssetCas cas = repository.getCas();
+			final String hash = request.getExpectedHash();
+			final Path candidate = cas.resolvePublicObject("v" + RouteAssetProtocol.RENDERER_VERSION, hash.substring(0, 2), hash, mediaType.getExtension());
+			if (!Files.isRegularFile(candidate)) return Collections.emptyList();
+			final long size = Files.size(candidate);
+			if (size <= 0 || size > RouteAssetProtocol.MAX_PACKET_FALLBACK_OBJECT_BYTES || request.getExpectedLength() >= 0 && request.getExpectedLength() != size) return Collections.emptyList();
+			final Path verified = cas.find(hash, mediaType).orElse(null);
+			if (verified == null) return Collections.emptyList();
+			final byte[] bytes = Files.readAllBytes(verified);
+			if (bytes.length != size || !RouteAssetHash.sha256(bytes).equals(hash)) return Collections.emptyList();
+			synchronized (stateLock) {
+				if (authorization != packetFallbackAuthorizations.get(playerId) || !authorization.allows(request)) return Collections.emptyList();
+				final PacketFallbackConnection connection = packetFallbackConnections.get(playerId);
+				if (connection == null || !connection.authorize(request, bytes.length, System.currentTimeMillis())) return Collections.emptyList();
+			}
+			return PacketRouteAssetChunk.split(request, bytes);
+		} catch (IOException | RuntimeException exception) {
+			return Collections.emptyList();
+		}
 	}
 
 	public void setOriginPort(int originPort) {
@@ -201,8 +314,11 @@ public final class RouteAssetServerManager implements AutoCloseable {
 		synchronized (stateLock) {
 			if (closed) return;
 			closed = true;
+			activeServer = null;
 			desiredGeneration++;
 			pending = null;
+			playerCapabilities.clear();
+			connectedPlayers.clear();
 			stateLock.notifyAll();
 		}
 		coordinator.shutdownNow();
@@ -213,6 +329,30 @@ public final class RouteAssetServerManager implements AutoCloseable {
 		} catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
 		}
+	}
+
+	private void notifyPublishedRevision(String revision) {
+		final List<RefreshTarget> targets = new ArrayList<>();
+		synchronized (stateLock) {
+			playerCapabilities.forEach((playerId, hello) -> {
+				if (compatible(hello)) targets.add(new RefreshTarget(playerId, hello.getRequestNonce()));
+			});
+		}
+		for (final RefreshTarget target : targets) refreshNotificationSender.send(target.playerId, new PacketRouteAssetRefresh.RefreshPayload(revision, target.connectionNonce));
+	}
+
+	private void sendRefreshNotification(UUID playerId, PacketRouteAssetRefresh.RefreshPayload payload) {
+		final MinecraftServer server = activeServer;
+		if (server == null) return;
+		server.execute(() -> {
+			final ServerPlayerEntity player;
+			synchronized (stateLock) {
+				final RouteAssetHello hello = playerCapabilities.get(playerId);
+				player = connectedPlayers.get(playerId);
+				if (closed || player == null || hello == null || hello.getRequestNonce() != payload.getConnectionNonce()) return;
+			}
+			Init.REGISTRY.sendPacketToClient(player, new PacketRouteAssetRefresh(payload));
+		});
 	}
 
 	private void drain() {
@@ -240,9 +380,9 @@ public final class RouteAssetServerManager implements AutoCloseable {
 				languages = new HashSet<>(generatedLanguages);
 			}
 			for (final String language : languages) entries.putAll(catalog.enumerateFixed(request.snapshot, resourceFingerprint, language));
-			synchronized (stateLock) {
-				entries.putAll(observedEntries);
-			}
+			final Set<RouteAssetKey> observed;
+			synchronized (stateLock) { observed = new TreeSet<>(observedKeys); }
+			for (final RouteAssetKey key : observed) catalog.resolveObserved(key, request.snapshot, resourceFingerprint).ifPresent(entry -> entries.put(key, entry));
 
 			final RouteAssetRepository.RouteAssetHead head = repository.loadHead();
 			final RouteAssetManifest previous = head.getRevision().isEmpty() ? RouteAssetManifest.builder().build() : repository.loadManifest(head.getRevision());
@@ -259,12 +399,30 @@ public final class RouteAssetServerManager implements AutoCloseable {
 					reused++;
 					metrics.reused();
 				} else {
-					futures.add(workers.submit(() -> render(entry)));
+					futures.add(workers.submit(() -> {
+						if (isStale(request.generation)) throw new CancellationException("Stale route asset generation");
+						return render(entry);
+					}));
 				}
 			}
 			long bytes = 0;
 			for (final Future<RenderedEntry> future : futures) {
-				final RenderedEntry rendered = future.get();
+				if (isStale(request.generation)) {
+					futures.forEach(pendingFuture -> pendingFuture.cancel(true));
+					metrics.cancelled();
+					return;
+				}
+				final RenderedEntry rendered;
+				try {
+					rendered = future.get();
+				} catch (ExecutionException exception) {
+					if (exception.getCause() instanceof CancellationException) {
+						futures.forEach(pendingFuture -> pendingFuture.cancel(true));
+						metrics.cancelled();
+						return;
+					}
+					throw exception;
+				}
 				bytes += rendered.bytes;
 				final RouteAssetManifest.Entry oldEntry = previous.getEntries().get(rendered.key);
 				if (oldEntry != null && oldEntry.getHash().equals(rendered.hash)) {
@@ -285,6 +443,7 @@ public final class RouteAssetServerManager implements AutoCloseable {
 					dependencyFingerprints.clear();
 					dependencyFingerprints.putAll(nextDependencies);
 				}
+				persistDependencyFingerprints(nextDependencies);
 				return;
 			}
 			final RouteAssetManifestDiff diff = RouteAssetManifestDiff.between(previous.getRevision(), previous, next);
@@ -295,17 +454,31 @@ public final class RouteAssetServerManager implements AutoCloseable {
 			synchronized (stateLock) {
 				dependencyFingerprints.clear();
 				dependencyFingerprints.putAll(nextDependencies);
+				publishedLanguages.clear();
+				publishedLanguages.addAll(languages);
 			}
+			persistDependencyFingerprints(nextDependencies);
+			notifyPublishedRevision(next.getRevision());
 			final int[] counts = count(diff);
 			final RouteAssetMetrics.Summary summary = new RouteAssetMetrics.Summary(next.getRevision(), counts[0], counts[1], counts[2], counts[3], System.currentTimeMillis() - started, bytes, reused, originPort);
 			metrics.summary(summary);
 			Init.LOGGER.info("route_texture side=server event=revision revision={} add={} modify={} delete={} move={} duration_ms={} queue={} cancelled={} failed={} bytes={} reused={} cas_bytes={} origin_port={}", next.getRevision(), counts[0], counts[1], counts[2], counts[3], summary.getDurationMillis(), pendingCount(), metrics.getCancelledGenerations(), metrics.getFailedGenerations(), bytes, reused, 0, originPort);
+		} catch (CancellationException exception) {
+			metrics.cancelled();
 		} catch (InterruptedException exception) {
 			Thread.currentThread().interrupt();
 			metrics.cancelled();
 		} catch (ExecutionException | IOException | RuntimeException exception) {
 			metrics.failed();
 			Init.LOGGER.warn("route_texture side=server event=generation_failed generation={} cause={}", request.generation, exception.toString());
+		}
+	}
+
+	private void persistDependencyFingerprints(Map<RouteAssetKey, String> fingerprints) {
+		try {
+			repository.saveDependencyFingerprints(fingerprints);
+		} catch (IOException | RuntimeException exception) {
+			Init.LOGGER.warn("Unable to persist route texture dependency fingerprints", exception);
 		}
 	}
 
@@ -374,13 +547,7 @@ public final class RouteAssetServerManager implements AutoCloseable {
 	}
 
 	private static String defaultResourceFingerprint() throws IOException {
-		final RouteAssetSourceImages sources = new RouteAssetSourceImages(RouteAssetServerManager::readAsset);
-		for (final String path : List.of("textures/block/sign/arrow.png", "textures/block/sign/railway_interchange.png", "textures/block/sign/airplane.png")) sources.get(path);
-		final ByteArrayOutputStream output = new ByteArrayOutputStream();
-		output.write(sources.getFingerprint().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-		output.write(readAsset("font/noto-sans-semibold.ttf"));
-		output.write(readAsset("font/noto-serif-cjk-tc-semibold.ttf"));
-		return RouteAssetHash.sha256(output.toByteArray());
+		return RouteAssetResourceFingerprint.compute(RouteAssetServerManager::readAsset);
 	}
 
 	private static byte[] readAsset(String path) throws IOException {
@@ -397,6 +564,21 @@ public final class RouteAssetServerManager implements AutoCloseable {
 	@FunctionalInterface
 	public interface RenderFunction {
 		RouteAssetImage render(RouteAssetKey key, RouteAssetRenderSnapshot snapshot) throws Exception;
+	}
+
+	@FunctionalInterface
+	public interface RefreshNotificationSender {
+		void send(UUID playerId, PacketRouteAssetRefresh.RefreshPayload payload);
+	}
+
+	private static final class RefreshTarget {
+		private final UUID playerId;
+		private final long connectionNonce;
+
+		private RefreshTarget(UUID playerId, long connectionNonce) {
+			this.playerId = playerId;
+			this.connectionNonce = connectionNonce;
+		}
 	}
 
 	private static final class GenerationRequest {
@@ -440,5 +622,72 @@ public final class RouteAssetServerManager implements AutoCloseable {
 			}
 			return count++ < RouteAssetProtocol.MAX_OBSERVED_KEYS_PER_PLAYER_PER_MINUTE;
 		}
+	}
+
+	private static final class PacketFallbackAuthorization {
+		private final long generation;
+		private final String documentHash;
+		private final Set<String> activePngHashes;
+
+		private PacketFallbackAuthorization(long generation, String documentHash, Set<String> activePngHashes) {
+			this.generation = generation;
+			this.documentHash = documentHash;
+			this.activePngHashes = Collections.unmodifiableSet(new HashSet<>(activePngHashes));
+		}
+
+		private boolean allows(PacketRouteAssetChunkRequest.RequestPayload request) {
+			if (request.getGeneration() != generation) return false;
+			return request.getObjectType() == PacketRouteAssetChunkRequest.ObjectType.JSON ? !documentHash.isEmpty() && documentHash.equals(request.getExpectedHash()) : activePngHashes.contains(request.getExpectedHash());
+		}
+	}
+
+	private static final class PacketFallbackConnection {
+		private final Map<Long, PacketFallbackTransfer> transfers = new HashMap<>();
+		private long generation;
+		private long sentBytes;
+
+		private void advanceGeneration(long generation) {
+			this.generation = generation;
+			transfers.clear();
+		}
+
+		private boolean authorize(PacketRouteAssetChunkRequest.RequestPayload request, int length, long now) {
+			transfers.entrySet().removeIf(entry -> elapsedAtLeast(now, entry.getValue().createdMillis, RouteAssetProtocol.PACKET_FALLBACK_EXPIRY_MILLIS));
+			if (request.getGeneration() != generation || length <= 0 || length > RouteAssetProtocol.MAX_PACKET_FALLBACK_OBJECT_BYTES) return false;
+			final PacketFallbackTransfer existing = transfers.get(request.getTransferId());
+			if (existing != null) return existing.matches(request, length);
+			if (transfers.size() >= MAX_TRACKED_PACKET_FALLBACK_TRANSFERS || length > RouteAssetProtocol.MAX_PACKET_FALLBACK_CONNECTION_BYTES - sentBytes) return false;
+			sentBytes += length;
+			transfers.put(request.getTransferId(), new PacketFallbackTransfer(request, length, now));
+			return true;
+		}
+	}
+
+	private static final class PacketFallbackTransfer {
+		private final PacketRouteAssetChunkRequest.ObjectType objectType;
+		private final String hash;
+		private final int length;
+		private final long expectedLength;
+		private final long createdMillis;
+
+		private PacketFallbackTransfer(PacketRouteAssetChunkRequest.RequestPayload request, int length, long createdMillis) {
+			objectType = request.getObjectType();
+			hash = request.getExpectedHash();
+			this.length = length;
+			expectedLength = request.getExpectedLength();
+			this.createdMillis = createdMillis;
+		}
+
+		private boolean matches(PacketRouteAssetChunkRequest.RequestPayload request, int length) {
+			return objectType == request.getObjectType() && hash.equals(request.getExpectedHash()) && this.length == length && expectedLength == request.getExpectedLength();
+		}
+	}
+
+	private static boolean elapsedAtLeast(long now, long started, long duration) {
+		return now >= started && now - started >= duration;
+	}
+
+	private static long saturatingAdd(long value, long increment) {
+		return value > Long.MAX_VALUE - increment ? Long.MAX_VALUE : value + increment;
 	}
 }

@@ -17,6 +17,7 @@ import java.util.function.Predicate;
  */
 public final class ClientPacketHelper {
 	private static Consumer<PacketRouteAssetManifest.ManifestPayload> routeAssetManifestHandler = payload -> { };
+	private static Consumer<PacketRouteAssetChunk.ChunkPayload> routeAssetChunkHandler = payload -> { };
 
 	public static void setRouteAssetManifestHandler(Consumer<PacketRouteAssetManifest.ManifestPayload> handler) {
 		routeAssetManifestHandler = handler;
@@ -24,6 +25,14 @@ public final class ClientPacketHelper {
 
 	public static void handleRouteAssetManifest(PacketRouteAssetManifest.ManifestPayload manifestPayload) {
 		routeAssetManifestHandler.accept(manifestPayload);
+	}
+
+	public static void setRouteAssetChunkHandler(Consumer<PacketRouteAssetChunk.ChunkPayload> handler) {
+		routeAssetChunkHandler = handler;
+	}
+
+	public static void handleRouteAssetChunk(PacketRouteAssetChunk.ChunkPayload chunkPayload) {
+		routeAssetChunkHandler.accept(chunkPayload);
 	}
 
 	public static void openBlockEntityScreen(BlockPos blockPos) {

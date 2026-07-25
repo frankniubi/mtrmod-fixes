@@ -98,6 +98,18 @@ public final class RouteAssetSourceImagesTest {
 		Assertions.assertTrue(sourceClear >= 0 && sourceClear < textureReload);
 	}
 
+	@Test
+	public void sharedResourceFingerprintMatchesTheBundledProtocolIdentity() throws Exception {
+		final ClassLoader classLoader = RouteAssetSourceImagesTest.class.getClassLoader();
+		final String fingerprint = RouteAssetResourceFingerprint.compute(path -> {
+			try (final java.io.InputStream input = classLoader.getResourceAsStream("assets/mtr/" + path)) {
+				if (input == null) throw new IOException("missing " + path);
+				return input.readAllBytes();
+			}
+		});
+		Assertions.assertEquals(RouteAssetProtocol.BUNDLED_RESOURCE_FINGERPRINT, fingerprint);
+	}
+
 	private static byte[] png(int color) throws Exception {
 		final BufferedImage image = new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB);
 		image.setRGB(0, 0, color);

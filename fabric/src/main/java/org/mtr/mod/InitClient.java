@@ -375,7 +375,7 @@ public final class InitClient {
 			lastMillis = System.currentTimeMillis();
 			gameMillis = 0;
 			lastUpdatePacketMillis = 0;
-			DynamicTextureCache.instance.refresh();
+			DynamicTextureCache.instance.onWorldReset();
 			ClientRouteAssetManager.getInstance().onJoin(multiplayerAddressSupplier.get());
 
 			// Clientside webserver for locally hosting the online system map
@@ -433,6 +433,7 @@ public final class InitClient {
 				if (lastClientWorld == null || !lastClientWorld.equals(clientWorld)) {
 					lastClientWorld = clientWorld;
 					MinecraftClientData.reset();
+					DynamicTextureCache.instance.onWorldReset();
 					REGISTRY_CLIENT.sendPacketToServer(new PacketRequestInterchangeData());
 				}
 			}
@@ -471,6 +472,7 @@ public final class InitClient {
 
 		Config.init(MinecraftClient.getInstance().getRunDirectoryMapped());
 		ClientPacketHelper.setRouteAssetManifestHandler(payload -> ClientRouteAssetManager.getInstance().handleManifest(payload));
+		ClientPacketHelper.setRouteAssetChunkHandler(payload -> ClientRouteAssetManager.getInstance().handlePacketFallbackChunk(payload));
 
 		BlockTactileMap.BlockEntity.updateSoundSource = TACTILE_MAP_SOUND_INSTANCE::setPos;
 		BlockTactileMap.BlockEntity.onUse = blockPos -> {

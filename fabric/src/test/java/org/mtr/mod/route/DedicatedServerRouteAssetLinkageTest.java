@@ -24,4 +24,14 @@ public final class DedicatedServerRouteAssetLinkageTest {
 			}
 		}
 	}
+
+	@Test
+	public void rendererResourceFingerprintIncludesEveryComposedSourceImage() throws Exception {
+		Path fingerprint = Path.of("src", "main", "java", "org", "mtr", "mod", "route", "RouteAssetResourceFingerprint.java");
+		if (!Files.exists(fingerprint)) fingerprint = Path.of("fabric").resolve(fingerprint);
+		final String source = Files.readString(fingerprint);
+		for (final String path : List.of("arrow.png", "circle.png", "railway_interchange.png", "airplane.png", "noto-sans-semibold.ttf", "noto-serif-cjk-tc-semibold.ttf")) {
+			Assertions.assertTrue(source.contains(path), "resource fingerprint omits " + path);
+		}
+	}
 }

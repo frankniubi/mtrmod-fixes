@@ -3,6 +3,9 @@ package org.mtr.mod.client.asset;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mtr.mapping.holder.Identifier;
+import org.mtr.mapping.holder.NativeImageBackedTexture;
+import org.mtr.mod.client.DynamicTextureCache;
 import org.mtr.mod.packet.PacketRouteAssetManifest;
 import org.mtr.mod.route.RouteAssetHash;
 import org.mtr.mod.route.RouteAssetKey;
@@ -14,6 +17,7 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,9 +27,12 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Queue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 public final class ClientRouteAssetSessionTest {
@@ -98,6 +105,215 @@ public final class ClientRouteAssetSessionTest {
 		manager.handleManifest(payload(RouteAssetNegotiation.Mode.UNCHANGED, serverId, manifest.getRevision(), "", FINGERPRINT));
 		Assertions.assertEquals(ClientRouteAssetSession.State.READY, manager.getState());
 		Assertions.assertTrue(requests.isEmpty(), "UNCHANGED must not authorize HEAD or GET work");
+	}
+
+	@Test
+	public void renderLookupDistinguishesNegotiationMappedAndLocalFallbackStates() throws Exception {
+		final String address = "render-state.example.com:25565";
+		final String serverId = "b57b948a-49d5-4b1b-8cf0-c2c923e681ab";
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		final String pngHash = cache.admitPng(RouteAssetHash.sha256(PNG), PNG);
+		final RouteAssetManifest manifest = manifest(pngHash);
+		final RouteAssetKey mappedKey = manifest.getEntries().firstKey();
+		final RouteAssetKey absentKey = mappedKey.withPrimaryId(mappedKey.getPrimaryId() + 1);
+		cache.storeManifest(serverId, manifest);
+		cache.associate(address, serverId);
+
+		final QueueExecutor maintenanceExecutor = new QueueExecutor();
+		final List<org.mtr.mod.route.RouteAssetHello> hellos = new ArrayList<>();
+		final ClientRouteAssetManager manager = new ClientRouteAssetManager(
+				cache,
+				() -> 100,
+				() -> new ClientRouteAssetManager.Settings(true, 2, "NORMAL", FINGERPRINT, RouteAssetProtocol.MAX_REVISION_DOWNLOAD_BYTES),
+				hellos::add,
+				request -> { },
+				() -> { },
+				maintenanceExecutor
+		);
+
+		manager.onJoin(address);
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.PENDING, manager.lookupRouteTexture(mappedKey).getState());
+		manager.handleManifest(payload(RouteAssetNegotiation.Mode.UNCHANGED, serverId, manifest.getRevision(), "", FINGERPRINT, hellos.get(0).getRequestNonce()));
+		Assertions.assertEquals(ClientRouteAssetSession.State.SYNCING, manager.getState());
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.PENDING, manager.lookupRouteTexture(mappedKey).getState());
+
+		maintenanceExecutor.runNext();
+		Assertions.assertEquals(ClientRouteAssetSession.State.READY, manager.getState());
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.PENDING, manager.lookupRouteTexture(mappedKey).getState(), "a mapped hash remains a placeholder until the GPU cache makes it resident");
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.LOCAL, manager.lookupRouteTexture(absentKey).getState());
+
+		manager.onDisconnect();
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.LOCAL, manager.lookupRouteTexture(mappedKey).getState());
+		final ClientRouteAssetManager highResolution = manager(cache, new AtomicLong(), 4, FINGERPRINT, new ArrayList<>(), new ArrayList<>());
+		highResolution.onJoin(address);
+		Assertions.assertEquals(ClientRouteAssetSession.State.LOCAL_FALLBACK, highResolution.getState());
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.LOCAL, highResolution.lookupRouteTexture(mappedKey).getState());
+	}
+
+	@Test
+	public void staleDecodeOutcomeCannotChangeTheNewGenerationCooldown() throws Exception {
+		final String address = "decode-generation.example.com";
+		final String serverId = "24121ced-d974-450c-8262-4867895eaf27";
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		final String pngHash = cache.admitPng(RouteAssetHash.sha256(PNG), PNG);
+		final RouteAssetManifest manifest = manifest(pngHash);
+		final RouteAssetKey mappedKey = manifest.getEntries().firstKey();
+		cache.storeManifest(serverId, manifest);
+		cache.associate(address, serverId);
+		final AtomicLong clock = new AtomicLong(1_000);
+		final List<org.mtr.mod.route.RouteAssetHello> hellos = new ArrayList<>();
+		final ClientRouteAssetManager manager = manager(cache, clock, 2, FINGERPRINT, hellos, new ArrayList<>());
+
+		manager.onJoin(address);
+		manager.handleManifest(payload(RouteAssetNegotiation.Mode.UNCHANGED, serverId, manifest.getRevision(), "", FINGERPRINT, hellos.get(0).getRequestNonce()));
+		final long staleGeneration = manager.getGeneration();
+		manager.onVariantChanged();
+		manager.handleManifest(payload(RouteAssetNegotiation.Mode.UNCHANGED, serverId, manifest.getRevision(), "", FINGERPRINT, hellos.get(1).getRequestNonce()));
+		final long currentGeneration = manager.getGeneration();
+		Assertions.assertNotEquals(staleGeneration, currentGeneration);
+
+		final Method markFailure = ClientRouteAssetManager.class.getDeclaredMethod("markGpuFailure", String.class, long.class);
+		final Method clearFailure = ClientRouteAssetManager.class.getDeclaredMethod("clearGpuFailure", String.class, long.class);
+		markFailure.setAccessible(true);
+		clearFailure.setAccessible(true);
+		markFailure.invoke(manager, pngHash, staleGeneration);
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.PENDING, manager.lookupRouteTexture(mappedKey).getState(), "a late old-generation failure cannot force local rasterization");
+
+		markFailure.invoke(manager, pngHash, currentGeneration);
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.LOCAL, manager.lookupRouteTexture(mappedKey).getState());
+		clearFailure.invoke(manager, pngHash, staleGeneration);
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.LOCAL, manager.lookupRouteTexture(mappedKey).getState(), "a late old-generation success cannot clear the current cooldown");
+		clearFailure.invoke(manager, pngHash, currentGeneration);
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.PENDING, manager.lookupRouteTexture(mappedKey).getState());
+	}
+
+	@Test
+	public void managerCapsOutstandingDecodeAdmissionAndResetSkipsQueuedIo() throws Exception {
+		final String address = "decode-admission.example.com";
+		final String serverId = "e6b29d24-d9d8-46f9-a340-dbf23fd18f60";
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		final RouteAssetManifest.Builder manifestBuilder = RouteAssetManifest.builder();
+		final List<RouteAssetKey> keys = new ArrayList<>();
+		for (int index = 0; index < 65; index++) {
+			final byte[] bytes = png(0xFF000000 | index);
+			final String hash = cache.admitPng(RouteAssetHash.sha256(bytes), bytes);
+			final RouteAssetKey key = RouteAssetKey.parse("minecraft/overworld|ROUTE_COLOR_STRIP|" + (index + 1) + "|2|NORMAL|style=DEFAULT");
+			manifestBuilder.put(key, hash, "fixture-" + index);
+			keys.add(key);
+		}
+		final RouteAssetManifest manifest = manifestBuilder.build();
+		cache.storeManifest(serverId, manifest);
+		cache.associate(address, serverId);
+		final QueueExecutor decodeExecutor = new QueueExecutor();
+		final AtomicLong decodeCount = new AtomicLong();
+		final ClientRouteAssetGpuCache<ClientRouteAssetManager.DecodedNativeImage, ClientRouteAssetManager.RouteAssetTextureHandle> gpuCache = new ClientRouteAssetGpuCache<>(
+				decodeExecutor,
+				hash -> {
+					decodeCount.incrementAndGet();
+					throw new IOException("decoder should not run in this test");
+				},
+				(hash, resource) -> { throw new IOException("registrar should not run in this test"); },
+				() -> 0,
+				RouteAssetProtocol.DEFAULT_GPU_CACHE_BYTES
+		);
+		final List<org.mtr.mod.route.RouteAssetHello> hellos = new ArrayList<>();
+		final ClientRouteAssetManager manager = manager(cache, new AtomicLong(), 2, FINGERPRINT, hellos, new ArrayList<>());
+		manager.installGpuCache(gpuCache);
+
+		manager.onJoin(address);
+		manager.handleManifest(payload(RouteAssetNegotiation.Mode.UNCHANGED, serverId, manifest.getRevision(), "", FINGERPRINT, hellos.get(0).getRequestNonce()));
+		for (final RouteAssetKey key : keys) Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.PENDING, manager.lookupRouteTexture(key).getState());
+		Assertions.assertEquals(64, gpuCache.getInFlightCount());
+		Assertions.assertEquals(64, decodeExecutor.size(), "the sixty-fifth unique hash must receive placeholder backpressure without queueing decode work");
+
+		manager.onDisconnect();
+		decodeExecutor.runAll();
+		Assertions.assertEquals(0, decodeCount.get(), "reset queued tasks must fail the GPU generation precheck before decoder IO");
+		Assertions.assertEquals(0, gpuCache.getInFlightCount());
+	}
+
+	@Test
+	public void productionDiskDecoderTransitionsMappedLookupFromPendingToReady() throws Exception {
+		final String address = "decode-ready.example.com";
+		final String serverId = "09620fd4-28dc-4055-a649-2293999730df";
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		final String pngHash = cache.admitPng(RouteAssetHash.sha256(PNG), PNG);
+		final RouteAssetManifest manifest = manifest(pngHash);
+		final RouteAssetKey mappedKey = manifest.getEntries().firstKey();
+		cache.storeManifest(serverId, manifest);
+		cache.associate(address, serverId);
+		final List<org.mtr.mod.route.RouteAssetHello> hellos = new ArrayList<>();
+		final ClientRouteAssetManager manager = manager(cache, new AtomicLong(), 2, FINGERPRINT, hellos, new ArrayList<>());
+		final QueueExecutor decodeExecutor = new QueueExecutor();
+		final AtomicLong handleCloses = new AtomicLong();
+		final DynamicTextureCache.DynamicResource resource = fakeDynamicResource();
+		final ClientRouteAssetGpuCache<ClientRouteAssetManager.DecodedNativeImage, ClientRouteAssetManager.RouteAssetTextureHandle> gpuCache = new ClientRouteAssetGpuCache<>(
+				manager.correlateDecodeGeneration(decodeExecutor),
+				manager::decodeRouteTexture,
+				(hash, decodedResource) -> {
+					final ClientRouteAssetManager.DecodedNativeImage ownedImage = decodedResource.transferOwnership();
+					return new ClientRouteAssetManager.RouteAssetTextureHandle(resource, () -> {
+						ownedImage.close();
+						handleCloses.incrementAndGet();
+					});
+				},
+				() -> 0,
+				RouteAssetProtocol.DEFAULT_GPU_CACHE_BYTES
+		);
+		manager.installGpuCache(gpuCache);
+
+		manager.onJoin(address);
+		manager.handleManifest(payload(RouteAssetNegotiation.Mode.UNCHANGED, serverId, manifest.getRevision(), "", FINGERPRINT, hellos.get(0).getRequestNonce()));
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.PENDING, manager.lookupRouteTexture(mappedKey).getState());
+		decodeExecutor.runNext();
+		Assertions.assertEquals(1, gpuCache.getDecodedQueueSize());
+		manager.beginRenderFrame(8, 2_000_000);
+		final ClientRouteAssetManager.RouteTextureLookup ready = manager.lookupRouteTexture(mappedKey);
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.READY, ready.getState());
+		Assertions.assertSame(resource, ready.getResource());
+
+		manager.onDisconnect();
+		Assertions.assertEquals(1, handleCloses.get(), "the resident handle must receive decoded image ownership exactly once");
+	}
+
+	@Test
+	public void changedCachedBytesEnterLocalCooldownWithoutPerFrameDecodeRetry() throws Exception {
+		final String address = "decode-cooldown.example.com";
+		final String serverId = "1620a672-5c0f-4242-a7ba-a8521a94d909";
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		final String pngHash = cache.admitPng(RouteAssetHash.sha256(PNG), PNG);
+		final RouteAssetManifest manifest = manifest(pngHash);
+		final RouteAssetKey mappedKey = manifest.getEntries().firstKey();
+		cache.storeManifest(serverId, manifest);
+		cache.associate(address, serverId);
+		final AtomicLong clock = new AtomicLong(1_000);
+		final List<org.mtr.mod.route.RouteAssetHello> hellos = new ArrayList<>();
+		final ClientRouteAssetManager manager = manager(cache, clock, 2, FINGERPRINT, hellos, new ArrayList<>());
+		final QueueExecutor decodeExecutor = new QueueExecutor();
+		final ClientRouteAssetGpuCache<ClientRouteAssetManager.DecodedNativeImage, ClientRouteAssetManager.RouteAssetTextureHandle> gpuCache = new ClientRouteAssetGpuCache<>(
+				manager.correlateDecodeGeneration(decodeExecutor),
+				manager::decodeRouteTexture,
+				(hash, resource) -> { throw new AssertionError("corrupt content cannot reach registration"); },
+				() -> 0,
+				RouteAssetProtocol.DEFAULT_GPU_CACHE_BYTES
+		);
+		manager.installGpuCache(gpuCache);
+
+		manager.onJoin(address);
+		manager.handleManifest(payload(RouteAssetNegotiation.Mode.UNCHANGED, serverId, manifest.getRevision(), "", FINGERPRINT, hellos.get(0).getRequestNonce()));
+		Files.write(cache.pathForPng(pngHash), new byte[]{1, 2, 3});
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.PENDING, manager.lookupRouteTexture(mappedKey).getState());
+		decodeExecutor.runNext();
+		Assertions.assertEquals(0, gpuCache.getInFlightCount());
+		for (int index = 0; index < 10; index++) Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.LOCAL, manager.lookupRouteTexture(mappedKey).getState());
+		Assertions.assertEquals(0, decodeExecutor.size(), "unchanged corrupt hash must not cause a per-frame retry or HTTP repair");
+		clock.addAndGet(4_999);
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.LOCAL, manager.lookupRouteTexture(mappedKey).getState());
+		clock.incrementAndGet();
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.PENDING, manager.lookupRouteTexture(mappedKey).getState());
+		Assertions.assertEquals(1, decodeExecutor.size());
+		manager.onDisconnect();
+		decodeExecutor.runAll();
 	}
 
 	@Test
@@ -546,6 +762,106 @@ public final class ClientRouteAssetSessionTest {
 		}
 	}
 
+	@Test
+	public void defaultDecodePoolIsBoundedNamedDaemonAndLowPriority() throws Exception {
+		final ExecutorService executor = ClientRouteAssetManager.createDecodeExecutor();
+		final CountDownLatch started = new CountDownLatch(2);
+		final CountDownLatch release = new CountDownLatch(1);
+		try {
+			final Future<Thread> first = executor.submit(() -> {
+				started.countDown();
+				release.await();
+				return Thread.currentThread();
+			});
+			final Future<Thread> second = executor.submit(() -> {
+				started.countDown();
+				release.await();
+				return Thread.currentThread();
+			});
+			Assertions.assertTrue(started.await(5, TimeUnit.SECONDS));
+			for (int index = 0; index < 64; index++) executor.execute(() -> { });
+			Assertions.assertThrows(RejectedExecutionException.class, () -> executor.execute(() -> { }), "decode work must apply backpressure instead of growing an unbounded queue");
+			release.countDown();
+			for (final Thread thread : List.of(first.get(), second.get())) {
+				Assertions.assertTrue(thread.getName().startsWith("mtr-route-assets-client-decode-"));
+				Assertions.assertTrue(thread.isDaemon());
+				Assertions.assertEquals(Thread.MIN_PRIORITY, thread.getPriority());
+			}
+		} finally {
+			release.countDown();
+			executor.shutdownNow();
+		}
+	}
+
+	@Test
+	public void refreshPreservesReadyManifestAndRejectsDuplicates() throws Exception {
+		final String address = "refresh-ready.example.com";
+		final String serverId = "c2f97e82-d97e-4cbb-931e-4911279ab2af";
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		final String pngHash = cache.admitPng(RouteAssetHash.sha256(PNG), PNG);
+		final RouteAssetManifest manifest = manifest(pngHash);
+		final RouteAssetKey key = manifest.getEntries().firstKey();
+		cache.storeManifest(serverId, manifest);
+		cache.associate(address, serverId);
+		final List<org.mtr.mod.route.RouteAssetHello> hellos = new ArrayList<>();
+		final ClientRouteAssetManager manager = manager(cache, new AtomicLong(1_000), 2, FINGERPRINT, hellos, new ArrayList<>());
+
+		manager.onJoin(address);
+		manager.handleManifest(payload(RouteAssetNegotiation.Mode.UNCHANGED, serverId, manifest.getRevision(), "", FINGERPRINT, manager.getGeneration()));
+		final long readyNonce = manager.getGeneration();
+		manager.handleRefresh("a".repeat(64), readyNonce - 1);
+		manager.handleRefresh(manifest.getRevision(), readyNonce);
+		Assertions.assertEquals(1, hellos.size());
+
+		manager.handleRefresh("b".repeat(64), readyNonce);
+		Assertions.assertEquals(ClientRouteAssetSession.State.NEGOTIATING, manager.getState());
+		Assertions.assertEquals(manifest.getRevision(), hellos.get(1).getCachedRevision());
+		manager.handleRefresh("b".repeat(64), manager.getGeneration());
+		Assertions.assertEquals(2, hellos.size());
+		manager.handleRefresh("c".repeat(64), manager.getGeneration());
+		manager.handleManifest(PacketRouteAssetManifest.ManifestPayload.fallback("temporary", FINGERPRINT, manager.getGeneration()));
+		Assertions.assertEquals(ClientRouteAssetSession.State.NEGOTIATING, manager.getState(), "a newer revision observed during negotiation must immediately start the next re-hello");
+		Assertions.assertEquals(3, hellos.size());
+		manager.handleRefresh("c".repeat(64), manager.getGeneration());
+		Assertions.assertEquals(3, hellos.size());
+		manager.handleManifest(PacketRouteAssetManifest.ManifestPayload.fallback("temporary", FINGERPRINT, manager.getGeneration()));
+		Assertions.assertEquals(ClientRouteAssetSession.State.READY, manager.getState());
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.PENDING, manager.lookupRouteTexture(key).getState());
+	}
+
+	@Test
+	public void emptyHeadAndIncrementalTimeoutRecoverWithoutDroppingOldManifest() throws Exception {
+		final ClientRouteAssetDiskCache emptyCache = new ClientRouteAssetDiskCache(temporaryDirectory.resolve("empty"), RouteAssetProtocol.RENDERER_VERSION);
+		final List<org.mtr.mod.route.RouteAssetHello> emptyHellos = new ArrayList<>();
+		final ClientRouteAssetManager empty = manager(emptyCache, new AtomicLong(), 2, FINGERPRINT, emptyHellos, new ArrayList<>());
+		empty.onJoin("empty.example.com");
+		empty.handleManifest(PacketRouteAssetManifest.ManifestPayload.fallback("no-revision", FINGERPRINT, empty.getGeneration()));
+		Assertions.assertEquals(ClientRouteAssetSession.State.LOCAL_FALLBACK, empty.getState());
+		empty.handleRefresh("c".repeat(64), empty.getGeneration());
+		Assertions.assertEquals(ClientRouteAssetSession.State.NEGOTIATING, empty.getState());
+		Assertions.assertEquals(2, emptyHellos.size());
+
+		final String address = "timeout.example.com";
+		final String serverId = "cff21004-3252-4474-b739-23e31fe299e6";
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory.resolve("timeout"), RouteAssetProtocol.RENDERER_VERSION);
+		final String hash = cache.admitPng(RouteAssetHash.sha256(PNG), PNG);
+		final RouteAssetManifest manifest = manifest(hash);
+		cache.storeManifest(serverId, manifest);
+		cache.associate(address, serverId);
+		final AtomicLong clock = new AtomicLong(1_000);
+		final List<ClientRouteAssetManager.DocumentRequest> requests = new ArrayList<>();
+		final ClientRouteAssetManager manager = manager(cache, clock, 2, FINGERPRINT, new ArrayList<>(), requests);
+		manager.onJoin(address);
+		manager.handleManifest(payload(RouteAssetNegotiation.Mode.UNCHANGED, serverId, manifest.getRevision(), "", FINGERPRINT, manager.getGeneration()));
+		manager.handleRefresh("d".repeat(64), manager.getGeneration());
+		manager.handleManifest(payload(RouteAssetNegotiation.Mode.SNAPSHOT, serverId, "d".repeat(64), "e".repeat(64), FINGERPRINT, manager.getGeneration()));
+		Assertions.assertEquals(ClientRouteAssetSession.State.SYNCING, manager.getState());
+		clock.addAndGet(30_000);
+		manager.tick(clock.get());
+		Assertions.assertEquals(ClientRouteAssetSession.State.READY, manager.getState());
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.PENDING, manager.lookupRouteTexture(manifest.getEntries().firstKey()).getState());
+	}
+
 	private static ClientRouteAssetManager manager(ClientRouteAssetDiskCache cache, AtomicLong clock, int resolution, String fingerprint, List<org.mtr.mod.route.RouteAssetHello> hellos, List<ClientRouteAssetManager.DocumentRequest> requests) {
 		return new ClientRouteAssetManager(
 				cache,
@@ -558,6 +874,12 @@ public final class ClientRouteAssetSessionTest {
 
 	private static RouteAssetManifest manifest(String hash) {
 		return RouteAssetManifest.builder().put(RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|1|2|NORMAL|a=4:9,f=0,t=0,v=1"), hash, "fixture").build();
+	}
+
+	private static DynamicTextureCache.DynamicResource fakeDynamicResource() throws Exception {
+		final Constructor<DynamicTextureCache.DynamicResource> constructor = DynamicTextureCache.DynamicResource.class.getDeclaredConstructor(Identifier.class, NativeImageBackedTexture.class);
+		constructor.setAccessible(true);
+		return constructor.newInstance(new Identifier("mtr", "route_asset_test"), null);
 	}
 
 	private static PacketRouteAssetManifest.ManifestPayload payload(RouteAssetNegotiation.Mode mode, String serverId, String revision, String documentHash, String fingerprint) {
@@ -603,6 +925,10 @@ public final class ClientRouteAssetSessionTest {
 
 		private void runNext() {
 			tasks.remove().run();
+		}
+
+		private void runAll() {
+			while (!tasks.isEmpty()) runNext();
 		}
 	}
 }

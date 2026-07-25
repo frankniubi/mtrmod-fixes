@@ -1,6 +1,7 @@
 package org.mtr.mod.route;
 
 import org.mtr.libraries.com.google.gson.JsonArray;
+import org.mtr.libraries.com.google.gson.JsonElement;
 import org.mtr.libraries.com.google.gson.JsonObject;
 import org.mtr.libraries.com.google.gson.JsonParser;
 
@@ -10,10 +11,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -26,6 +30,7 @@ public final class RouteAssetRepository {
 	private final Path repositoryRoot;
 	private final Path headPath;
 	private final Path serverIdPath;
+	private final Path dependencyStatePath;
 	private final Path snapshotsPath;
 	private final Path diffsPath;
 	private final Path revisionsPath;
@@ -41,6 +46,7 @@ public final class RouteAssetRepository {
 		repositoryRoot = cas.getOutputRoot().resolve("v" + rendererVersion).resolve("repository");
 		headPath = repositoryRoot.resolve("HEAD.json");
 		serverIdPath = repositoryRoot.resolve("server-id");
+		dependencyStatePath = repositoryRoot.resolve("dependencies.json");
 		snapshotsPath = repositoryRoot.resolve("snapshots");
 		diffsPath = repositoryRoot.resolve("diffs");
 		revisionsPath = repositoryRoot.resolve("revisions");
@@ -145,6 +151,49 @@ public final class RouteAssetRepository {
 		return serverId;
 	}
 
+	public synchronized Map<RouteAssetKey, String> loadDependencyFingerprints() throws IOException {
+		if (!Files.isRegularFile(dependencyStatePath)) return Collections.emptyMap();
+		if (Files.size(dependencyStatePath) <= 0 || Files.size(dependencyStatePath) > RouteAssetProtocol.MAX_MANIFEST_BYTES) {
+			throw new IOException("Invalid route asset dependency state size");
+		}
+		try {
+			final JsonObject root = JsonParser.parseString(Files.readString(dependencyStatePath, StandardCharsets.UTF_8)).getAsJsonObject();
+			if (root.get("rendererVersion").getAsInt() != rendererVersion) throw new IOException("Route asset dependency renderer version mismatch");
+			final JsonArray entries = root.getAsJsonArray("entries");
+			if (entries == null || entries.size() > RouteAssetProtocol.MAX_MANIFEST_ENTRIES) throw new IOException("Invalid route asset dependency entry count");
+			final TreeMap<RouteAssetKey, String> result = new TreeMap<>();
+			for (final JsonElement element : entries) {
+				final JsonObject entry = element.getAsJsonObject();
+				final RouteAssetKey key = RouteAssetKey.parse(entry.get("key").getAsString());
+				final String fingerprint = requireDependencyFingerprint(entry.get("dependency").getAsString());
+				if (result.put(key, fingerprint) != null) throw new IOException("Duplicate route asset dependency key");
+			}
+			return Collections.unmodifiableMap(result);
+		} catch (IOException exception) {
+			throw exception;
+		} catch (RuntimeException exception) {
+			throw new IOException("Invalid route asset dependency state", exception);
+		}
+	}
+
+	public synchronized void saveDependencyFingerprints(Map<RouteAssetKey, String> fingerprints) throws IOException {
+		Objects.requireNonNull(fingerprints, "fingerprints");
+		if (fingerprints.size() > RouteAssetProtocol.MAX_MANIFEST_ENTRIES) throw new IllegalArgumentException("Too many route asset dependency fingerprints");
+		final JsonObject root = new JsonObject();
+		root.addProperty("rendererVersion", rendererVersion);
+		final JsonArray entries = new JsonArray();
+		new TreeMap<>(fingerprints).forEach((key, fingerprint) -> {
+			final JsonObject entry = new JsonObject();
+			entry.addProperty("key", Objects.requireNonNull(key, "dependency key").toString());
+			entry.addProperty("dependency", requireDependencyFingerprint(fingerprint));
+			entries.add(entry);
+		});
+		root.add("entries", entries);
+		final byte[] bytes = root.toString().getBytes(StandardCharsets.UTF_8);
+		if (bytes.length > RouteAssetProtocol.MAX_MANIFEST_BYTES) throw new IllegalArgumentException("Route asset dependency state is too large");
+		writeAtomic(dependencyStatePath, bytes);
+	}
+
 	private String loadOrCreateServerId() throws IOException {
 		if (Files.isRegularFile(serverIdPath)) {
 			try {
@@ -193,6 +242,14 @@ public final class RouteAssetRepository {
 			result.add(value);
 		}
 		return result;
+	}
+
+	private static String requireDependencyFingerprint(String fingerprint) {
+		final String value = Objects.requireNonNull(fingerprint, "dependency fingerprint").trim();
+		if (value.isEmpty() || value.getBytes(StandardCharsets.UTF_8).length > RouteAssetProtocol.MAX_KEY_UTF8_BYTES) {
+			throw new IllegalArgumentException("Invalid route asset dependency fingerprint");
+		}
+		return value;
 	}
 
 	private static byte[] encodeRevisionMetadata(RouteAssetHead head, List<String> causes) {

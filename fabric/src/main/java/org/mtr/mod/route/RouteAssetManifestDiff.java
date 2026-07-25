@@ -54,9 +54,9 @@ public final class RouteAssetManifestDiff {
 		});
 
 		for (final Map.Entry<RouteAssetKey, RouteAssetManifest.Entry> removedEntry : new ArrayList<>(removed.entrySet())) {
-			final Map.Entry<RouteAssetKey, RouteAssetManifest.Entry> movedEntry = added.entrySet().stream().filter(entry -> entry.getValue().equals(removedEntry.getValue())).findFirst().orElse(null);
+			final Map.Entry<RouteAssetKey, RouteAssetManifest.Entry> movedEntry = added.entrySet().stream().filter(entry -> entry.getValue().getHash().equals(removedEntry.getValue().getHash())).findFirst().orElse(null);
 			if (movedEntry != null) {
-				changes.add(Change.move(removedEntry.getKey(), movedEntry.getKey(), removedEntry.getValue()));
+				changes.add(Change.move(removedEntry.getKey(), movedEntry.getKey(), removedEntry.getValue(), movedEntry.getValue()));
 				removed.remove(removedEntry.getKey());
 				added.remove(movedEntry.getKey());
 			}
@@ -147,8 +147,9 @@ public final class RouteAssetManifestDiff {
 			return new Change(Operation.DELETE, key, null, null, entry.getHash(), "", "", List.of(entry.getDependencyFingerprint()));
 		}
 
-		static Change move(RouteAssetKey oldKey, RouteAssetKey newKey, RouteAssetManifest.Entry entry) {
-			return new Change(Operation.MOVE, null, oldKey, newKey, entry.getHash(), entry.getHash(), entry.getDependencyFingerprint(), List.of(entry.getDependencyFingerprint()));
+		static Change move(RouteAssetKey oldKey, RouteAssetKey newKey, RouteAssetManifest.Entry oldEntry, RouteAssetManifest.Entry newEntry) {
+			if (!oldEntry.getHash().equals(newEntry.getHash())) throw new IllegalArgumentException("MOVE content hash changed");
+			return new Change(Operation.MOVE, null, oldKey, newKey, oldEntry.getHash(), newEntry.getHash(), newEntry.getDependencyFingerprint(), List.of(newEntry.getDependencyFingerprint()));
 		}
 
 		private void validateShape() {

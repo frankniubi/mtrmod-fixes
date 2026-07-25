@@ -6,6 +6,7 @@ import org.mtr.libraries.okhttp3.OkHttpClient;
 import org.mtr.libraries.okhttp3.Request;
 import org.mtr.libraries.okhttp3.Response;
 import org.mtr.libraries.okhttp3.ResponseBody;
+import org.mtr.mod.packet.PacketRouteAssetChunkRequest;
 import org.mtr.mod.route.RouteAssetHash;
 import org.mtr.mod.route.RouteAssetKey;
 import org.mtr.mod.route.RouteAssetManifest;
@@ -40,6 +41,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -51,6 +53,7 @@ public final class ClientRouteAssetDownloader {
 	private final ExecutorService executor;
 	private final Transport transport;
 	private final Runnable beforeManifestCommit;
+	private final PacketFallbackTransport packetFallbackTransport;
 	private final int maximumConcurrency;
 	private final Set<ActiveTask> activeTasks = ConcurrentHashMap.newKeySet();
 	private final Set<Future<?>> activeWorkerFutures = ConcurrentHashMap.newKeySet();
@@ -58,32 +61,45 @@ public final class ClientRouteAssetDownloader {
 	private final AtomicLong cancellationEpoch = new AtomicLong();
 
 	public ClientRouteAssetDownloader(ClientRouteAssetDiskCache diskCache, ExecutorService executor) {
-		this(diskCache, executor, new OkHttpTransport(), () -> { }, inferConcurrency(executor));
+		this(diskCache, executor, new OkHttpTransport(), () -> { }, PacketFallbackTransport.DISABLED, inferConcurrency(executor));
 	}
 
 	public ClientRouteAssetDownloader(ClientRouteAssetDiskCache diskCache, ExecutorService executor, Transport transport) {
-		this(diskCache, executor, transport, () -> { }, inferConcurrency(executor));
+		this(diskCache, executor, transport, () -> { }, PacketFallbackTransport.DISABLED, inferConcurrency(executor));
 	}
 
 	public ClientRouteAssetDownloader(ClientRouteAssetDiskCache diskCache, ExecutorService executor, Runnable beforeManifestCommit) {
-		this(diskCache, executor, new OkHttpTransport(), beforeManifestCommit, inferConcurrency(executor));
+		this(diskCache, executor, new OkHttpTransport(), beforeManifestCommit, PacketFallbackTransport.DISABLED, inferConcurrency(executor));
 	}
 
 	public ClientRouteAssetDownloader(ClientRouteAssetDiskCache diskCache, ExecutorService executor, Transport transport, Runnable beforeManifestCommit) {
-		this(diskCache, executor, transport, beforeManifestCommit, inferConcurrency(executor));
+		this(diskCache, executor, transport, beforeManifestCommit, PacketFallbackTransport.DISABLED, inferConcurrency(executor));
 	}
 
 	public ClientRouteAssetDownloader(ClientRouteAssetDiskCache diskCache, ExecutorService executor, int maximumConcurrency) {
-		this(diskCache, executor, new OkHttpTransport(), () -> { }, maximumConcurrency);
+		this(diskCache, executor, new OkHttpTransport(), () -> { }, PacketFallbackTransport.DISABLED, maximumConcurrency);
 	}
 
 	public ClientRouteAssetDownloader(ClientRouteAssetDiskCache diskCache, ExecutorService executor, Transport transport, Runnable beforeManifestCommit, int maximumConcurrency) {
+		this(diskCache, executor, transport, beforeManifestCommit, PacketFallbackTransport.DISABLED, maximumConcurrency);
+	}
+
+	private ClientRouteAssetDownloader(ClientRouteAssetDiskCache diskCache, ExecutorService executor, Transport transport, Runnable beforeManifestCommit, PacketFallbackTransport packetFallbackTransport, int maximumConcurrency) {
 		this.diskCache = Objects.requireNonNull(diskCache, "diskCache");
 		this.executor = Objects.requireNonNull(executor, "executor");
 		this.transport = Objects.requireNonNull(transport, "transport");
 		this.beforeManifestCommit = Objects.requireNonNull(beforeManifestCommit, "beforeManifestCommit");
+		this.packetFallbackTransport = Objects.requireNonNull(packetFallbackTransport, "packetFallbackTransport");
 		if (maximumConcurrency < 1 || maximumConcurrency > 8) throw new IllegalArgumentException("Invalid route asset download concurrency");
 		this.maximumConcurrency = maximumConcurrency;
+	}
+
+	public static ClientRouteAssetDownloader withPacketFallback(ClientRouteAssetDiskCache diskCache, ExecutorService executor, PacketFallbackTransport packetFallbackTransport, int maximumConcurrency) {
+		return new ClientRouteAssetDownloader(diskCache, executor, new OkHttpTransport(), () -> { }, packetFallbackTransport, maximumConcurrency);
+	}
+
+	public static ClientRouteAssetDownloader withPacketFallback(ClientRouteAssetDiskCache diskCache, ExecutorService executor, Transport transport, PacketFallbackTransport packetFallbackTransport, int maximumConcurrency) {
+		return new ClientRouteAssetDownloader(diskCache, executor, transport, () -> { }, packetFallbackTransport, maximumConcurrency);
 	}
 
 	public CompletableFuture<byte[]> download(DownloadRequest request) {
@@ -170,7 +186,38 @@ public final class ClientRouteAssetDownloader {
 				lastFailure = exception;
 			}
 		}
-		throw Objects.requireNonNull(lastFailure);
+		return downloadWithPacketFallback(request, expectedCancellationEpoch, Objects.requireNonNull(lastFailure));
+	}
+
+	private byte[] downloadWithPacketFallback(DownloadRequest request, long expectedCancellationEpoch, IOException httpFailure) throws IOException {
+		if (!packetFallbackTransport.isAvailable() || request.expectedLength > RouteAssetProtocol.MAX_PACKET_FALLBACK_OBJECT_BYTES) throw httpFailure;
+		checkCurrent(request, expectedCancellationEpoch);
+		final CompletableFuture<byte[]> fallback;
+		try {
+			fallback = Objects.requireNonNull(packetFallbackTransport.request(request), "packetFallbackTransport returned null");
+		} catch (RuntimeException exception) {
+			throw new IOException("Route asset packet fallback request failed", exception);
+		}
+		final byte[] bytes;
+		try {
+			bytes = fallback.get(RouteAssetProtocol.PACKET_FALLBACK_EXPIRY_MILLIS, TimeUnit.MILLISECONDS);
+		} catch (InterruptedException exception) {
+			Thread.currentThread().interrupt();
+			fallback.cancel(true);
+			throw new IOException("Route asset packet fallback was interrupted", exception);
+		} catch (TimeoutException exception) {
+			fallback.cancel(true);
+			throw new IOException("Route asset packet fallback timed out", exception);
+		} catch (ExecutionException exception) {
+			final Throwable cause = exception.getCause();
+			if (cause instanceof IOException) throw (IOException) cause;
+			throw new IOException("Route asset packet fallback failed", cause);
+		}
+		checkCurrent(request, expectedCancellationEpoch);
+		if (bytes == null || bytes.length <= 0 || bytes.length > RouteAssetProtocol.MAX_PACKET_FALLBACK_OBJECT_BYTES || bytes.length > request.maximumBytes || request.expectedLength >= 0 && bytes.length != request.expectedLength) throw new IOException("Route asset packet fallback object length is invalid");
+		if (!RouteAssetHash.sha256(bytes).equals(request.expectedHash)) throw new IOException("Route asset packet fallback SHA-256 mismatch");
+		request.budget.consume(bytes.length);
+		return bytes;
 	}
 
 	private SyncResult synchronizeNow(ClientRouteAssetManager.DocumentRequest request, int resolution, String language, long configuredRevisionMaximumBytes, long cacheMaximumBytes, long expectedCacheEpoch, BooleanSupplier generationCurrent, ProgressListener progressListener, long expectedCancellationEpoch) throws IOException {
@@ -216,12 +263,7 @@ public final class ClientRouteAssetDownloader {
 		if (activeHashes.isEmpty()) throw new IOException("Route asset manifest has no entries for the active variant");
 		final Set<String> introducedActiveHashes = new LinkedHashSet<>(activeHashes);
 		if (request.getPayload().getMode() == RouteAssetNegotiation.Mode.DIFF) introducedActiveHashes.removeAll(previousHashes);
-
-		if (request.getPayload().getMode() == RouteAssetNegotiation.Mode.DIFF) for (final String hash : activeHashes) {
-			if (!introducedActiveHashes.contains(hash) && diskCache.findPng(hash).isEmpty()) {
-				throw new IOException("An unchanged route asset object is missing or corrupt");
-			}
-		}
+		for (final String hash : activeHashes) if (diskCache.findPng(hash).isEmpty()) introducedActiveHashes.add(hash);
 		diskCache.initialize();
 		final Set<String> previousActivePins = previous == null ? Collections.emptySet() : activeHashes(previous, resolution, language);
 		final ClientRouteAssetDiskCache.PruneResult pruneResult = diskCache.prune(cacheMaximumBytes, previousActivePins, expectedCacheEpoch);
@@ -398,6 +440,18 @@ public final class ClientRouteAssetDownloader {
 		}
 	}
 
+	@FunctionalInterface
+	public interface PacketFallbackTransport {
+		PacketFallbackTransport DISABLED = new PacketFallbackTransport() {
+			@Override public CompletableFuture<byte[]> request(DownloadRequest request) { return new CompletableFuture<>(); }
+			@Override public boolean isAvailable() { return false; }
+		};
+
+		CompletableFuture<byte[]> request(DownloadRequest request);
+
+		default boolean isAvailable() { return true; }
+	}
+
 	public static final class TransportResponse implements Closeable {
 		private final int code;
 		private final long contentLength;
@@ -506,6 +560,9 @@ public final class ClientRouteAssetDownloader {
 		public String getExpectedHash() { return expectedHash; }
 		public long getExpectedLength() { return expectedLength; }
 		public long getMaximumBytes() { return maximumBytes; }
+		public PacketRouteAssetChunkRequest.ObjectType getPacketObjectType() {
+			return target.getUri().getPath().endsWith(".json") ? PacketRouteAssetChunkRequest.ObjectType.JSON : PacketRouteAssetChunkRequest.ObjectType.PNG;
+		}
 	}
 
 	public static final class DownloadBudget {

@@ -9,12 +9,15 @@ import org.mtr.core.serializer.JsonReader;
 import org.mtr.core.serializer.SerializedDataBase;
 import org.mtr.core.servlet.OperationProcessor;
 import org.mtr.core.tool.Utilities;
+import org.mtr.libraries.com.google.gson.JsonObject;
 import org.mtr.mapping.holder.ServerWorld;
+import org.mtr.mapping.holder.World;
 import org.mtr.mapping.mapper.MinecraftServerHelper;
 import org.mtr.mapping.tool.PacketBufferReceiver;
 import org.mtr.mod.Init;
 import org.mtr.mod.client.DynamicTextureCache;
 import org.mtr.mod.client.MinecraftClientData;
+import org.mtr.mod.route.RouteAssetServerManager;
 
 import javax.annotation.Nonnull;
 
@@ -35,6 +38,12 @@ public final class PacketUpdateData extends PacketRequestResponseBase {
 	@Override
 	protected void runClientInbound(JsonReader jsonReader) {
 		update(jsonReader);
+	}
+
+	@Override
+	protected void runServerInbound(ServerWorld serverWorld, JsonObject jsonObject) {
+		final RouteAssetServerManager manager = Init.getRouteAssetServerManager();
+		if (manager != null) manager.acceptUpdate(Init.getWorldId(new World(serverWorld.data)), jsonObject);
 	}
 
 	@Override
@@ -76,6 +85,6 @@ public final class PacketUpdateData extends PacketRequestResponseBase {
 		new UpdateDataResponse(jsonReader, MinecraftClientData.getDashboardInstance()).write();
 		new UpdateDataResponse(jsonReader, MinecraftClientData.getInterchangeData()).write();
 		minecraftClientData.vehicles.forEach(vehicle -> PathData.writePathCache(vehicle.vehicleExtraData.immutablePath, new MinecraftClientData(), vehicle.getTransportMode()));
-		DynamicTextureCache.instance.refresh();
+		DynamicTextureCache.instance.onRouteDataChanged();
 	}
 }

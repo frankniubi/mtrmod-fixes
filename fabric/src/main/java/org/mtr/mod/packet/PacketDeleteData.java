@@ -9,10 +9,13 @@ import org.mtr.core.servlet.OperationProcessor;
 import org.mtr.core.tool.Utilities;
 import org.mtr.libraries.com.google.gson.JsonObject;
 import org.mtr.mapping.holder.ServerWorld;
+import org.mtr.mapping.holder.World;
 import org.mtr.mapping.tool.PacketBufferReceiver;
 import org.mtr.mod.Init;
 import org.mtr.mod.block.BlockNode;
+import org.mtr.mod.client.DynamicTextureCache;
 import org.mtr.mod.client.MinecraftClientData;
+import org.mtr.mod.route.RouteAssetServerManager;
 
 import javax.annotation.Nonnull;
 
@@ -34,6 +37,8 @@ public final class PacketDeleteData extends PacketRequestResponseBase {
 	protected void runServerInbound(ServerWorld serverWorld, JsonObject jsonObject) {
 		// Check if there are any rail nodes that need to be reset
 		new DeleteDataResponse(new JsonReader(jsonObject)).iterateRailNodePosition(railNodePosition -> BlockNode.resetRailNode(serverWorld, Init.positionToBlockPos(railNodePosition)));
+		final RouteAssetServerManager manager = Init.getRouteAssetServerManager();
+		if (manager != null) manager.acceptDelete(Init.getWorldId(new World(serverWorld.data)), jsonObject);
 	}
 
 	@Override
@@ -42,6 +47,7 @@ public final class PacketDeleteData extends PacketRequestResponseBase {
 		deleteDataResponse.write(MinecraftClientData.getInstance());
 		deleteDataResponse.write(MinecraftClientData.getDashboardInstance());
 		deleteDataResponse.write(MinecraftClientData.getInterchangeData());
+		DynamicTextureCache.instance.onRouteDataChanged();
 	}
 
 	@Override

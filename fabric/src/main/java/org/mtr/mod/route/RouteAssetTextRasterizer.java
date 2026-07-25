@@ -1,30 +1,83 @@
 package org.mtr.mod.route;
 
+import org.mtr.mod.generated.lang.TranslationProvider;
+
 import java.awt.Color;
 import java.awt.Font;
-import java.awt.FontMetrics;
 import java.awt.Graphics2D;
+import java.awt.GraphicsEnvironment;
 import java.awt.RenderingHints;
+import java.awt.font.FontRenderContext;
+import java.awt.font.TextAttribute;
+import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
+import java.awt.image.DataBufferByte;
 import java.io.ByteArrayInputStream;
+import java.text.AttributedString;
+import java.util.Arrays;
+import java.util.Locale;
 import java.util.Objects;
 
 @FunctionalInterface
 public interface RouteAssetTextRasterizer {
 
-	void draw(RouteAssetImage target, String text, int x, int y, int width, int height, int abgr, Alignment alignment);
+	float LINE_HEIGHT_MULTIPLIER = 1.25F;
+
+	RasterizedText rasterize(String text, int maxWidth, int maxHeight, int fontSizeCjk, int fontSizeLatin, int padding, Alignment alignment, String language);
+
+	default void draw(RouteAssetImage target, String value, int x, int y, int width, int height, int abgr, Alignment alignment) {
+		final RasterizedText text = rasterize(value, width, height, Math.max(1, height * 4 / 5), Math.max(1, height * 2 / 5), 0, alignment, "NORMAL");
+		for (int drawY = 0; drawY < text.height; drawY++) {
+			for (int drawX = 0; drawX < text.width; drawX++) {
+				blend(target, x + drawX, y + drawY, ((text.pixels[drawY * text.width + drawX] & 0xFF) << 24) | (abgr & 0xFFFFFF));
+			}
+		}
+	}
 
 	static RouteAssetTextRasterizer fromFonts(byte[] latinFontBytes, byte[] cjkFontBytes) {
 		try {
-			final Font latin = Font.createFont(Font.TRUETYPE_FONT, new ByteArrayInputStream(latinFontBytes));
-			final Font cjk = Font.createFont(Font.TRUETYPE_FONT, new ByteArrayInputStream(cjkFontBytes));
-			return new AwtRasterizer(latin, cjk);
+			return new AwtRasterizer(Font.createFont(Font.TRUETYPE_FONT, new ByteArrayInputStream(latinFontBytes)), Font.createFont(Font.TRUETYPE_FONT, new ByteArrayInputStream(cjkFontBytes)));
 		} catch (Exception exception) {
 			throw new IllegalArgumentException("Unable to load route asset fonts", exception);
 		}
 	}
 
-	enum Alignment { LEFT, CENTER, RIGHT }
+	static boolean isCjk(String text) {
+		return text.codePoints().anyMatch(codePoint -> {
+			final Character.UnicodeBlock block = Character.UnicodeBlock.of(codePoint);
+			return Character.isIdeographic(codePoint) || block == Character.UnicodeBlock.CJK_COMPATIBILITY || block == Character.UnicodeBlock.CJK_COMPATIBILITY_FORMS || block == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS || block == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS_SUPPLEMENT || block == Character.UnicodeBlock.CJK_RADICALS_SUPPLEMENT || block == Character.UnicodeBlock.CJK_STROKES || block == Character.UnicodeBlock.CJK_SYMBOLS_AND_PUNCTUATION || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_B || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_C || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_D || block == Character.UnicodeBlock.ENCLOSED_CJK_LETTERS_AND_MONTHS || block == Character.UnicodeBlock.BOPOMOFO || block == Character.UnicodeBlock.BOPOMOFO_EXTENDED || block == Character.UnicodeBlock.HIRAGANA || block == Character.UnicodeBlock.KATAKANA || block == Character.UnicodeBlock.KATAKANA_PHONETIC_EXTENSIONS || block == Character.UnicodeBlock.KANA_SUPPLEMENT || block == Character.UnicodeBlock.KANBUN || block == Character.UnicodeBlock.HANGUL_JAMO || block == Character.UnicodeBlock.HANGUL_JAMO_EXTENDED_A || block == Character.UnicodeBlock.HANGUL_JAMO_EXTENDED_B || block == Character.UnicodeBlock.HANGUL_SYLLABLES || block == Character.UnicodeBlock.HANGUL_COMPATIBILITY_JAMO || block == Character.UnicodeBlock.KANGXI_RADICALS || block == Character.UnicodeBlock.TAI_XUAN_JING_SYMBOLS || block == Character.UnicodeBlock.IDEOGRAPHIC_DESCRIPTION_CHARACTERS;
+		});
+	}
+
+	enum Alignment {
+		LEFT, CENTER, RIGHT;
+
+		float offset(float value, float size) {
+			switch (this) {
+				case CENTER: return value - size / 2;
+				case RIGHT: return value - size;
+				default: return value;
+			}
+		}
+	}
+
+	final class RasterizedText {
+		private final byte[] pixels;
+		private final int width;
+		private final int height;
+
+		public RasterizedText(byte[] pixels, int width, int height) {
+			if (width < 0 || height < 0 || (long) width * height != pixels.length) throw new IllegalArgumentException("Invalid rasterized text dimensions");
+			this.pixels = pixels.clone();
+			this.width = width;
+			this.height = height;
+		}
+
+		public byte[] getPixels() { return pixels.clone(); }
+		byte[] pixels() { return pixels; }
+		public int getWidth() { return width; }
+		public int getHeight() { return height; }
+	}
 
 	final class AwtRasterizer implements RouteAssetTextRasterizer {
 		private final Font latin;
@@ -36,64 +89,91 @@ public interface RouteAssetTextRasterizer {
 		}
 
 		@Override
-		public void draw(RouteAssetImage target, String text, int x, int y, int width, int height, int abgr, Alignment alignment) {
-			if (text == null || text.isEmpty() || width <= 0 || height <= 0 || x < 0 || y < 0 || x + width > target.getWidth() || y + height > target.getHeight()) return;
-			final BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-			final Graphics2D graphics = image.createGraphics();
-			try {
-				graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-				graphics.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_OFF);
-				graphics.setColor(new Color(RouteAssetImage.abgrToArgb(abgr), true));
-				final String[] lines = text.split("\\|", -1);
-				final int lineHeight = Math.max(1, height / Math.max(1, lines.length));
-				for (int lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-					final String line = lines[lineIndex];
-					if (line.isEmpty()) continue;
-					int size = Math.max(1, lineHeight * 4 / 5);
-					Font font = selectFont(line).deriveFont((float) size);
-					FontMetrics metrics = graphics.getFontMetrics(font);
-					while (size > 1 && metrics.stringWidth(line) > width) {
-						font = selectFont(line).deriveFont((float) --size);
-						metrics = graphics.getFontMetrics(font);
+		public RasterizedText rasterize(String text, int maxWidth, int maxHeight, int fontSizeCjk, int fontSizeLatin, int padding, Alignment alignment, String language) {
+			if (maxWidth <= 0) return new RasterizedText(new byte[0], 0, 0);
+			final boolean oneRow = alignment == null;
+			final String value = text == null || text.isEmpty() ? TranslationProvider.GUI_MTR_UNTITLED.getString() : text;
+			final String[] defaultTextSplit = value.split("\\|");
+			final String languageMode = Objects.requireNonNull(language, "language").trim().toUpperCase(Locale.ROOT);
+			if (!languageMode.equals("NORMAL") && !languageMode.equals("CJK") && !languageMode.equals("LATIN")) throw new IllegalArgumentException("Unsupported route asset language");
+			final String[] filtered = Arrays.stream(defaultTextSplit).filter(part -> isCjk(part) == languageMode.equals("CJK")).toArray(String[]::new);
+			final String[] textSplit = languageMode.equals("NORMAL") || filtered.length == 0 ? defaultTextSplit : filtered;
+			final AttributedString[] attributedStrings = new AttributedString[textSplit.length];
+			final int[] textWidths = new int[textSplit.length];
+			final int[] fontSizes = new int[textSplit.length];
+			final FontRenderContext context = new FontRenderContext(new AffineTransform(), false, false);
+			int width = 0;
+			int height = 0;
+
+			for (int index = 0; index < textSplit.length; index++) {
+				final int newFontSize = isCjk(textSplit[index]) || latin.canDisplayUpTo(textSplit[index]) >= 0 ? fontSizeCjk : fontSizeLatin;
+				attributedStrings[index] = new AttributedString(textSplit[index]);
+				fontSizes[index] = newFontSize;
+				final Font latinSized = latin.deriveFont(Font.PLAIN, newFontSize);
+				final Font cjkSized = cjk.deriveFont(Font.PLAIN, newFontSize);
+				for (int characterIndex = 0; characterIndex < textSplit[index].length(); characterIndex++) {
+					final char character = textSplit[index].charAt(characterIndex);
+					Font selected = latinSized.canDisplay(character) ? latinSized : cjkSized.canDisplay(character) ? cjkSized : null;
+					if (selected == null) {
+						for (final Font candidate : GraphicsEnvironment.getLocalGraphicsEnvironment().getAllFonts()) if (candidate.canDisplay(character)) { selected = candidate.deriveFont(Font.PLAIN, newFontSize); break; }
+						if (selected == null) selected = new Font(null).deriveFont(Font.PLAIN, newFontSize);
 					}
-					graphics.setFont(font);
-					final int textWidth = metrics.stringWidth(line);
-					final int drawX = alignment == Alignment.LEFT ? 0 : alignment == Alignment.RIGHT ? width - textWidth : (width - textWidth) / 2;
-					final int drawY = lineIndex * lineHeight + Math.max(metrics.getAscent(), (lineHeight - metrics.getHeight()) / 2 + metrics.getAscent());
-					graphics.drawString(line, drawX, Math.min(height - 1, drawY));
+					textWidths[index] += selected.getStringBounds(textSplit[index].substring(characterIndex, characterIndex + 1), context).getBounds().width;
+					attributedStrings[index].addAttribute(TextAttribute.FONT, selected, characterIndex, characterIndex + 1);
 				}
+				if (oneRow) {
+					if (index > 0) width += padding;
+					width += textWidths[index];
+					height = Math.max(height, (int) (fontSizes[index] * LINE_HEIGHT_MULTIPLIER));
+				} else {
+					width = Math.max(width, Math.min(maxWidth, textWidths[index]));
+					height += (int) (fontSizes[index] * LINE_HEIGHT_MULTIPLIER);
+				}
+			}
+
+			final int imageHeight = Math.min(height, maxHeight);
+			final int imageWidth = width + (oneRow ? 0 : padding * 2);
+			final int paddedHeight = imageHeight + (oneRow ? 0 : padding * 2);
+			if (imageWidth <= 0 || paddedHeight <= 0) return new RasterizedText(new byte[0], 0, 0);
+			final BufferedImage image = new BufferedImage(imageWidth, paddedHeight, BufferedImage.TYPE_BYTE_GRAY);
+			final Graphics2D graphics = image.createGraphics();
+			int textOffset = 0;
+			try {
+				graphics.setColor(Color.WHITE);
+				graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+				for (int index = 0; index < textSplit.length; index++) {
+					if (oneRow) {
+						graphics.drawString(attributedStrings[index].getIterator(), textOffset, height / LINE_HEIGHT_MULTIPLIER);
+						textOffset += textWidths[index] + padding;
+					} else {
+						final float scaleY = (float) imageHeight / height;
+						final float textWidth = Math.min(maxWidth, textWidths[index] * scaleY);
+						final float scaleX = textWidths[index] == 0 ? 1 : textWidth / textWidths[index];
+						final AffineTransform stretch = new AffineTransform();
+						stretch.concatenate(AffineTransform.getScaleInstance(scaleX, scaleY));
+						graphics.setTransform(stretch);
+						graphics.drawString(attributedStrings[index].getIterator(), alignment.offset(0, textWidth - width) / scaleY + padding / scaleX, textOffset + fontSizes[index] + padding / scaleY);
+						textOffset += (int) (fontSizes[index] * LINE_HEIGHT_MULTIPLIER);
+					}
+				}
+				return new RasterizedText(((DataBufferByte) image.getRaster().getDataBuffer()).getData(), imageWidth, paddedHeight);
 			} finally {
 				graphics.dispose();
+				image.flush();
 			}
-			for (int drawY = 0; drawY < height; drawY++) {
-				for (int drawX = 0; drawX < width; drawX++) {
-					final int source = RouteAssetImage.argbToAbgr(image.getRGB(drawX, drawY));
-					if ((source >>> 24) != 0) blend(target, x + drawX, y + drawY, source);
-				}
-			}
-			image.flush();
 		}
+	}
 
-		private Font selectFont(String text) {
-			for (int index = 0; index < text.length(); index++) {
-				if (text.charAt(index) >= 0x2E80) return cjk;
-			}
-			return latin;
-		}
-
-		private static void blend(RouteAssetImage target, int x, int y, int source) {
-			final int sourceAlpha = source >>> 24;
-			if (sourceAlpha == 255) {
-				target.setPixel(x, y, source);
-				return;
-			}
-			final int destination = target.getPixel(x, y);
-			final int inverse = 255 - sourceAlpha;
-			final int red = ((source & 0xFF) * sourceAlpha + (destination & 0xFF) * inverse) / 255;
-			final int green = (((source >>> 8) & 0xFF) * sourceAlpha + ((destination >>> 8) & 0xFF) * inverse) / 255;
-			final int blue = (((source >>> 16) & 0xFF) * sourceAlpha + ((destination >>> 16) & 0xFF) * inverse) / 255;
-			final int alpha = Math.min(255, sourceAlpha + ((destination >>> 24) * inverse) / 255);
-			target.setPixel(x, y, alpha << 24 | blue << 16 | green << 8 | red);
-		}
+	static void blend(RouteAssetImage target, int x, int y, int source) {
+		if (x < 0 || y < 0 || x >= target.getWidth() || y >= target.getHeight()) return;
+		final int sourceAlpha = source >>> 24;
+		if (sourceAlpha == 0) return;
+		final int destination = target.getPixel(x, y);
+		final boolean transparent = (destination >>> 24) == 0;
+		final int inverse = 255 - sourceAlpha;
+		final int red = (((transparent ? 255 : destination & 0xFF) * inverse) + (source & 0xFF) * sourceAlpha) / 255;
+		final int green = (((transparent ? 255 : destination >>> 8 & 0xFF) * inverse) + (source >>> 8 & 0xFF) * sourceAlpha) / 255;
+		final int blue = (((transparent ? 255 : destination >>> 16 & 0xFF) * inverse) + (source >>> 16 & 0xFF) * sourceAlpha) / 255;
+		target.setPixel(x, y, 0xFF000000 | blue << 16 | green << 8 | red);
 	}
 }

@@ -61,18 +61,19 @@ public final class PacketRouteAssetHello extends PacketHandler {
 		if (manager == null) {
 			payload = PacketRouteAssetManifest.ManifestPayload.fallback("server-disabled", EMPTY_FINGERPRINT, hello.getRequestNonce());
 		} else {
-			manager.handleHello(serverPlayerEntity, hello);
-			payload = negotiate(manager);
+			payload = negotiate(manager, serverPlayerEntity);
 		}
 		Init.REGISTRY.sendPacketToClient(serverPlayerEntity, new PacketRouteAssetManifest(payload));
 	}
 
-	private PacketRouteAssetManifest.ManifestPayload negotiate(RouteAssetServerManager manager) {
+	private PacketRouteAssetManifest.ManifestPayload negotiate(RouteAssetServerManager manager, ServerPlayerEntity serverPlayerEntity) {
 		try {
-			final RouteAssetNegotiation negotiation = manager.negotiate(hello);
+			final RouteAssetNegotiation negotiation = manager.negotiate(serverPlayerEntity, hello);
 			if (negotiation.getMode() == RouteAssetNegotiation.Mode.FALLBACK || negotiation.getMode() == RouteAssetNegotiation.Mode.DISABLED) {
 				return PacketRouteAssetManifest.ManifestPayload.fallback(negotiation.getMode() == RouteAssetNegotiation.Mode.DISABLED ? "no-revision" : "incompatible", manager.getResourceFingerprint(), hello.getRequestNonce());
 			}
+			final String publicBaseUrl = Config.getServer().getRouteTexturePublicBaseUrl();
+			if (!hasUsableHttpOrigin(publicBaseUrl, negotiation.getOriginPort())) return PacketRouteAssetManifest.ManifestPayload.fallback("http-origin-unavailable", manager.getResourceFingerprint(), hello.getRequestNonce());
 			long documentLength = 0;
 			String documentPath = "";
 			if (!negotiation.getDocumentHash().isEmpty()) {
@@ -84,7 +85,7 @@ public final class PacketRouteAssetHello extends PacketHandler {
 					negotiation.getMode(),
 					manager.getRepository().getServerId(),
 					negotiation.getOriginPort(),
-					Config.getServer().getRouteTexturePublicBaseUrl(),
+					publicBaseUrl,
 					negotiation.getAuthoritativeRevision(),
 					negotiation.getDocumentHash(),
 					documentLength,
@@ -101,5 +102,9 @@ public final class PacketRouteAssetHello extends PacketHandler {
 
 	public RouteAssetHello getHello() {
 		return hello;
+	}
+
+	static boolean hasUsableHttpOrigin(String publicBaseUrl, int originPort) {
+		return originPort > 0 || publicBaseUrl != null && !publicBaseUrl.trim().isEmpty();
 	}
 }

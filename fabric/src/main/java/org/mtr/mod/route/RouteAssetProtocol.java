@@ -4,7 +4,7 @@ public final class RouteAssetProtocol {
 
 	public static final int PROTOCOL_VERSION = 1;
 	public static final int RENDERER_VERSION = 1;
-	public static final String BUNDLED_RESOURCE_FINGERPRINT = "ca960b76db0b425cfd4b1dbaaed11f89cbc2a6d459d28ad4b960fda87f2bbd81";
+	public static final String BUNDLED_RESOURCE_FINGERPRINT = "6c145f55dc6afc6248b7e39518da9c3c68ef2ee308c04c92ccacbf4223c02be7";
 	public static final int MAX_MANIFEST_ENTRIES = 200_000;
 	public static final int MAX_MANIFEST_BYTES = 64 * 1024 * 1024;
 	public static final int MAX_KEY_UTF8_BYTES = 512;
@@ -22,6 +22,7 @@ public final class RouteAssetProtocol {
 	public static final int MAX_PACKET_FALLBACK_OBJECT_BYTES = 256 * 1024;
 	public static final int MAX_PACKET_FALLBACK_CONNECTION_BYTES = 4 * 1024 * 1024;
 	public static final int MAX_PACKET_CHUNK_BYTES = 12 * 1024;
+	public static final long PACKET_FALLBACK_EXPIRY_MILLIS = 30_000;
 	public static final String HTTP_PATH = "/mtr/assets/routes/";
 
 	private RouteAssetProtocol() {

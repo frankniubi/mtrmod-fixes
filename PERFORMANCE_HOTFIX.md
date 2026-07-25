@@ -90,6 +90,16 @@ The branch also retains the preceding hotfix work around the mesh cache:
 - Nested optimized-renderer reload handling and GL state preservation for incremental mesh uploads.
 - Reuse of serialized broadcast packet content instead of serializing once per player.
 
+## Server Route Texture Offload
+
+This branch also adds an optional, default-enabled Fabric 1.20.1 path for route maps, direction arrows, route color strips, and route squares at internal dynamic-texture resolution values 0 through 3. A dedicated-server-safe renderer publishes immutable SHA-256 PNG/manifest objects through MTR's plain-HTTP webserver or an operator-configured HTTPS CDN. Clients validate a Git-style incremental manifest, reuse their local content-addressed cache, decode away from the render thread, and budget GPU uploads to eight objects with a soft 2 ms limit per frame.
+
+Server publication is dependency-driven and latest-wins. Updates, deletes, dashboard refreshes, startup snapshots, and bounded periodic snapshots can schedule work, while unchanged dependencies and unchanged output hashes retain existing objects. Publication notifications cause incremental renegotiation without discarding the client's previous usable revision. Resolution values above 3 and any incompatible or failed transfer use the original local renderer.
+
+Operational configuration, storage paths, CDN behavior, cache repair, and fallback limits are documented in `docs/route-texture-assets.md`. A reproducible cold/warm/incremental benchmark checklist is in `benchmark-artifacts/route-texture/README.md`; no new FPS claim is made without completing that matched runtime capture.
+
+The route-texture branch verification completed 238 Fabric tests with no failures, built `fabric-4.0.5.jar` (`SHA-256 422B9955387699AFAE01DFC40D175F9FEF13D8622FE4A70FDC999B54F998E12C`), and reached normal dedicated-server startup with Jetty HTTP on port 8888 before a normal console shutdown. These are correctness and startup results, not an FPS claim.
+
 The controlled `+17.9%` comparison isolates the final GPU-mesh build from the previous hotfix build; it is not a measurement of every supporting change against unmodified upstream.
 
 ## Known Limits

@@ -10,6 +10,8 @@ import org.mtr.mapping.holder.MinecraftClient;
 import org.mtr.mapping.mapper.ResourceManagerHelper;
 import org.mtr.mod.Init;
 import org.mtr.mod.Keys;
+import org.mtr.mod.client.asset.ClientRouteAssetManager;
+import org.mtr.mod.client.asset.ClientRouteAssetResourceFingerprint;
 import org.mtr.mod.config.Config;
 import org.mtr.mod.render.DefaultRailMeshCache;
 import org.mtr.mod.resource.*;
@@ -89,6 +91,8 @@ public class CustomResourceLoader {
 		LIFTS_CACHE.clear();
 		RouteMapGenerator.clearSourceImages();
 		DynamicTextureCache.instance.reload();
+		ClientRouteAssetResourceFingerprint.reload();
+		ClientRouteAssetManager.getInstance().onResourcesReloaded();
 		TEST_DURATION = 0;
 
 		final ObjectArrayList<SignResource> defaultSigns = new ObjectArrayList<>();

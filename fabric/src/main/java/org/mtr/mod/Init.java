@@ -114,6 +114,7 @@ public final class Init implements Utilities {
 		REGISTRY.registerPacket(PacketRouteAssetHello.class, PacketRouteAssetHello::new);
 		REGISTRY.registerPacket(PacketRouteAssetManifest.class, PacketRouteAssetManifest::new);
 		REGISTRY.registerPacket(PacketRouteAssetObservedKeys.class, PacketRouteAssetObservedKeys::new);
+		REGISTRY.registerPacket(PacketRouteAssetRefresh.class, PacketRouteAssetRefresh::new);
 		REGISTRY.registerPacket(PacketSetRouteIdHasDisabledAnnouncements.class, PacketSetRouteIdHasDisabledAnnouncements::new);
 		REGISTRY.registerPacket(PacketTurnOnBlockEntity.class, PacketTurnOnBlockEntity::new);
 		REGISTRY.registerPacket(PacketUpdateData.class, PacketUpdateData::new);
@@ -128,6 +129,8 @@ public final class Init implements Utilities {
 		REGISTRY.registerPacket(PacketUpdateTrainSensorConfig.class, PacketUpdateTrainSensorConfig::new);
 		REGISTRY.registerPacket(PacketUpdateVehiclesLifts.class, PacketUpdateVehiclesLifts::new);
 		REGISTRY.registerPacket(PacketUpdateVehicleRidingEntities.class, PacketUpdateVehicleRidingEntities::new);
+		REGISTRY.registerPacket(PacketRouteAssetChunkRequest.class, PacketRouteAssetChunkRequest::new);
+		REGISTRY.registerPacket(PacketRouteAssetChunk.class, PacketRouteAssetChunk::new);
 
 		// Register command
 		REGISTRY.registerCommand("mtr", commandBuilderMtr -> {
@@ -256,6 +259,7 @@ public final class Init implements Utilities {
 		});
 
 		REGISTRY.eventRegistry.registerStartServerTick(() -> {
+			if (routeAssetServerManager != null) routeAssetServerManager.tick();
 			if (sendWorldTimeUpdate != null && serverTick % (SECONDS_PER_MC_HOUR * 10) == 0) {
 				sendWorldTimeUpdate.run();
 			}

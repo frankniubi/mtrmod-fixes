@@ -10,6 +10,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
@@ -46,6 +47,19 @@ public final class RouteAssetCasTest {
 		try (final java.util.stream.Stream<Path> paths = Files.walk(root)) {
 			Assertions.assertTrue(paths.noneMatch(candidate -> candidate.getFileName().toString().contains(".tmp")));
 		}
+	}
+
+	@Test
+	public void verifiedMetadataCacheRevalidatesAChangedObject() throws Exception {
+		final RouteAssetCas cas = new RouteAssetCas(root, 1);
+		final byte[] expected = png(0xFF102030);
+		final String hash = cas.putPng(expected);
+		final Path path = cas.find(hash, RouteAssetCas.MediaType.PNG).orElseThrow();
+
+		Files.write(path, png(0xFF506070));
+		Files.setLastModifiedTime(path, FileTime.fromMillis(System.currentTimeMillis() + 2_000));
+		Assertions.assertTrue(cas.find(hash, RouteAssetCas.MediaType.PNG).isEmpty(), "metadata changes must invalidate the trusted immutable lookup and rerun SHA validation");
+		Assertions.assertEquals(hash, cas.putPng(expected));
 	}
 
 	@Test

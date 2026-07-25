@@ -2,13 +2,18 @@ package org.mtr.mod.route;
 
 import org.mtr.core.data.ClientData;
 import org.mtr.core.data.Platform;
+import org.mtr.core.data.Route;
 import org.mtr.core.data.SimplifiedRoute;
 import org.mtr.core.data.SimplifiedRoutePlatform;
+import org.mtr.core.data.Station;
+import org.mtr.core.data.TransportMode;
 import org.mtr.core.operation.DeleteDataResponse;
 import org.mtr.core.operation.ListDataResponse;
 import org.mtr.core.operation.UpdateDataResponse;
 import org.mtr.core.serializer.JsonReader;
 import org.mtr.libraries.com.google.gson.JsonObject;
+import org.mtr.libraries.it.unimi.dsi.fastutil.ints.IntAVLTreeSet;
+import org.mtr.mod.data.InterchangeRouteDisplay;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -19,6 +24,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 public final class RouteAssetDataMirror {
@@ -115,23 +121,67 @@ public final class RouteAssetDataMirror {
 	}
 
 	private static DimensionSnapshot materialize(String dimension, ClientData data, long epoch) {
-		final TreeMap<Long, MutablePlatform> platforms = new TreeMap<>();
+		return materializeDimension(dimension, data, epoch, data.stationIdMap::get);
+	}
+
+	/** Builds the same immutable render input on a server mirror or a live client adapter. */
+	public static DimensionSnapshot materializeDimension(String dimension, ClientData data, long epoch, Function<Long, Station> stationResolver) {
+		Objects.requireNonNull(data, "data");
+		Objects.requireNonNull(stationResolver, "stationResolver");
+		final Set<Long> platformIds = new java.util.TreeSet<>();
+		for (final Platform platform : data.platforms) platformIds.add(platform.getId());
+		for (final SimplifiedRoute route : data.simplifiedRoutes) for (final SimplifiedRoutePlatform routePlatform : route.getPlatforms()) platformIds.add(routePlatform.getPlatformId());
+		final TreeMap<Long, PlatformSnapshot> platforms = new TreeMap<>();
+		for (final long platformId : platformIds) platforms.put(platformId, materializePlatform(data, platformId, stationResolver));
+		return new DimensionSnapshot(dimension, epoch, platforms);
+	}
+
+	public static PlatformSnapshot materializePlatform(ClientData data, long platformId, Function<Long, Station> stationResolver) {
+		final List<SimplifiedRoute> occurrences = new ArrayList<>();
+		final IntAVLTreeSet excludedRouteColors = new IntAVLTreeSet();
 		for (final SimplifiedRoute route : data.simplifiedRoutes) {
-			final ArrayList<RouteAssetRenderSnapshot.Station> stations = new ArrayList<>();
-			for (final SimplifiedRoutePlatform routePlatform : route.getPlatforms()) {
-				stations.add(new RouteAssetRenderSnapshot.Station(routePlatform.getStationId(), routePlatform.getStationName(), false, false, false, false));
-			}
-			final RouteAssetRenderSnapshot.Route routeSnapshot = new RouteAssetRenderSnapshot.Route(route.getId(), route.getName(), route.getColor(), stations);
-			for (final SimplifiedRoutePlatform routePlatform : route.getPlatforms()) {
-				platforms.computeIfAbsent(routePlatform.getPlatformId(), ignored -> new MutablePlatform(routePlatform.getStationName())).routes.add(routeSnapshot);
+			final int currentIndex = route.getPlatformIndex(platformId);
+			if (currentIndex >= 0 && !route.getName().isEmpty()) {
+				occurrences.add(route);
+				if (currentIndex < route.getPlatforms().size() - 1) excludedRouteColors.add(InterchangeRouteDisplay.normalizeColor(route.getColor()));
 			}
 		}
-		for (final Platform platform : data.platforms) {
-			platforms.computeIfAbsent(platform.getId(), ignored -> new MutablePlatform(platform.getStationName()));
+		final List<RouteAssetRenderSnapshot.Route> routes = new ArrayList<>();
+		for (final SimplifiedRoute route : occurrences) {
+			final int currentIndex = route.getPlatformIndex(platformId);
+			final List<RouteAssetRenderSnapshot.Station> stations = new ArrayList<>();
+			for (final SimplifiedRoutePlatform routePlatform : route.getPlatforms()) {
+				stations.add(new RouteAssetRenderSnapshot.Station(routePlatform.getPlatformId(), routePlatform.getStationId(), routePlatform.getStationName(), routePlatform.getDestination(), interchange(stationResolver.apply(routePlatform.getStationId()), excludedRouteColors)));
+			}
+			final Route sourceRoute = data.routeIdMap.get(route.getId());
+			final RouteAssetRenderSnapshot.RouteKind routeKind;
+			if (sourceRoute == null) routeKind = RouteAssetRenderSnapshot.RouteKind.UNRESOLVED;
+			else if (sourceRoute.getTransportMode() == TransportMode.TRAIN && sourceRoute.getRouteType() == org.mtr.core.data.RouteType.HIGH_SPEED) routeKind = RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED;
+			else routeKind = RouteAssetRenderSnapshot.RouteKind.METRO;
+			routes.add(new RouteAssetRenderSnapshot.Route(route.getId(), route.getName(), route.getColor(), circularState(route.getCircularState()), routeKind, currentIndex, stations));
 		}
-		final TreeMap<Long, PlatformSnapshot> immutablePlatforms = new TreeMap<>();
-		platforms.forEach((id, platform) -> immutablePlatforms.put(id, new PlatformSnapshot(id, platform.name, platform.routes)));
-		return new DimensionSnapshot(dimension, epoch, immutablePlatforms);
+		final Platform platform = data.platformIdMap.get(platformId);
+		return new PlatformSnapshot(platformId, platform == null ? "" : platform.getName(), routes);
+	}
+
+	private static RouteAssetRenderSnapshot.Interchange interchange(Station station, IntAVLTreeSet excludedRouteColors) {
+		if (station == null) return RouteAssetRenderSnapshot.Interchange.empty();
+		final InterchangeRouteDisplay.RouteMapDisplay display = InterchangeRouteDisplay.getRouteMapDisplay(InterchangeRouteDisplay.getStationGroups(station, excludedRouteColors));
+		final List<Integer> colors = new ArrayList<>();
+		final List<String> names = new ArrayList<>();
+		display.getEntries().forEach(entry -> {
+			colors.add(entry.getColor());
+			names.add(entry.getText());
+		});
+		return new RouteAssetRenderSnapshot.Interchange(colors, names, display.hasRailwayInterchange(), display.hasAirportInterchange());
+	}
+
+	private static RouteAssetRenderSnapshot.CircularState circularState(Route.CircularState state) {
+		switch (state) {
+			case CLOCKWISE: return RouteAssetRenderSnapshot.CircularState.CLOCKWISE;
+			case ANTICLOCKWISE: return RouteAssetRenderSnapshot.CircularState.ANTICLOCKWISE;
+			default: return RouteAssetRenderSnapshot.CircularState.NONE;
+		}
 	}
 
 	private static String validateDimension(String dimension) {
@@ -147,15 +197,6 @@ public final class RouteAssetDataMirror {
 		private MutableDimension(ClientData clientData, DimensionSnapshot snapshot) {
 			this.clientData = clientData;
 			this.snapshot = snapshot;
-		}
-	}
-
-	private static final class MutablePlatform {
-		private final String name;
-		private final List<RouteAssetRenderSnapshot.Route> routes = new ArrayList<>();
-
-		private MutablePlatform(String name) {
-			this.name = name == null ? "" : name;
 		}
 	}
 
@@ -195,18 +236,19 @@ public final class RouteAssetDataMirror {
 
 	public static final class PlatformSnapshot {
 		private final long id;
-		private final String name;
+		private final String displayName;
 		private final List<RouteAssetRenderSnapshot.Route> routes;
 
-		public PlatformSnapshot(long id, String name, List<RouteAssetRenderSnapshot.Route> routes) {
+		public PlatformSnapshot(long id, String displayName, List<RouteAssetRenderSnapshot.Route> routes) {
 			if (id < 0 || routes.size() > 512) throw new IllegalArgumentException("Invalid platform snapshot");
 			this.id = id;
-			this.name = Objects.requireNonNull(name, "name");
+			this.displayName = Objects.requireNonNull(displayName, "displayName");
 			this.routes = Collections.unmodifiableList(new ArrayList<>(routes));
 		}
 
 		public long getId() { return id; }
-		public String getName() { return name; }
+		public String getName() { return displayName; }
+		public String getDisplayName() { return displayName; }
 		public List<RouteAssetRenderSnapshot.Route> getRoutes() { return routes; }
 	}
 }

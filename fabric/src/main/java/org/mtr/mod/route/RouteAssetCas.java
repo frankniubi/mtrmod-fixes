@@ -13,6 +13,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.LinkOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -29,6 +32,7 @@ public final class RouteAssetCas {
 	private final int rendererVersion;
 	private final Path objectRoot;
 	private final ConcurrentHashMap<String, Object> admissionLocks = new ConcurrentHashMap<>();
+	private final ConcurrentHashMap<Path, VerifiedStamp> verifiedObjects = new ConcurrentHashMap<>();
 
 	private static final Pattern PREFIX_PATTERN = Pattern.compile("[0-9a-f]{2}");
 
@@ -56,12 +60,15 @@ public final class RouteAssetCas {
 		final String validHash = RouteAssetHash.requireValid(hash);
 		final Path path = pathFor(validHash, type);
 		try {
-			if (!Files.isRegularFile(path)) {
-				return Optional.empty();
-			}
+			final VerifiedStamp before = readStamp(path);
+			if (before.equals(verifiedObjects.get(path))) return Optional.of(path);
 			validateObject(path, validHash, type);
+			final VerifiedStamp after = readStamp(path);
+			if (!before.equals(after)) throw new IOException("Route asset CAS object changed during validation");
+			verifiedObjects.put(path, after);
 			return Optional.of(path);
 		} catch (IOException | RuntimeException exception) {
+			verifiedObjects.remove(path);
 			return Optional.empty();
 		}
 	}
@@ -117,6 +124,7 @@ public final class RouteAssetCas {
 			if (!pinned.contains(hash)) {
 				final long size = Files.size(object);
 				Files.deleteIfExists(object);
+				verifiedObjects.remove(object);
 				totalBytes -= size;
 				deletedBytes += size;
 				deletedObjects++;
@@ -153,6 +161,7 @@ public final class RouteAssetCas {
 					validateObject(temporary, hash, type);
 					moveAtomically(temporary, target);
 					validateObject(target, hash, type);
+					verifiedObjects.put(target, readStamp(target));
 					return hash;
 				} finally {
 					Files.deleteIfExists(temporary);
@@ -177,6 +186,12 @@ public final class RouteAssetCas {
 		} else {
 			validateJson(bytes);
 		}
+	}
+
+	private static VerifiedStamp readStamp(Path path) throws IOException {
+		final BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+		if (!attributes.isRegularFile()) throw new IOException("Route asset CAS object is not a regular file");
+		return new VerifiedStamp(attributes.size(), attributes.lastModifiedTime(), attributes.fileKey());
 	}
 
 	private static void validatePng(byte[] bytes) throws IOException {
@@ -213,6 +228,31 @@ public final class RouteAssetCas {
 			return Files.getLastModifiedTime(path).toMillis();
 		} catch (IOException exception) {
 			return Long.MIN_VALUE;
+		}
+	}
+
+	private static final class VerifiedStamp {
+		private final long size;
+		private final FileTime modified;
+		private final Object fileKey;
+
+		private VerifiedStamp(long size, FileTime modified, Object fileKey) {
+			this.size = size;
+			this.modified = modified;
+			this.fileKey = fileKey;
+		}
+
+		@Override
+		public boolean equals(Object object) {
+			if (this == object) return true;
+			if (!(object instanceof VerifiedStamp)) return false;
+			final VerifiedStamp stamp = (VerifiedStamp) object;
+			return size == stamp.size && modified.equals(stamp.modified) && java.util.Objects.equals(fileKey, stamp.fileKey);
+		}
+
+		@Override
+		public int hashCode() {
+			return java.util.Objects.hash(size, modified, fileKey);
 		}
 	}
 

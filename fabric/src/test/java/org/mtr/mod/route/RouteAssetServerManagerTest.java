@@ -32,21 +32,21 @@ public final class RouteAssetServerManagerTest {
 		})) {
 			manager.submitSnapshot(snapshot("A"), "initial");
 			Assertions.assertTrue(manager.awaitIdle(10_000));
-			Assertions.assertEquals(16, renderCalls.get());
-			Assertions.assertEquals(16, manager.getMetrics().getLastSummary().getAdd());
+			Assertions.assertEquals(32, renderCalls.get());
+			Assertions.assertEquals(32, manager.getMetrics().getLastSummary().getAdd());
 			Assertions.assertEquals(0, manager.getMetrics().getLastSummary().getModify());
 			final String firstRevision = manager.getRepository().loadHead().getRevision();
 
 			manager.submitSnapshot(snapshot("A"), "unchanged");
 			Assertions.assertTrue(manager.awaitIdle(10_000));
-			Assertions.assertEquals(16, renderCalls.get());
+			Assertions.assertEquals(32, renderCalls.get());
 			Assertions.assertEquals(firstRevision, manager.getRepository().loadHead().getRevision());
 
 			constantPixels.set(true);
 			manager.submitSnapshot(snapshot("B"), "first-constant");
 			Assertions.assertTrue(manager.awaitIdle(10_000));
 			Assertions.assertEquals(0, manager.getMetrics().getLastSummary().getAdd());
-			Assertions.assertEquals(16, manager.getMetrics().getLastSummary().getModify());
+			Assertions.assertEquals(32, manager.getMetrics().getLastSummary().getModify());
 			final String constantRevision = manager.getRepository().loadHead().getRevision();
 			manager.submitSnapshot(snapshot("C"), "same-pixels");
 			Assertions.assertTrue(manager.awaitIdle(10_000));

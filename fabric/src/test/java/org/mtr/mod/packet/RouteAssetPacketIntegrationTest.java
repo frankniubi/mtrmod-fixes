@@ -2,18 +2,45 @@ package org.mtr.mod.packet;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.mtr.mod.client.asset.ClientRouteAssetDiskCache;
+import org.mtr.mod.client.asset.ClientRouteAssetDownloader;
+import org.mtr.mod.client.asset.ClientRouteAssetUrlPolicy;
+import org.mtr.mod.route.RouteAssetHash;
+import org.mtr.mod.route.RouteAssetDataMirror;
+import org.mtr.mod.route.RouteAssetDependencyCatalog;
 import org.mtr.mod.route.RouteAssetHello;
+import org.mtr.mod.route.RouteAssetImage;
 import org.mtr.mod.route.RouteAssetKey;
+import org.mtr.mod.route.RouteAssetManifest;
+import org.mtr.mod.route.RouteAssetMetrics;
 import org.mtr.mod.route.RouteAssetNegotiation;
 import org.mtr.mod.route.RouteAssetProtocol;
+import org.mtr.mod.route.RouteAssetRepository;
+import org.mtr.mod.route.RouteAssetServerManager;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.UUID;
 
 public final class RouteAssetPacketIntegrationTest {
+
+	@TempDir
+	Path temporaryDirectory;
 
 	@Test
 	public void boundedStringsRejectLengthBeforeReadingCharacters() {
@@ -25,6 +52,146 @@ public final class RouteAssetPacketIntegrationTest {
 		Assertions.assertEquals(0, characterReads.get());
 		Assertions.assertThrows(IllegalArgumentException.class, () -> RouteAssetPacketCodec.requireBounded("é".repeat(300), 512, 512));
 		Assertions.assertThrows(IllegalArgumentException.class, () -> RouteAssetPacketCodec.decodeEnum(RouteAssetNegotiation.Mode.class, 99));
+	}
+
+	@Test
+	public void boundedBytesRejectLengthBeforeReadingCharacters() {
+		final AtomicInteger byteReads = new AtomicInteger();
+		Assertions.assertThrows(IllegalArgumentException.class, () -> RouteAssetPacketCodec.readBoundedBytes(RouteAssetProtocol.MAX_PACKET_CHUNK_BYTES + 1, index -> {
+			byteReads.incrementAndGet();
+			return (char) 0;
+		}, RouteAssetProtocol.MAX_PACKET_CHUNK_BYTES));
+		Assertions.assertEquals(0, byteReads.get());
+		Assertions.assertThrows(IllegalArgumentException.class, () -> RouteAssetPacketCodec.requireBoundedBytes(new byte[RouteAssetProtocol.MAX_PACKET_CHUNK_BYTES + 1], RouteAssetProtocol.MAX_PACKET_CHUNK_BYTES));
+	}
+
+	@Test
+	public void chunkLayoutIsStrictlyBounded() {
+		final String hash = "a".repeat(64);
+		final byte[] maximumChunk = new byte[RouteAssetProtocol.MAX_PACKET_CHUNK_BYTES];
+		Assertions.assertDoesNotThrow(() -> new PacketRouteAssetChunk.ChunkPayload(1, 2, PacketRouteAssetChunkRequest.ObjectType.PNG, hash, RouteAssetProtocol.MAX_PACKET_CHUNK_BYTES + 1, 2, 0, maximumChunk));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> new PacketRouteAssetChunk.ChunkPayload(1, 2, PacketRouteAssetChunkRequest.ObjectType.PNG, hash, RouteAssetProtocol.MAX_PACKET_FALLBACK_OBJECT_BYTES + 1, 1, 0, new byte[1]));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> new PacketRouteAssetChunk.ChunkPayload(1, 2, PacketRouteAssetChunkRequest.ObjectType.PNG, hash, 1, 2, 0, new byte[1]));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> new PacketRouteAssetChunk.ChunkPayload(1, 2, PacketRouteAssetChunkRequest.ObjectType.PNG, hash, 1, 1, 1, new byte[1]));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> new PacketRouteAssetChunk.ChunkPayload(1, 2, PacketRouteAssetChunkRequest.ObjectType.PNG, hash, 1, 1, 0, new byte[2]));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> new PacketRouteAssetChunkRequest.RequestPayload(1, 2, PacketRouteAssetChunkRequest.ObjectType.PNG, hash, RouteAssetProtocol.MAX_PACKET_FALLBACK_OBJECT_BYTES + 1));
+	}
+
+	@Test
+	public void duplicateChunksAreIdempotentAndFinalHashIsMandatory() throws Exception {
+		final AtomicLong now = new AtomicLong(100);
+		final PacketRouteAssetChunk.ClientTransferReceiver receiver = new PacketRouteAssetChunk.ClientTransferReceiver(now::get);
+		receiver.beginConnection(11);
+		final byte[] bytes = new byte[RouteAssetProtocol.MAX_PACKET_CHUNK_BYTES + 37];
+		for (int index = 0; index < bytes.length; index++) bytes[index] = (byte) index;
+		final PacketRouteAssetChunkRequest.RequestPayload request = new PacketRouteAssetChunkRequest.RequestPayload(11, 41, PacketRouteAssetChunkRequest.ObjectType.PNG, RouteAssetHash.sha256(bytes), bytes.length);
+		final CompletableFuture<byte[]> completion = receiver.request(request);
+		final List<PacketRouteAssetChunk.ChunkPayload> chunks = PacketRouteAssetChunk.split(request, bytes);
+		receiver.accept(chunks.get(0));
+		receiver.accept(chunks.get(0));
+		receiver.accept(chunks.get(1));
+		Assertions.assertArrayEquals(bytes, completion.get(1, TimeUnit.SECONDS));
+		Assertions.assertEquals(bytes.length, receiver.getAcceptedConnectionBytes());
+
+		final byte[] corrupt = Arrays.copyOf(bytes, bytes.length);
+		corrupt[0] ^= 1;
+		final PacketRouteAssetChunkRequest.RequestPayload corruptRequest = new PacketRouteAssetChunkRequest.RequestPayload(11, 42, PacketRouteAssetChunkRequest.ObjectType.PNG, RouteAssetHash.sha256(bytes), bytes.length);
+		final CompletableFuture<byte[]> corruptCompletion = receiver.request(corruptRequest);
+		final int firstLength = RouteAssetProtocol.MAX_PACKET_CHUNK_BYTES;
+		receiver.accept(new PacketRouteAssetChunk.ChunkPayload(11, 42, PacketRouteAssetChunkRequest.ObjectType.PNG, corruptRequest.getExpectedHash(), corrupt.length, 2, 0, Arrays.copyOfRange(corrupt, 0, firstLength)));
+		receiver.accept(new PacketRouteAssetChunk.ChunkPayload(11, 42, PacketRouteAssetChunkRequest.ObjectType.PNG, corruptRequest.getExpectedHash(), corrupt.length, 2, 1, Arrays.copyOfRange(corrupt, firstLength, corrupt.length)));
+		Assertions.assertThrows(ExecutionException.class, () -> corruptCompletion.get(1, TimeUnit.SECONDS));
+	}
+
+	@Test
+	public void incompleteTransfersExpireAndGenerationAdvanceCancelsThem() {
+		final AtomicLong now = new AtomicLong(1_000);
+		final PacketRouteAssetChunk.ClientTransferReceiver receiver = new PacketRouteAssetChunk.ClientTransferReceiver(now::get);
+		receiver.beginConnection(3);
+		final PacketRouteAssetChunkRequest.RequestPayload expiring = request(3, 1, new byte[] {1});
+		final CompletableFuture<byte[]> expiredCompletion = receiver.request(expiring);
+		now.addAndGet(RouteAssetProtocol.PACKET_FALLBACK_EXPIRY_MILLIS);
+		receiver.expireIncomplete();
+		Assertions.assertTrue(expiredCompletion.isCompletedExceptionally());
+
+		final CompletableFuture<byte[]> cancelledCompletion = receiver.request(request(3, 2, new byte[] {2}));
+		receiver.advanceGeneration(4);
+		Assertions.assertTrue(cancelledCompletion.isCompletedExceptionally());
+		Assertions.assertEquals(0, receiver.getIncompleteTransferCount());
+	}
+
+	@Test
+	public void connectionBudgetCannotExceedFourMiB() throws Exception {
+		final PacketRouteAssetChunk.ClientTransferReceiver receiver = new PacketRouteAssetChunk.ClientTransferReceiver(System::currentTimeMillis);
+		receiver.beginConnection(7);
+		final byte[] object = new byte[RouteAssetProtocol.MAX_PACKET_FALLBACK_OBJECT_BYTES];
+		final String hash = RouteAssetHash.sha256(object);
+		final int acceptedObjects = RouteAssetProtocol.MAX_PACKET_FALLBACK_CONNECTION_BYTES / object.length;
+		for (int index = 0; index < acceptedObjects; index++) {
+			final PacketRouteAssetChunkRequest.RequestPayload request = new PacketRouteAssetChunkRequest.RequestPayload(7, index + 1L, PacketRouteAssetChunkRequest.ObjectType.PNG, hash, object.length);
+			final CompletableFuture<byte[]> completion = receiver.request(request);
+			for (final PacketRouteAssetChunk.ChunkPayload chunk : PacketRouteAssetChunk.split(request, object)) receiver.accept(chunk);
+			Assertions.assertArrayEquals(object, completion.get(1, TimeUnit.SECONDS));
+		}
+		Assertions.assertEquals(RouteAssetProtocol.MAX_PACKET_FALLBACK_CONNECTION_BYTES, receiver.getAcceptedConnectionBytes());
+		final PacketRouteAssetChunkRequest.RequestPayload rejected = new PacketRouteAssetChunkRequest.RequestPayload(7, acceptedObjects + 1L, PacketRouteAssetChunkRequest.ObjectType.PNG, hash, object.length);
+		final CompletableFuture<byte[]> rejectedCompletion = receiver.request(rejected);
+		receiver.accept(PacketRouteAssetChunk.split(rejected, object).get(0));
+		Assertions.assertTrue(rejectedCompletion.isCompletedExceptionally());
+	}
+
+	@Test
+	public void packetFallbackStartsOnlyAfterEveryHttpRetryAndUsesPngAdmission() throws Exception {
+		final byte[] png = png();
+		final String hash = RouteAssetHash.sha256(png);
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory.resolve("fallback-cache"), RouteAssetProtocol.RENDERER_VERSION);
+		final ExecutorService executor = Executors.newSingleThreadExecutor();
+		final AtomicInteger httpAttempts = new AtomicInteger();
+		final AtomicInteger packetAttempts = new AtomicInteger();
+		try {
+			final ClientRouteAssetDownloader downloader = ClientRouteAssetDownloader.withPacketFallback(cache, executor, target -> {
+				httpAttempts.incrementAndGet();
+				return new ClientRouteAssetDownloader.TransportResponse(503, 0, null, new ByteArrayInputStream(new byte[0]));
+			}, request -> {
+				Assertions.assertEquals(RouteAssetProtocol.MAX_HTTP_RETRIES + 1, httpAttempts.get());
+				packetAttempts.incrementAndGet();
+				return CompletableFuture.completedFuture(png);
+			}, 1);
+			final ClientRouteAssetUrlPolicy policy = new ClientRouteAssetUrlPolicy("127.0.0.1:25565", 8888, "");
+			final ClientRouteAssetDownloader.DownloadRequest request = new ClientRouteAssetDownloader.DownloadRequest(5, policy, policy.resolve("v1/" + hash.substring(0, 2) + '/' + hash + ".png"), hash, png.length, RouteAssetProtocol.MAX_PNG_BYTES, () -> true);
+			Assertions.assertEquals(cache.pathForPng(hash), downloader.downloadPng(request).get(5, TimeUnit.SECONDS));
+			Assertions.assertTrue(cache.findPng(hash).isPresent());
+			Assertions.assertEquals(RouteAssetProtocol.MAX_HTTP_RETRIES + 1, httpAttempts.get());
+			Assertions.assertEquals(1, packetAttempts.get());
+		} finally {
+			executor.shutdownNow();
+		}
+	}
+
+	@Test
+	public void serverServesOnlyTheRequestingPlayersNegotiatedObjects() throws Exception {
+		final RouteAssetRepository repository = new RouteAssetRepository(temporaryDirectory.resolve("server-cas"), RouteAssetProtocol.RENDERER_VERSION, 4);
+		final byte[] authorizedPng = png();
+		final String authorizedHash = repository.getCas().putPng(authorizedPng);
+		final byte[] unrelatedPng = createPng(0xFF112233);
+		final String unrelatedHash = repository.getCas().putPng(unrelatedPng);
+		final RouteAssetKey key = RouteAssetKey.parse("minecraft/overworld|ROUTE_COLOR_STRIP|1|2|NORMAL|style=DEFAULT");
+		final RouteAssetManifest manifest = RouteAssetManifest.builder().put(key, authorizedHash, "dependency").build();
+		repository.publish(manifest, List.of("packet-fallback-test"));
+		try (final RouteAssetServerManager manager = new RouteAssetServerManager(repository, new RouteAssetDataMirror(), new RouteAssetDependencyCatalog(), (ignoredKey, ignoredSnapshot) -> new RouteAssetImage(1, 1), 1, "f".repeat(64), new RouteAssetMetrics())) {
+			final UUID authorizedPlayer = UUID.randomUUID();
+			final UUID otherPlayer = UUID.randomUUID();
+			final RouteAssetHello hello = new RouteAssetHello(RouteAssetProtocol.PROTOCOL_VERSION, RouteAssetProtocol.RENDERER_VERSION, 2, "NORMAL", "f".repeat(64), "", true, true, RouteAssetProtocol.MAX_REVISION_DOWNLOAD_BYTES, 91);
+			final RouteAssetNegotiation negotiation = manager.negotiate(authorizedPlayer, hello);
+			final PacketRouteAssetChunkRequest.RequestPayload pngRequest = new PacketRouteAssetChunkRequest.RequestPayload(91, 1, PacketRouteAssetChunkRequest.ObjectType.PNG, authorizedHash, authorizedPng.length);
+			Assertions.assertFalse(manager.handlePacketFallbackRequest(authorizedPlayer, pngRequest).isEmpty());
+			Assertions.assertTrue(manager.handlePacketFallbackRequest(otherPlayer, pngRequest).isEmpty());
+			Assertions.assertTrue(manager.handlePacketFallbackRequest(authorizedPlayer, new PacketRouteAssetChunkRequest.RequestPayload(91, 2, PacketRouteAssetChunkRequest.ObjectType.PNG, unrelatedHash, unrelatedPng.length)).isEmpty());
+			Assertions.assertTrue(manager.handlePacketFallbackRequest(authorizedPlayer, new PacketRouteAssetChunkRequest.RequestPayload(92, 3, PacketRouteAssetChunkRequest.ObjectType.PNG, authorizedHash, authorizedPng.length)).isEmpty());
+			final Path document = repository.getCas().find(negotiation.getDocumentHash(), org.mtr.mod.route.RouteAssetCas.MediaType.JSON).orElseThrow();
+			final PacketRouteAssetChunkRequest.RequestPayload documentRequest = new PacketRouteAssetChunkRequest.RequestPayload(91, 4, PacketRouteAssetChunkRequest.ObjectType.JSON, negotiation.getDocumentHash(), Files.size(document));
+			Assertions.assertFalse(manager.handlePacketFallbackRequest(authorizedPlayer, documentRequest).isEmpty());
+		}
 	}
 
 	@Test
@@ -44,11 +211,15 @@ public final class RouteAssetPacketIntegrationTest {
 		Assertions.assertTrue(init.contains("REGISTRY.registerPacket(PacketRouteAssetHello.class"));
 		Assertions.assertTrue(init.contains("REGISTRY.registerPacket(PacketRouteAssetManifest.class"));
 		Assertions.assertTrue(init.contains("REGISTRY.registerPacket(PacketRouteAssetObservedKeys.class"));
+		Assertions.assertTrue(init.contains("REGISTRY.registerPacket(PacketRouteAssetChunkRequest.class"));
+		Assertions.assertTrue(init.contains("REGISTRY.registerPacket(PacketRouteAssetChunk.class"));
 
 		final String hello = Files.readString(sourcePath("packet", "PacketRouteAssetHello.java"));
 		final String manifest = Files.readString(sourcePath("packet", "PacketRouteAssetManifest.java"));
 		final String observed = Files.readString(sourcePath("packet", "PacketRouteAssetObservedKeys.java"));
-		final String combined = hello + manifest + observed;
+		final String chunkRequest = Files.readString(sourcePath("packet", "PacketRouteAssetChunkRequest.java"));
+		final String chunk = Files.readString(sourcePath("packet", "PacketRouteAssetChunk.java"));
+		final String combined = hello + manifest + observed + chunkRequest + chunk;
 		Assertions.assertFalse(combined.contains("readString()"));
 		Assertions.assertFalse(combined.contains("writeString("));
 		Assertions.assertFalse(combined.contains("Base64"));
@@ -57,6 +228,9 @@ public final class RouteAssetPacketIntegrationTest {
 		Assertions.assertTrue(hello.contains("sendPacketToClient(serverPlayerEntity"));
 		Assertions.assertTrue(manifest.contains("ClientPacketHelper.handleRouteAssetManifest(manifestPayload)"));
 		Assertions.assertTrue(observed.contains("handleObservedKeys(serverPlayerEntity, keys)"));
+		Assertions.assertTrue(chunkRequest.contains("sendPacketToClient(serverPlayerEntity"));
+		Assertions.assertTrue(chunk.contains("ClientPacketHelper.handleRouteAssetChunk(chunkPayload)"));
+		Assertions.assertFalse(combined.contains("PacketRequestResponseBase"));
 	}
 
 	@Test
@@ -88,5 +262,21 @@ public final class RouteAssetPacketIntegrationTest {
 		path = path.resolve(fileName);
 		if (!Files.exists(path)) path = Path.of("fabric").resolve(path);
 		return path;
+	}
+
+	private static PacketRouteAssetChunkRequest.RequestPayload request(long generation, long transferId, byte[] bytes) {
+		return new PacketRouteAssetChunkRequest.RequestPayload(generation, transferId, PacketRouteAssetChunkRequest.ObjectType.PNG, RouteAssetHash.sha256(bytes), bytes.length);
+	}
+
+	private static byte[] png() throws Exception {
+		return createPng(0xFF336699);
+	}
+
+	private static byte[] createPng(int color) throws Exception {
+		final BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+		image.setRGB(0, 0, color);
+		final ByteArrayOutputStream output = new ByteArrayOutputStream();
+		Assertions.assertTrue(ImageIO.write(image, "png", output));
+		return output.toByteArray();
 	}
 }

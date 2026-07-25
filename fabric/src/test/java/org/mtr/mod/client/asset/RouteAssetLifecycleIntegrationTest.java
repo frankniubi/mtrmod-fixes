@@ -85,7 +85,7 @@ public final class RouteAssetLifecycleIntegrationTest {
 	}
 
 	@Test
-	public void diffNeverReauthorizesMissingUnchangedHashAndPreservesOldManifest() throws Exception {
+	public void diffRepairsEveryMissingActiveHashAndPublishesAtomically() throws Exception {
 		final String unchangedHash = RouteAssetHash.sha256(PNG);
 		final String introducedHash = RouteAssetHash.sha256(PNG_2);
 		final RouteAssetManifest before = RouteAssetManifest.builder().put(key(20, 2, "NORMAL"), unchangedHash, "unchanged").build();
@@ -105,10 +105,13 @@ public final class RouteAssetLifecycleIntegrationTest {
 
 		manager.onJoin("127.0.0.1");
 		manager.handleManifest(payload(RouteAssetNegotiation.Mode.DIFF, serverId, after.getRevision(), document, hellos.get(0).getRequestNonce()));
-		awaitState(manager, ClientRouteAssetSession.State.LOCAL_FALLBACK);
+		awaitState(manager, ClientRouteAssetSession.State.READY);
 
-		Assertions.assertFalse(requestedPaths.contains(routePath(pngPath(unchangedHash))), "an unchanged missing object is never reauthorized");
-		Assertions.assertEquals(before, cache.loadManifest(serverId).orElseThrow(), "a failed revision cannot replace the prior manifest");
+		Assertions.assertTrue(requestedPaths.contains(routePath(pngPath(unchangedHash))), "a previously introduced active hash must be recoverable after a cache miss or variant switch");
+		Assertions.assertTrue(requestedPaths.contains(routePath(pngPath(introducedHash))));
+		Assertions.assertTrue(cache.findPng(unchangedHash).isPresent());
+		Assertions.assertTrue(cache.findPng(introducedHash).isPresent());
+		Assertions.assertEquals(after, cache.loadManifest(serverId).orElseThrow(), "the revision becomes active only after every active hash verifies");
 	}
 
 	@Test

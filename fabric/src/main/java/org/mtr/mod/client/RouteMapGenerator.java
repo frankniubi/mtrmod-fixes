@@ -20,7 +20,12 @@ import org.mtr.mod.data.IGui;
 import org.mtr.mod.data.InterchangeRouteDisplay;
 import org.mtr.mod.generated.lang.TranslationProvider;
 import org.mtr.mod.route.RouteAssetImage;
+import org.mtr.mod.route.RouteAssetCanonicalKeyFactory;
+import org.mtr.mod.route.RouteAssetKey;
+import org.mtr.mod.route.RouteAssetRenderSnapshot;
+import org.mtr.mod.route.RouteAssetRenderer;
 import org.mtr.mod.route.RouteAssetSourceImages;
+import org.mtr.mod.route.RouteAssetTextRasterizer;
 
 import java.io.IOException;
 import java.util.Locale;
@@ -45,6 +50,7 @@ public class RouteMapGenerator implements IGui {
 	private static final String AIRPORT_INTERCHANGE_RESOURCE = "textures/block/sign/airplane.png";
 	private static final int RAILWAY_INTERCHANGE_COLOR = 0x21679F;
 	private static final RouteAssetSourceImages ROUTE_ASSET_SOURCE_IMAGES = new RouteAssetSourceImages(RouteMapGenerator::loadRouteAssetSource);
+	private static final RouteAssetRenderer SHARED_ROUTE_ASSET_RENDERER = new RouteAssetRenderer();
 	private static final String TEMP_CIRCULAR_MARKER_CLOCKWISE = String.format("temp_circular_marker_%s_clockwise", Init.randomString());
 	private static final String TEMP_CIRCULAR_MARKER_ANTICLOCKWISE = String.format("temp_circular_marker_%s_anticlockwise", Init.randomString());
 	private static final int PIXEL_RESOLUTION = 24;
@@ -55,6 +61,39 @@ public class RouteMapGenerator implements IGui {
 		lineSpacing = lineSize * 3 / 2;
 		fontSizeBig = lineSize * 2;
 		fontSizeSmall = fontSizeBig / 2;
+	}
+
+	private static NativeImage renderShared(RouteAssetKey key, RouteAssetRenderSnapshot snapshot) {
+		final RouteAssetTextRasterizer text = (value, maxWidth, maxHeight, cjkSize, latinSize, padding, alignment, language) -> {
+			final int[] dimensions = new int[2];
+			final byte[] pixels = DynamicTextureCache.instance.getTextPixels(value, dimensions, maxWidth, maxHeight, cjkSize, latinSize, padding, alignment == null ? null : HorizontalAlignment.valueOf(alignment.name()));
+			return new RouteAssetTextRasterizer.RasterizedText(pixels, dimensions[0], dimensions[1]);
+		};
+		final RouteAssetImage image = SHARED_ROUTE_ASSET_RENDERER.render(key, snapshot, text, ROUTE_ASSET_SOURCE_IMAGES, resolution());
+		final NativeImage nativeImage = new NativeImage(NativeImageFormat.getAbgrMapped(), image.getWidth(), image.getHeight(), false);
+		for (int x = 0; x < image.getWidth(); x++) for (int y = 0; y < image.getHeight(); y++) nativeImage.setPixelColor(x, y, image.getPixel(x, y));
+		return nativeImage;
+	}
+
+	private static RouteAssetClientSnapshotAdapter.ResolvedSnapshot resolveShared(RouteAssetKey key) {
+		return RouteAssetClientSnapshotAdapter.resolve(key).orElseGet(() -> new RouteAssetClientSnapshotAdapter.ResolvedSnapshot(RouteAssetRenderSnapshot.builder().build(), "0".repeat(64)));
+	}
+
+	public static String getRouteAssetFingerprint(RouteAssetKey key) {
+		return RouteAssetClientSnapshotAdapter.resolve(key).map(RouteAssetClientSnapshotAdapter.ResolvedSnapshot::getFingerprint).orElse("");
+	}
+
+	public static RouteAssetRenderSnapshot getRouteAssetSnapshot(RouteAssetKey key) {
+		return RouteAssetClientSnapshotAdapter.resolve(key).map(RouteAssetClientSnapshotAdapter.ResolvedSnapshot::getSnapshot).orElse(null);
+	}
+
+	private static int resolution() { return Config.getClient().getDynamicTextureResolution(); }
+	private static String language() {
+		switch (Config.getClient().getLanguageDisplay()) {
+			case CJK_ONLY: return "CJK";
+			case NON_CJK_ONLY: return "LATIN";
+			default: return "NORMAL";
+		}
 	}
 
 	public static NativeImage generatePixelatedText(String text, int textColor, int maxWidth, double cjkSizeRatio, boolean fullPixel) {
@@ -79,19 +118,8 @@ public class RouteMapGenerator implements IGui {
 
 	public static NativeImage generateColorStrip(long platformId) {
 		try {
-			final IntArrayList colors = getRouteStream(platformId, (simplifiedRoute, currentStationIndex) -> {
-			});
-			if (colors.isEmpty()) {
-				final NativeImage nativeImage = new NativeImage(NativeImageFormat.getAbgrMapped(), 1, 1, false);
-				nativeImage.setPixelColor(0, 0, 0);
-				return nativeImage;
-			} else {
-				final NativeImage nativeImage = new NativeImage(NativeImageFormat.getAbgrMapped(), 1, colors.size(), false);
-				for (int i = 0; i < colors.size(); i++) {
-					drawPixelSafe(nativeImage, 0, i, ARGB_BLACK | colors.getInt(i));
-				}
-				return nativeImage;
-			}
+			final RouteAssetKey key = RouteAssetCanonicalKeyFactory.routeColorStrip("client/runtime", platformId, Math.min(3, resolution()), language());
+			return renderShared(key, resolveShared(key).getSnapshot());
 		} catch (Exception e) {
 			Init.LOGGER.error("", e);
 		}
@@ -270,16 +298,8 @@ public class RouteMapGenerator implements IGui {
 
 	public static NativeImage generateRouteSquare(int color, String routeName, HorizontalAlignment horizontalAlignment) {
 		try {
-			final int padding = scale / 32;
-			final int[] dimensions = new int[2];
-			final byte[] pixels = DynamicTextureCache.instance.getTextPixels(routeName, dimensions, Integer.MAX_VALUE, (int) ((fontSizeBig + fontSizeSmall) * DynamicTextureCache.LINE_HEIGHT_MULTIPLIER), fontSizeBig, fontSizeSmall, padding, horizontalAlignment);
-
-			final int width = dimensions[0] + padding * 2;
-			final int height = dimensions[1] + padding * 2;
-			final NativeImage nativeImage = new NativeImage(NativeImageFormat.getAbgrMapped(), width, height, false);
-			nativeImage.fillRect(0, 0, width, height, invertColor(ARGB_BLACK | color));
-			drawString(nativeImage, pixels, width / 2, height / 2, dimensions, HorizontalAlignment.CENTER, VerticalAlignment.CENTER, 0, ARGB_WHITE, false);
-			return nativeImage;
+			final RouteAssetKey key = RouteAssetCanonicalKeyFactory.routeSquare("client/runtime", 0, Math.min(3, resolution()), language(), RouteAssetTextRasterizer.Alignment.valueOf(horizontalAlignment.name()));
+			return renderShared(key, RouteAssetRenderSnapshot.builder().routeColor(color).routeName(routeName).build());
 		} catch (Exception e) {
 			Init.LOGGER.error("", e);
 		}
@@ -293,6 +313,10 @@ public class RouteMapGenerator implements IGui {
 		}
 
 		try {
+			if (SHARED_ROUTE_ASSET_RENDERER != null) {
+				final RouteAssetKey key = RouteAssetCanonicalKeyFactory.directionArrow("client/runtime", platformId, Math.min(3, resolution()), language(), hasLeft, hasRight, RouteAssetTextRasterizer.Alignment.valueOf(horizontalAlignment.name()), showToString, paddingScale, aspectRatio, backgroundColor, textColor, transparentColor);
+				return renderShared(key, resolveShared(key).getSnapshot());
+			}
 			final ObjectArrayList<String> destinations = new ObjectArrayList<>();
 			final IntArrayList colors = getRouteStream(platformId, (simplifiedRoute, currentStationIndex) -> {
 				final String tempMarker;
@@ -390,6 +414,10 @@ public class RouteMapGenerator implements IGui {
 		}
 
 		try {
+			if (SHARED_ROUTE_ASSET_RENDERER != null) {
+				final RouteAssetKey key = RouteAssetCanonicalKeyFactory.routeMap("client/runtime", platformId, Math.min(3, resolution()), language(), vertical, flip, aspectRatio, transparentWhite);
+				return renderShared(key, resolveShared(key).getSnapshot());
+			}
 			final ObjectArrayList<ObjectIntImmutablePair<SimplifiedRoute>> routeDetails = new ObjectArrayList<>();
 			final IntAVLTreeSet excludedRouteColors = new IntAVLTreeSet();
 			getRouteStream(platformId, (simplifiedRoute, currentStationIndex) -> {

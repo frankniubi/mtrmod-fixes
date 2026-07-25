@@ -37,6 +37,24 @@ public final class RouteAssetManifestTest {
 	}
 
 	@Test
+	public void moveMatchesContentHashAndCarriesTheNewDependencyFingerprint() {
+		final RouteAssetKey oldKey = RouteAssetKey.parse("minecraft/overworld|ROUTE_SQUARE|20|2|NORMAL|align=LEFT");
+		final RouteAssetKey newKey = oldKey.withPrimaryId(21);
+		final RouteAssetManifest before = RouteAssetManifest.builder().put(oldKey, HASH_B, "old-key-fingerprint").build();
+		final RouteAssetManifest after = RouteAssetManifest.builder().put(newKey, HASH_B, "new-key-fingerprint").build();
+
+		final RouteAssetManifestDiff diff = RouteAssetManifestDiff.between(before.getRevision(), before, after);
+
+		Assertions.assertEquals(1, diff.getChanges().size());
+		final RouteAssetManifestDiff.Change move = diff.getChanges().get(0);
+		Assertions.assertEquals(RouteAssetManifestDiff.Operation.MOVE, move.getOperation());
+		Assertions.assertEquals(oldKey, move.getOldKey());
+		Assertions.assertEquals(newKey, move.getNewKey());
+		Assertions.assertEquals("new-key-fingerprint", move.getDependencyFingerprint());
+		Assertions.assertEquals(after, diff.apply(before));
+	}
+
+	@Test
 	public void addAndDeleteRetainTheirExpectedHashes() {
 		final RouteAssetKey deleted = RouteAssetKey.parse("minecraft/overworld|DIRECTION_ARROW|1|0|NORMAL|direction=LEFT");
 		final RouteAssetKey added = RouteAssetKey.parse("minecraft/the_nether|ROUTE_COLOR_STRIP|2|3|NORMAL|color=123456");

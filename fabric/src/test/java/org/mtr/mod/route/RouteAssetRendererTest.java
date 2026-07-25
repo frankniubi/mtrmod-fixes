@@ -45,12 +45,24 @@ public final class RouteAssetRendererTest {
 		Assertions.assertEquals(expected, actualValues);
 	}
 
+	@Test
+	public void transparentColorIsClearedAfterComposition() {
+		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.directionArrow("minecraft/overworld", 1, 1, "NORMAL", false, false, RouteAssetTextRasterizer.Alignment.CENTER, false, 0.2F, 2, 0xFF112233, 0xFFFFFFFF, 0xFF112233);
+		final RouteAssetRenderSnapshot snapshot = base().backgroundColor(0xFF112233).transparentColor(0xFF112233).showToString(false).build();
+		final RouteAssetImage image = renderer.render(key, snapshot, text, sources);
+		for (int y = 0; y < image.getHeight(); y++) {
+			for (int x = 0; x < image.getWidth(); x++) {
+				Assertions.assertEquals(0, image.getPixel(x, y));
+			}
+		}
+	}
+
 	private static Map<String, Fixture> fixtures() {
 		final Map<String, Fixture> fixtures = new LinkedHashMap<>();
 		fixtures.put("color-strip", fixture("minecraft/overworld|ROUTE_COLOR_STRIP|1|1|NORMAL|align=LEFT", base().routeColors(List.of(0x14755E, 0x25B407, 0x3E405E)).build()));
 		fixtures.put("route-square", fixture("minecraft/overworld|ROUTE_SQUARE|1|1|NORMAL|align=CENTER", base().routeColor(0x14755E).routeName("IG5").build()));
-		fixtures.put("vertical-map", fixture("minecraft/overworld|ROUTE_MAP|1|1|NORMAL|a=4:9,f=0,t=0,v=1", base().vertical(true).aspectRatio(4F / 9).stations(normalStations()).build()));
-		fixtures.put("direction-arrow", fixture("minecraft/overworld|DIRECTION_ARROW|1|1|NORMAL|a=16:5,align=LEFT", base().aspectRatio(16F / 5).hasLeft(true).destination("City Three|第三城").build()));
+		fixtures.put("vertical-map", fixture("minecraft/overworld|ROUTE_MAP|1|1|NORMAL|a=37:22,f=0,t=0,v=1", base().vertical(true).aspectRatio(37F / 22).stations(normalStations()).build()));
+		fixtures.put("direction-arrow", fixture("minecraft/overworld|DIRECTION_ARROW|1|1|NORMAL|a=22:5,align=CENTER,bg=FF000000,left=1,pad=1:5,right=0,show=1,text=FFFFFFFF,transparent=00000000", base().backgroundColor(0xFF000000).textColor(0xFFFFFFFF).paddingScale(0.2F).aspectRatio(22F / 5).hasLeft(true).destination("City Three|第三城").build()));
 		fixtures.put("horizontal-map", fixture("minecraft/overworld|ROUTE_MAP|2|1|NORMAL|a=16:5,f=0,t=0,v=0", base().aspectRatio(16F / 5).stations(normalStations()).build()));
 		fixtures.put("dense-map", fixture("minecraft/overworld|ROUTE_MAP|3|1|NORMAL|a=4:9,f=0,t=0,v=1", base().vertical(true).dense(true).aspectRatio(4F / 9).routeColors(List.of(0x14755E, 0x25B407, 0x3E405E)).stations(denseStations()).build()));
 		fixtures.put("railway-icon", fixture("minecraft/overworld|ROUTE_MAP|4|1|NORMAL|a=4:9,f=0,t=0,v=1", base().vertical(true).aspectRatio(4F / 9).stations(List.of(station(1, "Railway|鐵路", true, false))).build()));

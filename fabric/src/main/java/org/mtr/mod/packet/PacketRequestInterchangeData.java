@@ -29,7 +29,7 @@ public final class PacketRequestInterchangeData extends PacketRequestResponseBas
 	@Override
 	protected void runClientInbound(JsonReader jsonReader) {
 		new ListDataResponse(jsonReader, MinecraftClientData.getInterchangeData()).write();
-		DynamicTextureCache.instance.refresh();
+		DynamicTextureCache.instance.onRouteDataChanged();
 	}
 
 	@Override

@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
+import java.util.Map;
 
 public final class RouteAssetRepositoryTest {
 
@@ -64,6 +65,20 @@ public final class RouteAssetRepositoryTest {
 		final RouteAssetManifest manifest = manifest(repository, 4, 0xFF777777);
 		final String revision = repository.publish(manifest, Collections.singletonList("base-url:http")).getRevision();
 		Assertions.assertEquals(revision, repository.publish(manifest, Collections.singletonList("base-url:https-cdn")).getRevision());
+	}
+
+	@Test
+	public void dependencyFingerprintsPersistAtomicallyWithoutChangingHead() throws Exception {
+		final RouteAssetRepository repository = new RouteAssetRepository(root, 1, 32);
+		final RouteAssetManifest manifest = manifest(repository, 5, 0xFF888888);
+		final String revision = repository.publish(manifest, Collections.singletonList("initial")).getRevision();
+		final RouteAssetKey key = manifest.getEntries().firstKey();
+
+		repository.saveDependencyFingerprints(Map.of(key, "updated-input-same-pixels"));
+
+		final RouteAssetRepository restarted = new RouteAssetRepository(root, 1, 32);
+		Assertions.assertEquals(Map.of(key, "updated-input-same-pixels"), restarted.loadDependencyFingerprints());
+		Assertions.assertEquals(revision, restarted.loadHead().getRevision());
 	}
 
 	private static RouteAssetManifest manifest(RouteAssetRepository repository, long primaryId, int color) throws Exception {

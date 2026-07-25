@@ -53,10 +53,16 @@ public final class PacketForwardClientRequest extends PacketHandler {
 
 	@Override
 	public void runServer(MinecraftServer minecraftServer, ServerPlayerEntity serverPlayerEntity) {
-		Init.REQUEST_HELPER.sendRequest(
+		final boolean mutation = !content.isEmpty();
+		Init.REQUEST_HELPER.sendRequestWithStatus(
 				String.format("http://localhost:%s%s", Init.getServerPort(), endpoint),
 				content.isEmpty() ? null : content,
-				(response, path) -> Init.REGISTRY.sendPacketToClient(serverPlayerEntity, new PacketForwardClientRequest(response, path, callbackId))
+				(response, path, statusCode) -> minecraftServer.execute(() -> {
+					if (mutation && statusCode >= 200 && statusCode < 300 && Init.getRouteAssetServerManager() != null) {
+						Init.getRouteAssetServerManager().requestRefresh(minecraftServer, "forwarded-dashboard-update");
+					}
+					Init.REGISTRY.sendPacketToClient(serverPlayerEntity, new PacketForwardClientRequest(response, path, callbackId));
+				})
 		);
 	}
 
