@@ -65,6 +65,12 @@ public final class ClientRouteAssetSession {
 		return true;
 	}
 
+	public synchronized boolean completeAuthorized(long expectedGeneration) {
+		if (!isCurrent(expectedGeneration) || state != State.SYNCING && state != State.LOCAL_FALLBACK) return false;
+		state = State.READY;
+		return true;
+	}
+
 	public synchronized boolean fallback(long expectedGeneration) {
 		if (!isCurrent(expectedGeneration) || state == State.DISCONNECTED || state == State.DISABLED) {
 			return false;

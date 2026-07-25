@@ -1,6 +1,7 @@
 package org.mtr.mod.client.asset;
 
 import org.mtr.mapping.holder.MinecraftClient;
+import org.mtr.mapping.holder.Screen;
 import org.mtr.mod.InitClient;
 import org.mtr.mod.config.Config;
 import org.mtr.mod.packet.PacketRouteAssetHello;
@@ -10,6 +11,7 @@ import org.mtr.mod.route.RouteAssetHello;
 import org.mtr.mod.route.RouteAssetManifest;
 import org.mtr.mod.route.RouteAssetNegotiation;
 import org.mtr.mod.route.RouteAssetProtocol;
+import org.mtr.mod.screen.RouteAssetLoadingScreen;
 
 import java.io.IOException;
 import java.net.URI;
@@ -45,6 +47,8 @@ public final class ClientRouteAssetManager {
 	private final boolean available;
 	private final ClientRouteAssetSession session = new ClientRouteAssetSession();
 	private final AtomicBoolean maintenanceQueued = new AtomicBoolean();
+	private ClientRouteAssetDownloader downloader;
+	private LoadingScreenController loadingScreenController = LoadingScreenController.NONE;
 
 	private String multiplayerAddress = "";
 	private String currentServerId = "";
@@ -52,9 +56,16 @@ public final class ClientRouteAssetManager {
 	private Settings settings;
 	private long nextMaintenanceMillis;
 	private long diskCacheEpoch;
+	private Progress progress = Progress.EMPTY;
+	private long syncStartedMillis;
+	private long missingAssetsSinceMillis;
+	private boolean missingAssetsPlanned;
+	private Object loadingScreenToken;
 
 	private static final long MAINTENANCE_INTERVAL_MILLIS = 60_000;
+	private static final long DEFAULT_SYNC_TIMEOUT_MILLIS = 30_000;
 	private static final AtomicInteger MAINTENANCE_THREAD_COUNTER = new AtomicInteger();
+	private static final AtomicInteger DOWNLOAD_THREAD_COUNTER = new AtomicInteger();
 
 	public ClientRouteAssetManager(ClientRouteAssetDiskCache diskCache, LongSupplier clock, Supplier<Settings> settingsSupplier, Consumer<RouteAssetHello> helloSender, Consumer<DocumentRequest> documentRequestHandler) {
 		this(diskCache, clock, settingsSupplier, helloSender, documentRequestHandler, () -> { });
@@ -99,6 +110,7 @@ public final class ClientRouteAssetManager {
 	}
 
 	public synchronized void onJoin(String multiplayerAddress) {
+		closeLoadingScreen();
 		if (session.getState() != ClientRouteAssetSession.State.DISCONNECTED) {
 			session.disconnect();
 			cancelDocumentWork();
@@ -107,6 +119,7 @@ public final class ClientRouteAssetManager {
 		currentServerId = "";
 		pinnedHashes = Collections.emptySet();
 		nextMaintenanceMillis = 0;
+		resetSyncUi();
 		if (!available) {
 			settings = null;
 			session.join(true, false, clock.getAsLong());
@@ -201,6 +214,7 @@ public final class ClientRouteAssetManager {
 			currentServerId = UUID.fromString(payload.getServerId()).toString();
 			if (payload.getMode() == RouteAssetNegotiation.Mode.UNCHANGED) {
 				if (!session.beginCacheValidation(generation)) return;
+				syncStartedMillis = clock.getAsLong();
 				scheduleUnchangedValidation(generation, diskCacheEpoch, payload, settings, multiplayerAddress);
 				return;
 			}
@@ -210,8 +224,14 @@ public final class ClientRouteAssetManager {
 			}
 			requireCanonicalDocumentPath(payload);
 			if (!session.beginSync(generation, payload.getDocumentHash())) return;
-			scheduleAssociation(generation, multiplayerAddress, currentServerId);
-			documentRequestHandler.accept(new DocumentRequest(generation, payload, multiplayerAddress));
+			syncStartedMillis = clock.getAsLong();
+			final DocumentRequest request = new DocumentRequest(generation, payload, multiplayerAddress);
+			if (downloader == null) {
+				scheduleAssociation(generation, multiplayerAddress, currentServerId);
+				documentRequestHandler.accept(request);
+			} else {
+				startDownload(request, settings);
+			}
 		} catch (RuntimeException exception) {
 			session.fallback(generation);
 		}
@@ -269,6 +289,17 @@ public final class ClientRouteAssetManager {
 
 	public synchronized void tick(long nowMillis) {
 		session.tick(nowMillis);
+		if (session.getState() == ClientRouteAssetSession.State.SYNCING) {
+			final long timeoutMillis = settings == null ? DEFAULT_SYNC_TIMEOUT_MILLIS : settings.getStartupTimeoutMillis();
+			if (nowMillis >= saturatingAdd(syncStartedMillis, timeoutMillis)) {
+				session.fallback(session.getGeneration());
+				closeLoadingScreen();
+			} else if (missingAssetsPlanned && loadingScreenToken == null && nowMillis >= saturatingAdd(missingAssetsSinceMillis, RouteAssetProtocol.LOADING_SCREEN_DELAY_MILLIS) && loadingScreenController.canOpen()) {
+				loadingScreenToken = loadingScreenController.open(this::getProgress);
+			}
+		} else if (session.getState() != ClientRouteAssetSession.State.SYNCING) {
+			closeLoadingScreen();
+		}
 		if (available && settings != null && session.getState() == ClientRouteAssetSession.State.READY && nowMillis >= nextMaintenanceMillis && maintenanceQueued.compareAndSet(false, true)) {
 			final long generation = session.getGeneration();
 			final long maximumBytes = settings.getMaximumCacheBytes();
@@ -301,6 +332,7 @@ public final class ClientRouteAssetManager {
 
 	public synchronized CompletableFuture<Boolean> repairCurrentServerCache() {
 		if (!available || session.getState() == ClientRouteAssetSession.State.DISCONNECTED || currentServerId.isEmpty()) return CompletableFuture.completedFuture(false);
+		closeLoadingScreen();
 		final String serverId = currentServerId;
 		diskCacheEpoch = diskCache.advanceSessionEpoch();
 		session.disconnect();
@@ -326,6 +358,7 @@ public final class ClientRouteAssetManager {
 	}
 
 	public synchronized void onDisconnect() {
+		closeLoadingScreen();
 		if (available) diskCacheEpoch = diskCache.advanceSessionEpoch();
 		if (session.getState() != ClientRouteAssetSession.State.DISCONNECTED) {
 			session.disconnect();
@@ -336,6 +369,7 @@ public final class ClientRouteAssetManager {
 		pinnedHashes = Collections.emptySet();
 		settings = null;
 		nextMaintenanceMillis = 0;
+		resetSyncUi();
 	}
 
 	public boolean isCurrent(long generation) {
@@ -350,11 +384,98 @@ public final class ClientRouteAssetManager {
 		return session.getGeneration();
 	}
 
+	public synchronized Progress getProgress() {
+		return progress;
+	}
+
+	public synchronized String getCurrentServerId() {
+		return currentServerId;
+	}
+
+	void installDownloader(ClientRouteAssetDownloader downloader) {
+		this.downloader = Objects.requireNonNull(downloader, "downloader");
+	}
+
+	void installLoadingScreenController(LoadingScreenController loadingScreenController) {
+		this.loadingScreenController = Objects.requireNonNull(loadingScreenController, "loadingScreenController");
+	}
+
 	private void cancelDocumentWork() {
+		if (downloader != null) downloader.cancelAll();
 		try {
 			documentWorkCanceller.run();
 		} catch (RuntimeException ignored) {
 		}
+	}
+
+	private void startDownload(DocumentRequest request, Settings settingsSnapshot) {
+		final long generation = request.getGeneration();
+		downloader.synchronize(
+				request,
+				settingsSnapshot.getResolution(),
+				settingsSnapshot.getLanguage(),
+				settingsSnapshot.getMaximumRevisionDownloadBytes(),
+				settingsSnapshot.getMaximumCacheBytes(),
+				diskCacheEpoch,
+				() -> isCurrent(generation),
+				new ClientRouteAssetDownloader.ProgressListener() {
+					@Override
+					public void planned(int totalObjects) {
+						dispatchClient(generation, () -> updateDownloadPlan(generation, totalObjects));
+					}
+
+					@Override
+					public void completed(int completedObjects, int totalObjects) {
+						dispatchClient(generation, () -> updateDownloadProgress(generation, completedObjects, totalObjects));
+					}
+				}
+		).whenComplete((result, throwable) -> dispatchClient(generation, () -> finishDownload(generation, result, throwable)));
+	}
+
+	private synchronized void updateDownloadPlan(long generation, int totalObjects) {
+		if (!session.isCurrent(generation) || session.getState() != ClientRouteAssetSession.State.SYNCING) return;
+		progress = new Progress(0, totalObjects);
+		if (totalObjects > 0) {
+			missingAssetsPlanned = true;
+			missingAssetsSinceMillis = clock.getAsLong();
+		}
+	}
+
+	synchronized void updateDownloadProgress(long generation, int completedObjects, int totalObjects) {
+		if (!session.isCurrent(generation)) return;
+		progress = new Progress(Math.max(progress.getCompletedObjects(), completedObjects), totalObjects);
+	}
+
+	private synchronized void finishDownload(long generation, ClientRouteAssetDownloader.SyncResult result, Throwable throwable) {
+		if (!session.isCurrent(generation)) return;
+		if (throwable == null && result != null) {
+			pinnedHashes = result.getActiveHashes();
+			nextMaintenanceMillis = clock.getAsLong() + MAINTENANCE_INTERVAL_MILLIS;
+			if (session.getState() == ClientRouteAssetSession.State.SYNCING || session.getState() == ClientRouteAssetSession.State.LOCAL_FALLBACK) session.completeAuthorized(generation);
+		} else if (session.getState() == ClientRouteAssetSession.State.SYNCING) {
+			pinnedHashes = Collections.emptySet();
+			session.complete(generation, false);
+		}
+		closeLoadingScreen();
+	}
+
+	private void closeLoadingScreen() {
+		if (loadingScreenToken != null) {
+			if (loadingScreenController.isCurrent(loadingScreenToken)) loadingScreenController.close(loadingScreenToken);
+			loadingScreenToken = null;
+		}
+	}
+
+	private void resetSyncUi() {
+		progress = Progress.EMPTY;
+		syncStartedMillis = 0;
+		missingAssetsSinceMillis = 0;
+		missingAssetsPlanned = false;
+		loadingScreenToken = null;
+	}
+
+	private static long saturatingAdd(long value, long increment) {
+		return value > Long.MAX_VALUE - increment ? Long.MAX_VALUE : value + increment;
 	}
 
 	private synchronized boolean isReady(long generation) {
@@ -378,7 +499,7 @@ public final class ClientRouteAssetManager {
 	private static ClientRouteAssetManager createDefault() {
 		final ExecutorService backgroundExecutor = createMaintenanceExecutor();
 		final Executor clientExecutor = MinecraftClient.getInstance()::execute;
-		return createResilient(
+		final ClientRouteAssetManager manager = createResilient(
 				() -> {
 					final Path cacheRoot = MinecraftClient.getInstance().getRunDirectoryMapped().toPath().resolve(Path.of("cache", "mtr", "route-textures"));
 					return new ClientRouteAssetDiskCache(cacheRoot, RouteAssetProtocol.RENDERER_VERSION);
@@ -391,7 +512,8 @@ public final class ClientRouteAssetManager {
 						Config.getClient().getLanguageDisplay().name(),
 						fingerprint,
 						RouteAssetProtocol.MAX_REVISION_DOWNLOAD_BYTES,
-						(long) Config.getClient().getRouteTextureCacheMiB() * 1024 * 1024
+						(long) Config.getClient().getRouteTextureCacheMiB() * 1024 * 1024,
+						(long) Config.getClient().getRouteTextureStartupTimeoutSeconds() * 1000
 				),
 				hello -> InitClient.REGISTRY_CLIENT.sendPacketToServer(new PacketRouteAssetHello(hello)),
 				request -> { },
@@ -400,6 +522,11 @@ public final class ClientRouteAssetManager {
 				backgroundExecutor,
 				clientExecutor
 		);
+		if (manager.available) {
+			manager.installDownloader(new ClientRouteAssetDownloader(manager.diskCache, createDownloadExecutor(Config.getClient().getRouteTextureDownloadConcurrency())));
+			manager.installLoadingScreenController(new MinecraftLoadingScreenController());
+		}
+		return manager;
 	}
 
 	static ClientRouteAssetManager createResilient(IoSupplier<ClientRouteAssetDiskCache> cacheLoader, IoSupplier<String> fingerprintLoader, LongSupplier clock, Function<String, Settings> settingsFactory, Consumer<RouteAssetHello> helloSender, Consumer<DocumentRequest> documentRequestHandler, Runnable documentWorkCanceller, Executor maintenanceExecutor) {
@@ -435,6 +562,41 @@ public final class ClientRouteAssetManager {
 		});
 	}
 
+	static ExecutorService createDownloadExecutor(int concurrency) {
+		if (concurrency < 1 || concurrency > 8) throw new IllegalArgumentException("Invalid route asset download concurrency");
+		return Executors.newFixedThreadPool(concurrency, runnable -> {
+			final Thread thread = new Thread(runnable, "mtr-route-assets-client-download-" + DOWNLOAD_THREAD_COUNTER.incrementAndGet());
+			thread.setDaemon(true);
+			thread.setPriority(Thread.MIN_PRIORITY);
+			return thread;
+		});
+	}
+
+	private static final class MinecraftLoadingScreenController implements LoadingScreenController {
+		@Override
+		public boolean canOpen() {
+			return MinecraftClient.getInstance().getCurrentScreenMapped() == null;
+		}
+
+		@Override
+		public Object open(Supplier<Progress> progressSupplier) {
+			final Screen screen = new Screen(new RouteAssetLoadingScreen(progressSupplier));
+			MinecraftClient.getInstance().openScreen(screen);
+			return screen;
+		}
+
+		@Override
+		public boolean isCurrent(Object screenToken) {
+			final Screen current = MinecraftClient.getInstance().getCurrentScreenMapped();
+			return screenToken instanceof Screen && current != null && current.data == ((Screen) screenToken).data;
+		}
+
+		@Override
+		public void close(Object screenToken) {
+			if (isCurrent(screenToken)) MinecraftClient.getInstance().openScreen(null);
+		}
+	}
+
 	private static final class InstanceHolder {
 		private static final ClientRouteAssetManager INSTANCE = createDefault();
 	}
@@ -451,15 +613,21 @@ public final class ClientRouteAssetManager {
 		private final String resourceFingerprint;
 		private final long maximumRevisionDownloadBytes;
 		private final long maximumCacheBytes;
+		private final long startupTimeoutMillis;
 
 		public Settings(boolean enabled, int resolution, String language, String resourceFingerprint, long maximumRevisionDownloadBytes) {
-			this(enabled, resolution, language, resourceFingerprint, maximumRevisionDownloadBytes, Long.MAX_VALUE);
+			this(enabled, resolution, language, resourceFingerprint, maximumRevisionDownloadBytes, Long.MAX_VALUE, DEFAULT_SYNC_TIMEOUT_MILLIS);
 		}
 
 		public Settings(boolean enabled, int resolution, String language, String resourceFingerprint, long maximumRevisionDownloadBytes, long maximumCacheBytes) {
+			this(enabled, resolution, language, resourceFingerprint, maximumRevisionDownloadBytes, maximumCacheBytes, DEFAULT_SYNC_TIMEOUT_MILLIS);
+		}
+
+		public Settings(boolean enabled, int resolution, String language, String resourceFingerprint, long maximumRevisionDownloadBytes, long maximumCacheBytes, long startupTimeoutMillis) {
 			if (resolution < 0 || resolution > 8 || maximumRevisionDownloadBytes < 0 || maximumRevisionDownloadBytes > RouteAssetProtocol.MAX_REVISION_DOWNLOAD_BYTES || maximumCacheBytes < 0) {
 				throw new IllegalArgumentException("Invalid client route asset settings");
 			}
+			if (startupTimeoutMillis < 1_000 || startupTimeoutMillis > DEFAULT_SYNC_TIMEOUT_MILLIS) throw new IllegalArgumentException("Invalid route asset startup timeout");
 			this.enabled = enabled;
 			this.resolution = resolution;
 			final String configuredLanguage = Objects.requireNonNull(language, "language").trim().toUpperCase(java.util.Locale.ROOT);
@@ -474,6 +642,7 @@ public final class ClientRouteAssetManager {
 			this.resourceFingerprint = RouteAssetHash.requireValid(resourceFingerprint);
 			this.maximumRevisionDownloadBytes = maximumRevisionDownloadBytes;
 			this.maximumCacheBytes = maximumCacheBytes;
+			this.startupTimeoutMillis = startupTimeoutMillis;
 		}
 
 		public boolean isEnabled() { return enabled; }
@@ -482,6 +651,39 @@ public final class ClientRouteAssetManager {
 		public String getResourceFingerprint() { return resourceFingerprint; }
 		public long getMaximumRevisionDownloadBytes() { return maximumRevisionDownloadBytes; }
 		public long getMaximumCacheBytes() { return maximumCacheBytes; }
+		public long getStartupTimeoutMillis() { return startupTimeoutMillis; }
+	}
+
+	public static final class Progress {
+		private static final Progress EMPTY = new Progress(0, 0);
+		private final int completedObjects;
+		private final int totalObjects;
+
+		private Progress(int completedObjects, int totalObjects) {
+			if (completedObjects < 0 || totalObjects < 0 || completedObjects > totalObjects) throw new IllegalArgumentException("Invalid route asset progress");
+			this.completedObjects = completedObjects;
+			this.totalObjects = totalObjects;
+		}
+
+		public static Progress empty() { return EMPTY; }
+
+		public int getCompletedObjects() { return completedObjects; }
+		public int getTotalObjects() { return totalObjects; }
+		public float getFraction() { return totalObjects == 0 ? 0 : (float) completedObjects / totalObjects; }
+	}
+
+	public interface LoadingScreenController {
+		LoadingScreenController NONE = new LoadingScreenController() {
+			@Override public boolean canOpen() { return false; }
+			@Override public Object open(Supplier<Progress> progressSupplier) { throw new IllegalStateException("Route asset loading screen is unavailable"); }
+			@Override public boolean isCurrent(Object screenToken) { return false; }
+			@Override public void close(Object screenToken) { }
+		};
+
+		boolean canOpen();
+		Object open(Supplier<Progress> progressSupplier);
+		boolean isCurrent(Object screenToken);
+		void close(Object screenToken);
 	}
 
 	public static final class DocumentRequest {
@@ -499,6 +701,7 @@ public final class ClientRouteAssetManager {
 
 		public long getGeneration() { return generation; }
 		public PacketRouteAssetManifest.ManifestPayload getPayload() { return payload; }
+		public String getMultiplayerAddress() { return multiplayerAddress; }
 		public synchronized ClientRouteAssetUrlPolicy getUrlPolicy() {
 			resolveDocumentTarget();
 			return urlPolicy;

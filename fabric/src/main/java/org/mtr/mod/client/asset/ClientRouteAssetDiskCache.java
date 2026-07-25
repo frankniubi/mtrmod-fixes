@@ -119,6 +119,41 @@ public final class ClientRouteAssetDiskCache {
 		writeAtomic(manifestPath(id), RouteAssetManifestCodec.encode(manifest));
 	}
 
+	public boolean commitManifest(String multiplayerAddress, String serverId, RouteAssetManifest manifest, long expectedEpoch) throws IOException {
+		return commitManifest(multiplayerAddress, serverId, manifest, expectedEpoch, () -> { });
+	}
+
+	public boolean commitManifest(String multiplayerAddress, String serverId, RouteAssetManifest manifest, long expectedEpoch, Runnable beforeMove) throws IOException {
+		final String id = requireServerId(serverId);
+		if (manifest.getRendererVersion() != rendererVersion) throw new IOException("Route asset manifest renderer mismatch");
+		final Path manifestTarget = manifestPath(id);
+		final Path stagedManifest = writeStaged(manifestTarget, RouteAssetManifestCodec.encode(manifest));
+		Path stagedAssociations = null;
+		try {
+			synchronized (associationLock) {
+				final Map<String, String> associations = readAssociations();
+				associations.put(normalizeAddress(multiplayerAddress), id);
+				final JsonObject associationObject = new JsonObject();
+				associations.entrySet().stream().sorted(Map.Entry.comparingByKey()).forEach(entry -> associationObject.addProperty(entry.getKey(), entry.getValue()));
+				stagedAssociations = writeStaged(associationsPath, associationObject.toString().getBytes(StandardCharsets.UTF_8));
+				beforeMove.run();
+				synchronized (sessionEpochGuard) {
+					if (sessionEpoch != expectedEpoch) return false;
+					moveAtomically(stagedManifest, manifestTarget);
+					try {
+						moveAtomically(stagedAssociations, associationsPath);
+					} catch (IOException ignored) {
+						// The address index is a reconnect hint; the manifest is authoritative.
+					}
+					return true;
+				}
+			}
+		} finally {
+			Files.deleteIfExists(stagedManifest);
+			if (stagedAssociations != null) Files.deleteIfExists(stagedAssociations);
+		}
+	}
+
 	public Optional<RouteAssetManifest> loadManifest(String serverId) {
 		final Path path;
 		try {
@@ -299,14 +334,25 @@ public final class ClientRouteAssetDiskCache {
 	}
 
 	private static void writeAtomic(Path target, byte[] bytes) throws IOException {
-		Files.createDirectories(target.getParent());
-		final Path temporary = Files.createTempFile(target.getParent(), "." + target.getFileName() + '-', ".tmp");
+		final Path temporary = writeStaged(target, bytes);
 		try {
-			Files.write(temporary, bytes, StandardOpenOption.TRUNCATE_EXISTING);
-			force(temporary);
 			moveAtomically(temporary, target);
 		} finally {
 			Files.deleteIfExists(temporary);
+		}
+	}
+
+	private static Path writeStaged(Path target, byte[] bytes) throws IOException {
+		Files.createDirectories(target.getParent());
+		final Path temporary = Files.createTempFile(target.getParent(), "." + target.getFileName() + '-', ".tmp");
+		boolean successful = false;
+		try {
+			Files.write(temporary, bytes, StandardOpenOption.TRUNCATE_EXISTING);
+			force(temporary);
+			successful = true;
+			return temporary;
+		} finally {
+			if (!successful) Files.deleteIfExists(temporary);
 		}
 	}
 

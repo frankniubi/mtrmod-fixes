@@ -437,10 +437,11 @@ public final class ClientRouteAssetSessionTest {
 		cache.storeManifest(serverId, manifest);
 		cache.associate(address, serverId);
 		final QueueExecutor executor = new QueueExecutor();
+		final AtomicLong clock = new AtomicLong(1_700_000_000_000L);
 		final List<org.mtr.mod.route.RouteAssetHello> hellos = new ArrayList<>();
 		final ClientRouteAssetManager manager = new ClientRouteAssetManager(
 				cache,
-				() -> 10,
+				clock::get,
 				() -> new ClientRouteAssetManager.Settings(true, 2, "NORMAL", FINGERPRINT, RouteAssetProtocol.MAX_REVISION_DOWNLOAD_BYTES, activePng.length),
 				hellos::add,
 				request -> { },
@@ -452,6 +453,8 @@ public final class ClientRouteAssetSessionTest {
 
 		Assertions.assertEquals(ClientRouteAssetSession.State.SYNCING, manager.getState());
 		Assertions.assertEquals(1, executor.size());
+		manager.tick(clock.get());
+		Assertions.assertEquals(ClientRouteAssetSession.State.SYNCING, manager.getState(), "queued UNCHANGED validation starts its timeout at the response, not at epoch zero");
 		Assertions.assertTrue(Files.isRegularFile(cache.pathForPng(orphanHash)), "the packet thread must not scan or prune the CAS");
 		executor.runNext();
 		Assertions.assertEquals(ClientRouteAssetSession.State.READY, manager.getState());
