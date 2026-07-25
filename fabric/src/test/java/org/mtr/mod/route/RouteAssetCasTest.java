@@ -11,6 +11,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
 
 public final class RouteAssetCasTest {
 
@@ -57,6 +59,23 @@ public final class RouteAssetCasTest {
 		Assertions.assertTrue(cas.find(pinned, RouteAssetCas.MediaType.PNG).isPresent());
 		Assertions.assertTrue(cas.find(removable, RouteAssetCas.MediaType.PNG).isEmpty());
 		Assertions.assertTrue(result.getDeletedObjects() >= 1);
+	}
+
+	@Test
+	public void concurrentIdenticalAdmissionsShareOneObject() throws Exception {
+		final RouteAssetCas cas = new RouteAssetCas(root, 1);
+		final byte[] png = png(0xFF0A0B0C);
+		final java.util.concurrent.ExecutorService executor = Executors.newFixedThreadPool(16);
+		try {
+			final java.util.List<Callable<String>> calls = new java.util.ArrayList<>();
+			for (int index = 0; index < 16; index++) calls.add(() -> cas.putPng(png));
+			final java.util.List<java.util.concurrent.Future<String>> results = executor.invokeAll(calls);
+			final String expected = results.get(0).get();
+			for (final java.util.concurrent.Future<String> result : results) Assertions.assertEquals(expected, result.get());
+			Assertions.assertTrue(cas.find(expected, RouteAssetCas.MediaType.PNG).isPresent());
+		} finally {
+			executor.shutdownNow();
+		}
 	}
 
 	private static byte[] png(int color) throws Exception {

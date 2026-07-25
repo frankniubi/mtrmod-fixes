@@ -19,6 +19,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -27,6 +28,7 @@ public final class RouteAssetCas {
 	private final Path outputRoot;
 	private final int rendererVersion;
 	private final Path objectRoot;
+	private final ConcurrentHashMap<String, Object> admissionLocks = new ConcurrentHashMap<>();
 
 	private static final Pattern PREFIX_PATTERN = Pattern.compile("[0-9a-f]{2}");
 
@@ -133,23 +135,31 @@ public final class RouteAssetCas {
 
 	private String put(byte[] bytes, MediaType type) throws IOException {
 		final String hash = RouteAssetHash.sha256(bytes);
-		final Path target = pathFor(hash, type);
-		if (find(hash, type).isPresent()) {
-			return hash;
-		}
-		Files.createDirectories(target.getParent());
-		final Path temporary = Files.createTempFile(target.getParent(), "." + hash + '-', ".tmp");
+		final String lockKey = type.extension + ':' + hash;
+		final Object lock = admissionLocks.computeIfAbsent(lockKey, ignored -> new Object());
 		try {
-			Files.write(temporary, bytes, StandardOpenOption.TRUNCATE_EXISTING);
-			try (final FileChannel channel = FileChannel.open(temporary, StandardOpenOption.WRITE)) {
-				channel.force(true);
+			synchronized (lock) {
+				final Path target = pathFor(hash, type);
+				if (find(hash, type).isPresent()) {
+					return hash;
+				}
+				Files.createDirectories(target.getParent());
+				final Path temporary = Files.createTempFile(target.getParent(), "." + hash + '-', ".tmp");
+				try {
+					Files.write(temporary, bytes, StandardOpenOption.TRUNCATE_EXISTING);
+					try (final FileChannel channel = FileChannel.open(temporary, StandardOpenOption.WRITE)) {
+						channel.force(true);
+					}
+					validateObject(temporary, hash, type);
+					moveAtomically(temporary, target);
+					validateObject(target, hash, type);
+					return hash;
+				} finally {
+					Files.deleteIfExists(temporary);
+				}
 			}
-			validateObject(temporary, hash, type);
-			moveAtomically(temporary, target);
-			validateObject(target, hash, type);
-			return hash;
 		} finally {
-			Files.deleteIfExists(temporary);
+			admissionLocks.remove(lockKey, lock);
 		}
 	}
 
