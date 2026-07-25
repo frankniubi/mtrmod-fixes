@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 public final class RouteAssetRendererParityTest {
@@ -42,6 +43,33 @@ public final class RouteAssetRendererParityTest {
 
 		Assertions.assertNotEquals(0, image.getPixel(3, 2) >>> 24, "a 2x3 text raster must have a 3x2 background after rotation");
 		Assertions.assertEquals(0, image.getPixel(2, 3) >>> 24, "the unrotated 2x3 background extent must not leak below the rotated text");
+	}
+
+	@Test
+	public void verticalRouteMapPreRotatesInterchangeIconsWithStationText() throws Exception {
+		final RouteAssetImage icon = new RouteAssetImage(3, 3);
+		icon.setPixel(1, 0, 0xFFFFFFFF);
+		icon.setPixel(0, 2, 0xFFFFFFFF);
+		icon.setPixel(1, 2, 0xFFFFFFFF);
+		icon.setPixel(2, 2, 0xFFFFFFFF);
+		final byte[] iconPng = icon.toPng();
+		final RouteAssetSourceImages asymmetricSources = new RouteAssetSourceImages(path -> iconPng);
+		final RouteAssetTextRasterizer emptyText = (value, maxWidth, maxHeight, cjkSize, latinSize, padding, alignment, language) -> new RouteAssetTextRasterizer.RasterizedText(new byte[]{0}, 1, 1);
+		final RouteAssetRenderSnapshot.Station current = new RouteAssetRenderSnapshot.Station(10, 1, "Current", "Next", RouteAssetRenderSnapshot.Interchange.empty());
+		final RouteAssetRenderSnapshot.Station interchange = new RouteAssetRenderSnapshot.Station(20, 2, "Interchange", "", new RouteAssetRenderSnapshot.Interchange(List.of(), List.of(), true, false));
+		final RouteAssetRenderSnapshot.Route route = new RouteAssetRenderSnapshot.Route(7, "R7", 0xCC0000, RouteAssetRenderSnapshot.CircularState.NONE, RouteAssetRenderSnapshot.RouteKind.METRO, 0, List.of(current, interchange));
+		final RouteAssetRenderSnapshot snapshot = RouteAssetRenderSnapshot.builder().vertical(true).aspectRatio(37F / 22).routes(List.of(route)).build();
+		final RouteAssetImage image = renderer.render(RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 10, 0, "NORMAL", true, false, 37F / 22, false), snapshot, emptyText, asymmetricSources);
+
+		final int iconColor = RouteAssetImage.argbToAbgr(0xFF21679F);
+		final List<int[]> iconPixels = new ArrayList<>();
+		for (int y = 0; y < image.getHeight(); y++) for (int x = 0; x < image.getWidth(); x++) if (image.getPixel(x, y) == iconColor) iconPixels.add(new int[]{x, y});
+		Assertions.assertFalse(iconPixels.isEmpty());
+		final int minX = iconPixels.stream().mapToInt(pixel -> pixel[0]).min().orElseThrow();
+		final int maxX = iconPixels.stream().mapToInt(pixel -> pixel[0]).max().orElseThrow();
+		final long leftPixels = iconPixels.stream().filter(pixel -> pixel[0] == minX).count();
+		final long rightPixels = iconPixels.stream().filter(pixel -> pixel[0] == maxX).count();
+		Assertions.assertTrue(rightPixels > leftPixels, "the upright icon must be pre-rotated counterclockwise inside a vertical route-map texture");
 	}
 
 	@Test

@@ -127,6 +127,7 @@ public final class RouteAssetDependencyCatalog {
 			final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
 			final DataOutputStream canonical = new DataOutputStream(bytes);
 			canonical.writeInt(RouteAssetProtocol.RENDERER_VERSION);
+			if (key.getType() == RouteAssetType.ROUTE_MAP) canonical.writeInt(RouteAssetProtocol.ROUTE_MAP_RENDERER_VERSION);
 			writeString(canonical, resourceFingerprint);
 			writeString(canonical, key.toString());
 			writeString(canonical, snapshot.getPlatformDisplayName());

@@ -4,6 +4,7 @@ public final class RouteAssetProtocol {
 
 	public static final int PROTOCOL_VERSION = 1;
 	public static final int RENDERER_VERSION = 1;
+	public static final int ROUTE_MAP_RENDERER_VERSION = 2;
 	public static final String BUNDLED_RESOURCE_FINGERPRINT = "6c145f55dc6afc6248b7e39518da9c3c68ef2ee308c04c92ccacbf4223c02be7";
 	public static final int MAX_MANIFEST_ENTRIES = 200_000;
 	public static final int MAX_MANIFEST_BYTES = 64 * 1024 * 1024;

@@ -78,6 +78,7 @@ public final class RouteAssetDataMirrorTest {
 		do route = new Route(TransportMode.TRAIN, initialData); while (route.getId() < 0);
 		route.setName("Server Route");
 		route.setColor(0x14755E);
+		route.setRouteType(org.mtr.core.data.RouteType.HIGH_SPEED);
 		route.getRoutePlatforms().add(new RoutePlatformData(first.getId()));
 		route.getRoutePlatforms().add(new RoutePlatformData(second.getId()));
 		initialData.routes.add(route);
@@ -91,6 +92,7 @@ public final class RouteAssetDataMirrorTest {
 
 		Assertions.assertEquals(1, dimension.getPlatforms().get(first.getId()).getRoutes().size());
 		Assertions.assertEquals(route.getId(), dimension.getPlatforms().get(first.getId()).getRoutes().get(0).getId());
+		Assertions.assertEquals(RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED, dimension.getPlatforms().get(first.getId()).getRoutes().get(0).getRouteKind());
 	}
 
 	@Test

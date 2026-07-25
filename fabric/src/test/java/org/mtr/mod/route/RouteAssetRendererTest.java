@@ -64,9 +64,9 @@ public final class RouteAssetRendererTest {
 		fixtures.put("vertical-map", fixture("minecraft/overworld|ROUTE_MAP|1|1|NORMAL|a=37:22,f=0,t=0,v=1", base().vertical(true).aspectRatio(37F / 22).stations(normalStations()).build()));
 		fixtures.put("direction-arrow", fixture("minecraft/overworld|DIRECTION_ARROW|1|1|NORMAL|a=22:5,align=CENTER,bg=FF000000,left=1,pad=1:5,right=0,show=1,text=FFFFFFFF,transparent=00000000", base().backgroundColor(0xFF000000).textColor(0xFFFFFFFF).paddingScale(0.2F).aspectRatio(22F / 5).hasLeft(true).destination("City Three|第三城").build()));
 		fixtures.put("horizontal-map", fixture("minecraft/overworld|ROUTE_MAP|2|1|NORMAL|a=16:5,f=0,t=0,v=0", base().aspectRatio(16F / 5).stations(normalStations()).build()));
-		fixtures.put("dense-map", fixture("minecraft/overworld|ROUTE_MAP|3|1|NORMAL|a=4:9,f=0,t=0,v=1", base().vertical(true).dense(true).aspectRatio(4F / 9).routeColors(List.of(0x14755E, 0x25B407, 0x3E405E)).stations(denseStations()).build()));
-		fixtures.put("railway-icon", fixture("minecraft/overworld|ROUTE_MAP|4|1|NORMAL|a=4:9,f=0,t=0,v=1", base().vertical(true).aspectRatio(4F / 9).stations(List.of(station(1, "Railway|鐵路", true, false))).build()));
-		fixtures.put("airport-icon", fixture("minecraft/overworld|ROUTE_MAP|5|1|NORMAL|a=4:9,f=0,t=0,v=1", base().vertical(true).aspectRatio(4F / 9).stations(List.of(station(1, "Airport|機場", false, true))).build()));
+		fixtures.put("dense-map", fixture("minecraft/overworld|ROUTE_MAP|3|1|NORMAL|a=37:22,f=0,t=0,v=1", base().vertical(true).aspectRatio(37F / 22).routes(denseRoutes()).build()));
+		fixtures.put("railway-icon", fixture("minecraft/overworld|ROUTE_MAP|4|1|NORMAL|a=4:9,f=0,t=0,v=1", base().vertical(true).aspectRatio(4F / 9).stations(iconStations(true, false)).build()));
+		fixtures.put("airport-icon", fixture("minecraft/overworld|ROUTE_MAP|5|1|NORMAL|a=4:9,f=0,t=0,v=1", base().vertical(true).aspectRatio(4F / 9).stations(iconStations(false, true)).build()));
 		fixtures.put("bilingual-text", fixture("minecraft/overworld|ROUTE_SQUARE|6|1|NORMAL|align=CENTER", base().routeColor(0x21679F).routeName("Central|中央").build()));
 		fixtures.put("cjk-text", fixture("minecraft/overworld|ROUTE_SQUARE|7|1|NORMAL|align=CENTER", base().routeColor(0x25B407).routeName("第三城西").build()));
 		fixtures.put("latin-text", fixture("minecraft/overworld|ROUTE_SQUARE|8|1|NORMAL|align=CENTER", base().routeColor(0x3E405E).routeName("North Treetrunk").build()));
@@ -86,19 +86,34 @@ public final class RouteAssetRendererTest {
 		);
 	}
 
-	private static List<RouteAssetRenderSnapshot.Station> denseStations() {
+	private static List<RouteAssetRenderSnapshot.Route> denseRoutes() {
+		final List<RouteAssetRenderSnapshot.Station> stations = List.of(
+				new RouteAssetRenderSnapshot.Station(100, 1, "Current|本站", "Station 1", RouteAssetRenderSnapshot.Interchange.empty()),
+				new RouteAssetRenderSnapshot.Station(101, 2, "Station 1|第一站", "Station 2", RouteAssetRenderSnapshot.Interchange.empty()),
+				new RouteAssetRenderSnapshot.Station(102, 3, "Station 2|第二站", "Station 3", new RouteAssetRenderSnapshot.Interchange(List.of(), List.of(), true, false)),
+				new RouteAssetRenderSnapshot.Station(103, 4, "Station 3|第三站", "Station 4", new RouteAssetRenderSnapshot.Interchange(List.of(), List.of(), false, true)),
+				new RouteAssetRenderSnapshot.Station(104, 5, "Station 4|第四站", "Station 5", RouteAssetRenderSnapshot.Interchange.empty()),
+				new RouteAssetRenderSnapshot.Station(105, 6, "Station 5|第五站", "Station 6", RouteAssetRenderSnapshot.Interchange.empty()),
+				new RouteAssetRenderSnapshot.Station(106, 7, "Station 6|第六站", "Station 7", RouteAssetRenderSnapshot.Interchange.empty()),
+				new RouteAssetRenderSnapshot.Station(107, 8, "Station 7|第七站", "Station 8", RouteAssetRenderSnapshot.Interchange.empty()),
+				new RouteAssetRenderSnapshot.Station(108, 9, "Station 8|第八站", "Station 9", RouteAssetRenderSnapshot.Interchange.empty()),
+				new RouteAssetRenderSnapshot.Station(109, 10, "Station 9|第九站", "", RouteAssetRenderSnapshot.Interchange.empty())
+		);
 		return List.of(
-				new RouteAssetRenderSnapshot.Station(1, "North Treetrunk|樹園北", false, true, false, false),
-				new RouteAssetRenderSnapshot.Station(2, "Doyue Sai Plain|桃源山園", false, false, false, false),
-				new RouteAssetRenderSnapshot.Station(3, "Fee'in Ground|飛行遊場", false, false, true, true),
-				new RouteAssetRenderSnapshot.Station(4, "City Three Army|第三城軍", false, false, false, false),
-				new RouteAssetRenderSnapshot.Station(5, "West City Three|第三城西", false, false, false, false),
-				new RouteAssetRenderSnapshot.Station(6, "Yuyuan Railway|豫園火車站", false, false, true, false)
+				new RouteAssetRenderSnapshot.Route(31, "HS1", 0x14755E, RouteAssetRenderSnapshot.CircularState.NONE, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED, 0, stations),
+				new RouteAssetRenderSnapshot.Route(32, "HS2", 0x25B407, RouteAssetRenderSnapshot.CircularState.NONE, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED, 0, stations)
 		);
 	}
 
 	private static RouteAssetRenderSnapshot.Station station(long id, String name, boolean railway, boolean airport) {
 		return new RouteAssetRenderSnapshot.Station(id, name, false, false, railway, airport);
+	}
+
+	private static List<RouteAssetRenderSnapshot.Station> iconStations(boolean railway, boolean airport) {
+		return List.of(
+				new RouteAssetRenderSnapshot.Station(1, "Current", false, true, false, false),
+				station(2, railway ? "Railway|鐵路" : "Airport|機場", railway, airport)
+		);
 	}
 
 	private static Fixture fixture(String key, RouteAssetRenderSnapshot snapshot) {

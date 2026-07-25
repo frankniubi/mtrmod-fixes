@@ -27,7 +27,7 @@ public final class RouteAssetClientSnapshotAdapter {
 			if (found == null) return Optional.empty();
 			platformId = found;
 		} else platformId = key.getPrimaryId();
-		final RouteAssetDataMirror.PlatformSnapshot platform = RouteAssetDataMirror.materializePlatform(data, platformId, MinecraftClientData::getInterchangeStation);
+		final RouteAssetDataMirror.PlatformSnapshot platform = RouteAssetDataMirror.materializePlatform(data, platformId, MinecraftClientData::getInterchangeStation, MinecraftClientData::getInterchangeRoute);
 		final RouteAssetDataMirror.DimensionSnapshot dimension = new RouteAssetDataMirror.DimensionSnapshot(key.getDimension(), 0, Map.of(platformId, platform));
 		final RouteAssetDataMirror.Snapshot snapshot = new RouteAssetDataMirror.Snapshot(0, Map.of(key.getDimension(), dimension));
 		return CATALOG.resolveObserved(key, snapshot, LOCAL_RESOURCE_FINGERPRINT).map(entry -> new ResolvedSnapshot(entry.getSnapshot(), entry.getDependencyFingerprint()));

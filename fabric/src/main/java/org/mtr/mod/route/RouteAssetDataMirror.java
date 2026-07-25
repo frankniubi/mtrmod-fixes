@@ -134,15 +134,20 @@ public final class RouteAssetDataMirror {
 		for (final Platform platform : data.platforms) platformIds.add(platform.getId());
 		for (final SimplifiedRoute route : simplifiedRoutes) for (final SimplifiedRoutePlatform routePlatform : route.getPlatforms()) platformIds.add(routePlatform.getPlatformId());
 		final TreeMap<Long, PlatformSnapshot> platforms = new TreeMap<>();
-		for (final long platformId : platformIds) platforms.put(platformId, materializePlatform(data, simplifiedRoutes, platformId, stationResolver));
+		for (final long platformId : platformIds) platforms.put(platformId, materializePlatform(data, simplifiedRoutes, platformId, stationResolver, data.routeIdMap::get));
 		return new DimensionSnapshot(dimension, epoch, platforms);
 	}
 
 	public static PlatformSnapshot materializePlatform(ClientData data, long platformId, Function<Long, Station> stationResolver) {
-		return materializePlatform(data, materializeSimplifiedRoutes(data, false), platformId, stationResolver);
+		return materializePlatform(data, platformId, stationResolver, data.routeIdMap::get);
 	}
 
-	private static PlatformSnapshot materializePlatform(ClientData data, Iterable<SimplifiedRoute> simplifiedRoutes, long platformId, Function<Long, Station> stationResolver) {
+	public static PlatformSnapshot materializePlatform(ClientData data, long platformId, Function<Long, Station> stationResolver, Function<Long, Route> routeResolver) {
+		return materializePlatform(data, materializeSimplifiedRoutes(data, false), platformId, stationResolver, routeResolver);
+	}
+
+	private static PlatformSnapshot materializePlatform(ClientData data, Iterable<SimplifiedRoute> simplifiedRoutes, long platformId, Function<Long, Station> stationResolver, Function<Long, Route> routeResolver) {
+		Objects.requireNonNull(routeResolver, "routeResolver");
 		final List<SimplifiedRoute> occurrences = new ArrayList<>();
 		final IntAVLTreeSet excludedRouteColors = new IntAVLTreeSet();
 		for (final SimplifiedRoute route : simplifiedRoutes) {
@@ -159,7 +164,7 @@ public final class RouteAssetDataMirror {
 			for (final SimplifiedRoutePlatform routePlatform : route.getPlatforms()) {
 				stations.add(new RouteAssetRenderSnapshot.Station(routePlatform.getPlatformId(), routePlatform.getStationId(), routePlatform.getStationName(), routePlatform.getDestination(), interchange(stationResolver.apply(routePlatform.getStationId()), excludedRouteColors)));
 			}
-			final Route sourceRoute = data.routeIdMap.get(route.getId());
+			final Route sourceRoute = routeResolver.apply(route.getId());
 			final RouteAssetRenderSnapshot.RouteKind routeKind;
 			if (sourceRoute == null) routeKind = RouteAssetRenderSnapshot.RouteKind.UNRESOLVED;
 			else if (sourceRoute.getTransportMode() == TransportMode.TRAIN && sourceRoute.getRouteType() == org.mtr.core.data.RouteType.HIGH_SPEED) routeKind = RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED;

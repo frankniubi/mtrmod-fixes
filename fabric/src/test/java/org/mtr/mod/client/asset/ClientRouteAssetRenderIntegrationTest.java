@@ -25,6 +25,24 @@ public final class ClientRouteAssetRenderIntegrationTest {
 	}
 
 	@Test
+	public void localFallbackUsesTheLegacyOnDemandRendererBeyondTheServerAspectLimit() throws IOException {
+		final String generatorSource = readSource("client", "RouteMapGenerator.java");
+		final String keySource = readSource("route", "RouteAssetCanonicalKeyFactory.java");
+
+		Assertions.assertTrue(keySource.contains("MAX_ASPECT_RATIO = 8"), "the server must remain bounded to route textures covering at most three door blocks");
+		Assertions.assertFalse(generatorSource.contains("SHARED_ROUTE_ASSET_RENDERER"), "LOCAL fallback must not re-enter server key validation instead of the retained legacy rasterizer");
+		Assertions.assertTrue(generatorSource.contains("getRouteStream(platformId"), "the original client route-map generator must remain available on demand");
+	}
+
+	@Test
+	public void routeMapPixelChangesInvalidateOnlyRouteMapDependencies() throws IOException {
+		final String catalogSource = readSource("route", "RouteAssetDependencyCatalog.java");
+
+		Assertions.assertTrue(catalogSource.contains("key.getType() == RouteAssetType.ROUTE_MAP"));
+		Assertions.assertTrue(catalogSource.contains("ROUTE_MAP_RENDERER_VERSION"));
+	}
+
+	@Test
 	public void renderThreadOwnsBoundedUploadsAfterLegacyTextureTick() throws IOException {
 		final String source = readSource("render", "MainRenderer.java");
 		final int legacyTick = source.indexOf("DynamicTextureCache.instance.tick();");

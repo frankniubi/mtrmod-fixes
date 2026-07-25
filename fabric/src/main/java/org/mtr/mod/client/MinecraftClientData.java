@@ -158,6 +158,12 @@ public final class MinecraftClientData extends ClientData {
 		return localStation == null ? interchangeData.stationIdMap.get(stationId) : localStation;
 	}
 
+	@Nullable
+	public static Route getInterchangeRoute(long routeId) {
+		final Route localRoute = instance.routeIdMap.get(routeId);
+		return localRoute == null ? interchangeData.routeIdMap.get(routeId) : localRoute;
+	}
+
 	public static void reset() {
 		DefaultRailMeshCache.clear();
 		MinecraftClientData.instance = new MinecraftClientData();
