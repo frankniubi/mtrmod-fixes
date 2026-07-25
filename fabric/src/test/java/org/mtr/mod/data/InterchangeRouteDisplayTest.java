@@ -80,11 +80,35 @@ public final class InterchangeRouteDisplayTest {
 		addRoutes(data, airport1, TransportMode.AIRPLANE, route(data, TransportMode.AIRPLANE, RouteType.NORMAL, "Air 1", 3));
 		addRoutes(data, airport2, TransportMode.AIRPLANE, route(data, TransportMode.AIRPLANE, RouteType.NORMAL, "Air 2", 4));
 
-		final ObjectArrayList<InterchangeRouteDisplay.Entry> entries = InterchangeRouteDisplay.flattenForRouteMap(InterchangeRouteDisplay.getStationGroups(metro, new LongAVLTreeSet()));
-		Assertions.assertEquals(1, entries.stream().filter(entry -> entry.getCategory() == InterchangeRouteDisplay.Category.RAILWAY).count());
+		final InterchangeRouteDisplay.RouteMapDisplay routeMapDisplay = InterchangeRouteDisplay.getRouteMapDisplay(
+				InterchangeRouteDisplay.getStationGroups(metro, new LongAVLTreeSet())
+		);
+		final ObjectArrayList<InterchangeRouteDisplay.Entry> entries = routeMapDisplay.getEntries();
+		Assertions.assertTrue(routeMapDisplay.hasRailwayInterchange());
+		Assertions.assertEquals(0, entries.stream().filter(entry -> entry.getCategory() == InterchangeRouteDisplay.Category.RAILWAY).count());
 		Assertions.assertEquals(2, entries.stream().filter(entry -> entry.getCategory() == InterchangeRouteDisplay.Category.AIRPORT).count());
 		Assertions.assertTrue(entries.stream().anyMatch(entry -> entry.getText().equals("機場-Airport：Airport One")));
 		Assertions.assertTrue(entries.stream().anyMatch(entry -> entry.getText().equals("機場-Airport：Airport Two")));
+	}
+
+	@Test
+	public void routeMapKeepsNormalEntryBesideMergedRailwayFlag() {
+		final ClientData data = new ClientData();
+		final Station metro = station(data, "Metro", 0);
+		final Station railway = station(data, "Railway", 100);
+		metro.connectedStations.add(railway);
+		addRoutes(data, metro, TransportMode.TRAIN, route(data, TransportMode.TRAIN, RouteType.NORMAL, "Circular Line", 0xF2C500));
+		addRoutes(data, railway, TransportMode.TRAIN,
+				route(data, TransportMode.TRAIN, RouteType.HIGH_SPEED, "HSR North", 0x112233),
+				route(data, TransportMode.TRAIN, RouteType.HIGH_SPEED, "HSR South", 0x445566));
+
+		final InterchangeRouteDisplay.RouteMapDisplay display = InterchangeRouteDisplay.getRouteMapDisplay(
+				InterchangeRouteDisplay.getStationGroups(metro, new LongAVLTreeSet())
+		);
+		Assertions.assertTrue(display.hasRailwayInterchange());
+		Assertions.assertEquals(1, display.getEntries().size());
+		Assertions.assertEquals("Circular Line", display.getEntries().get(0).getText());
+		Assertions.assertEquals(0xF2C500, display.getEntries().get(0).getColor());
 	}
 
 	@Test

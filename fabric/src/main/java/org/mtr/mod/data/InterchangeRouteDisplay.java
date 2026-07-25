@@ -113,6 +113,33 @@ public final class InterchangeRouteDisplay {
 		return entries;
 	}
 
+	public static RouteMapDisplay getRouteMapDisplay(ObjectArrayList<StationGroup> stationGroups) {
+		final ObjectArrayList<Entry> entries = new ObjectArrayList<>();
+		final LongAVLTreeSet addedNormalRouteIds = new LongAVLTreeSet();
+		final LongAVLTreeSet addedAirportStationIds = new LongAVLTreeSet();
+		boolean hasRailwayInterchange = false;
+		for (final StationGroup stationGroup : stationGroups) {
+			for (final Entry entry : stationGroup.entries) {
+				switch (entry.category) {
+					case AIRPORT:
+						if (addedAirportStationIds.add(entry.stationId)) {
+							entries.add(entry);
+						}
+						break;
+					case RAILWAY:
+						hasRailwayInterchange = true;
+						break;
+					default:
+						if (addedNormalRouteIds.add(entry.sourceRouteId)) {
+							entries.add(entry);
+						}
+						break;
+				}
+			}
+		}
+		return new RouteMapDisplay(entries, hasRailwayInterchange);
+	}
+
 	private static Category classify(Route route) {
 		if (route.getTransportMode() == TransportMode.AIRPLANE) {
 			return Category.AIRPORT;
@@ -131,6 +158,25 @@ public final class InterchangeRouteDisplay {
 
 		public String getDisplayName() {
 			return displayName;
+		}
+	}
+
+	public static final class RouteMapDisplay {
+
+		private final ObjectArrayList<Entry> entries;
+		private final boolean hasRailwayInterchange;
+
+		private RouteMapDisplay(ObjectArrayList<Entry> entries, boolean hasRailwayInterchange) {
+			this.entries = entries;
+			this.hasRailwayInterchange = hasRailwayInterchange;
+		}
+
+		public ObjectArrayList<Entry> getEntries() {
+			return entries;
+		}
+
+		public boolean hasRailwayInterchange() {
+			return hasRailwayInterchange;
 		}
 	}
 
