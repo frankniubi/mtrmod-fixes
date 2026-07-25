@@ -6,11 +6,12 @@ import org.mtr.core.data.Station;
 import org.mtr.core.data.TransportMode;
 import org.mtr.libraries.it.unimi.dsi.fastutil.longs.LongAVLTreeSet;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 
 public final class InterchangeRouteDisplay {
 
 	public static final String RAILWAY_CATEGORY_NAME = "鐵路-Railway";
-	public static final String RAILWAY_DISPLAY_NAME = "可換鐵路 Railway Routes Changable";
+	public static final String RAILWAY_DISPLAY_NAME = "可換鐵路|Railway Routes Changable";
 	public static final String AIRPORT_CATEGORY_NAME = "機場-Airport";
 	public static final String AIRPORT_DISPLAY_PREFIX = AIRPORT_CATEGORY_NAME + "：";
 
@@ -58,6 +59,28 @@ public final class InterchangeRouteDisplay {
 			}
 		});
 		return stationGroups;
+	}
+
+	public static ObjectArrayList<StationGroup> deduplicateForBroadcast(ObjectArrayList<StationGroup> stationGroups, long preferredStationId) {
+		final ObjectArrayList<StationGroup> deduplicatedGroups = new ObjectArrayList<>();
+		final ObjectOpenHashSet<String> addedDisplayNames = new ObjectOpenHashSet<>();
+		for (int pass = 0; pass < 2; pass++) {
+			for (final StationGroup stationGroup : stationGroups) {
+				if ((pass == 0) != (stationGroup.stationId == preferredStationId)) {
+					continue;
+				}
+				final ObjectArrayList<Entry> deduplicatedEntries = new ObjectArrayList<>();
+				for (final Entry entry : stationGroup.entries) {
+					if (addedDisplayNames.add(entry.text)) {
+						deduplicatedEntries.add(entry);
+					}
+				}
+				if (!deduplicatedEntries.isEmpty()) {
+					deduplicatedGroups.add(new StationGroup(stationGroup.stationId, stationGroup.stationName, deduplicatedEntries));
+				}
+			}
+		}
+		return deduplicatedGroups;
 	}
 
 	public static ObjectArrayList<Entry> flattenForRouteMap(ObjectArrayList<StationGroup> stationGroups) {

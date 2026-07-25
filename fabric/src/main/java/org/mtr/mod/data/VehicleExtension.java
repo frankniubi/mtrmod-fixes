@@ -146,10 +146,9 @@ public class VehicleExtension extends Vehicle implements Utilities {
 							final LongAVLTreeSet excludedRouteIds = new LongAVLTreeSet();
 							excludedRouteIds.add(thisRouteId);
 							excludedRouteIds.add(vehicleExtraData.getNextRouteId());
-							InterchangeRouteDisplay.getStationGroups(nextStation, excludedRouteIds).forEach(stationGroup -> {
+							InterchangeRouteDisplay.deduplicateForBroadcast(InterchangeRouteDisplay.getStationGroups(nextStation, excludedRouteIds), nextStationId).forEach(stationGroup -> {
 								final String stationName = stationGroup.getStationName();
 								final ObjectArrayList<String> combinedRouteNames = new ObjectArrayList<>();
-								final ObjectArrayList<String> globalVisitedRouteNames = new ObjectArrayList<>();
 								final boolean isThisStation = stationGroup.getStationId() == nextStationId;
 
 								if (!isThisStation) {
@@ -158,10 +157,7 @@ public class VehicleExtension extends Vehicle implements Utilities {
 
 								stationGroup.getEntries().forEach(entry -> {
 									final String routeNameFormatted = entry.getText();
-									if (!globalVisitedRouteNames.contains(routeNameFormatted)) {
-										combinedRouteNames.add(routeNameFormatted);
-										globalVisitedRouteNames.add(routeNameFormatted);
-									}
+									combinedRouteNames.add(routeNameFormatted);
 
 									(isThisStation ? chatTextThisStation : chatTextOtherStations).add(TextHelper.append(
 											TextHelper.setStyle(TextHelper.literal("-"), Style.getEmptyMapped().withColor(TextColor.fromRgb(entry.getColor()))),

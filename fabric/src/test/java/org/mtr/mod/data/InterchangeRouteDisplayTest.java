@@ -39,7 +39,7 @@ public final class InterchangeRouteDisplayTest {
 		Assertions.assertEquals(1, railwayGroup.getEntries().size());
 		Assertions.assertEquals(InterchangeRouteDisplay.Category.RAILWAY, railwayGroup.getEntries().get(0).getCategory());
 		Assertions.assertEquals("鐵路-Railway", railwayGroup.getEntries().get(0).getCategory().getDisplayName());
-		Assertions.assertEquals("可換鐵路 Railway Routes Changable", railwayGroup.getEntries().get(0).getText());
+		Assertions.assertEquals("可換鐵路|Railway Routes Changable", railwayGroup.getEntries().get(0).getText());
 
 		Assertions.assertEquals(1, airportGroup.getEntries().size());
 		Assertions.assertEquals(InterchangeRouteDisplay.Category.AIRPORT, airportGroup.getEntries().get(0).getCategory());
@@ -85,6 +85,25 @@ public final class InterchangeRouteDisplayTest {
 		Assertions.assertEquals(2, entries.stream().filter(entry -> entry.getCategory() == InterchangeRouteDisplay.Category.AIRPORT).count());
 		Assertions.assertTrue(entries.stream().anyMatch(entry -> entry.getText().equals("機場-Airport：Airport One")));
 		Assertions.assertTrue(entries.stream().anyMatch(entry -> entry.getText().equals("機場-Airport：Airport Two")));
+	}
+
+	@Test
+	public void broadcastMergesDuplicateDisplayNamesAcrossStationZones() {
+		final ClientData data = new ClientData();
+		final Station metro = station(data, "Metro", 0);
+		final Station connected = station(data, "Connected", 100);
+		metro.connectedStations.add(connected);
+		addRoutes(data, metro, TransportMode.TRAIN, route(data, TransportMode.TRAIN, RouteType.NORMAL, "Shared Line", 0x123456));
+		addRoutes(data, connected, TransportMode.TRAIN, route(data, TransportMode.TRAIN, RouteType.NORMAL, "Shared Line", 0x654321));
+
+		final ObjectArrayList<InterchangeRouteDisplay.StationGroup> groups = InterchangeRouteDisplay.deduplicateForBroadcast(
+				InterchangeRouteDisplay.getStationGroups(metro, new LongAVLTreeSet()), metro.getId()
+		);
+		Assertions.assertEquals(1, groups.size());
+		Assertions.assertEquals(metro.getId(), groups.get(0).getStationId());
+		Assertions.assertEquals(1, groups.get(0).getEntries().size());
+		Assertions.assertEquals("Shared Line", groups.get(0).getEntries().get(0).getText());
+		Assertions.assertEquals(0x123456, groups.get(0).getEntries().get(0).getColor());
 	}
 
 	private static Station station(ClientData data, String name, long x) {

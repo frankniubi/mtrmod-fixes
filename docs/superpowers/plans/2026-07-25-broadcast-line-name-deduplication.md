@@ -39,7 +39,7 @@ public void broadcastMergesDuplicateDisplayNamesAcrossStationZones() {
 	addRoutes(data, connected, TransportMode.TRAIN, route(data, TransportMode.TRAIN, RouteType.NORMAL, "Shared Line", 0x654321));
 
 	final ObjectArrayList<InterchangeRouteDisplay.StationGroup> groups = InterchangeRouteDisplay.deduplicateForBroadcast(
-			InterchangeRouteDisplay.getStationGroups(metro, new LongAVLTreeSet())
+			InterchangeRouteDisplay.getStationGroups(metro, new LongAVLTreeSet()), metro.getId()
 	);
 	Assertions.assertEquals(1, groups.size());
 	Assertions.assertEquals(metro.getId(), groups.get(0).getStationId());
@@ -90,18 +90,23 @@ public static final String RAILWAY_DISPLAY_NAME = "可換鐵路|Railway Routes C
 Import `ObjectOpenHashSet` and add this method without changing `getStationGroups` or `flattenForRouteMap`:
 
 ```java
-public static ObjectArrayList<StationGroup> deduplicateForBroadcast(ObjectArrayList<StationGroup> stationGroups) {
+public static ObjectArrayList<StationGroup> deduplicateForBroadcast(ObjectArrayList<StationGroup> stationGroups, long preferredStationId) {
 	final ObjectArrayList<StationGroup> deduplicatedGroups = new ObjectArrayList<>();
 	final ObjectOpenHashSet<String> addedDisplayNames = new ObjectOpenHashSet<>();
-	for (final StationGroup stationGroup : stationGroups) {
-		final ObjectArrayList<Entry> deduplicatedEntries = new ObjectArrayList<>();
-		for (final Entry entry : stationGroup.entries) {
-			if (addedDisplayNames.add(entry.text)) {
-				deduplicatedEntries.add(entry);
+	for (int pass = 0; pass < 2; pass++) {
+		for (final StationGroup stationGroup : stationGroups) {
+			if ((pass == 0) != (stationGroup.stationId == preferredStationId)) {
+				continue;
 			}
-		}
-		if (!deduplicatedEntries.isEmpty()) {
-			deduplicatedGroups.add(new StationGroup(stationGroup.stationId, stationGroup.stationName, deduplicatedEntries));
+			final ObjectArrayList<Entry> deduplicatedEntries = new ObjectArrayList<>();
+			for (final Entry entry : stationGroup.entries) {
+				if (addedDisplayNames.add(entry.text)) {
+					deduplicatedEntries.add(entry);
+				}
+			}
+			if (!deduplicatedEntries.isEmpty()) {
+				deduplicatedGroups.add(new StationGroup(stationGroup.stationId, stationGroup.stationName, deduplicatedEntries));
+			}
 		}
 	}
 	return deduplicatedGroups;
@@ -114,7 +119,7 @@ Wrap the classified station groups in `VehicleExtension`:
 
 ```java
 InterchangeRouteDisplay.deduplicateForBroadcast(
-		InterchangeRouteDisplay.getStationGroups(nextStation, excludedRouteIds)
+		InterchangeRouteDisplay.getStationGroups(nextStation, excludedRouteIds), nextStationId
 ).forEach(stationGroup -> {
 ```
 

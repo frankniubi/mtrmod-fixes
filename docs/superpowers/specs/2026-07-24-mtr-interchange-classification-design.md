@@ -46,7 +46,7 @@ The broadcast excludes the current and next service route IDs. The route map exc
 
 This replaces the current color-based exclusion, which can incorrectly hide unrelated routes sharing a color. Normal routes are deduplicated by route ID. Railway entries are deduplicated per displayed interchange point. Airport entries are deduplicated by airport Station Zone ID.
 
-The message broadcast performs one additional display-level pass across the complete message. Entries with the same final display text appear once even when they come from different route IDs, colors, or overlapping Station Zones. The first deterministic occurrence supplies the color and Station Zone association. A connected Station Zone whose entries are all duplicates is omitted completely, including its otherwise empty heading and narration fragment. This broadcast-only rule does not alter route-map entries.
+The message broadcast performs one additional display-level pass across the complete message. Entries with the same final display text appear once even when they come from different route IDs, colors, or overlapping Station Zones. The next Station Zone is evaluated first, followed by connected Station Zones in Core order, so the first deterministic occurrence supplies the color and Station Zone association without allowing a connected Zone to displace the next station's own route. A connected Station Zone whose entries are all duplicates is omitted completely, including its otherwise empty heading and narration fragment. This broadcast-only rule does not alter route-map entries.
 
 Hidden routes remain excluded, matching current Core interchange behavior.
 
