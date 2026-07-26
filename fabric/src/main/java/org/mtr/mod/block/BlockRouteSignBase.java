@@ -7,9 +7,11 @@ import org.mtr.mapping.tool.HolderBase;
 import org.mtr.mod.Blocks;
 import org.mtr.mod.Init;
 import org.mtr.mod.packet.PacketOpenBlockEntityScreen;
+import org.mtr.mod.route.RouteSignStyleMode;
 
 import javax.annotation.Nonnull;
 import java.util.List;
+import java.util.Objects;
 
 public abstract class BlockRouteSignBase extends BlockDirectionalDoubleBlockBase implements IBlock, BlockWithEntity {
 
@@ -47,7 +49,9 @@ public abstract class BlockRouteSignBase extends BlockDirectionalDoubleBlockBase
 	public static abstract class BlockEntityBase extends BlockEntityExtension {
 
 		private long platformId;
+		private RouteSignStyleMode styleMode = RouteSignStyleMode.AUTO;
 		private static final String KEY_PLATFORM_ID = "platform_id";
+		private static final String KEY_STYLE_OVERRIDE = "route_sign_style";
 
 		public BlockEntityBase(BlockEntityType<?> type, BlockPos pos, BlockState state) {
 			super(type, pos, state);
@@ -56,20 +60,35 @@ public abstract class BlockRouteSignBase extends BlockDirectionalDoubleBlockBase
 		@Override
 		public void readCompoundTag(CompoundTag compoundTag) {
 			platformId = compoundTag.getLong(KEY_PLATFORM_ID);
+			styleMode = RouteSignStyleMode.fromPersisted(compoundTag.getString(KEY_STYLE_OVERRIDE));
 		}
 
 		@Override
 		public void writeCompoundTag(CompoundTag compoundTag) {
 			compoundTag.putLong(KEY_PLATFORM_ID, platformId);
+			if (styleMode.isExplicit()) {
+				compoundTag.putString(KEY_STYLE_OVERRIDE, styleMode.name());
+			} else {
+				compoundTag.remove(KEY_STYLE_OVERRIDE);
+			}
 		}
 
 		public void setPlatformId(long platformId) {
+			setData(platformId, styleMode);
+		}
+
+		public void setData(long platformId, RouteSignStyleMode styleMode) {
 			this.platformId = platformId;
+			this.styleMode = Objects.requireNonNull(styleMode, "styleMode");
 			markDirty2();
 		}
 
 		public long getPlatformId() {
 			return platformId;
+		}
+
+		public RouteSignStyleMode getStyleMode() {
+			return styleMode;
 		}
 	}
 }
