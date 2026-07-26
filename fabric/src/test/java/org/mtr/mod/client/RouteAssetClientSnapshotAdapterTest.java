@@ -28,6 +28,7 @@ import org.mtr.mod.route.RouteAssetDataMirror;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.util.Set;
 
 public final class RouteAssetClientSnapshotAdapterTest {
 
@@ -43,12 +44,15 @@ public final class RouteAssetClientSnapshotAdapterTest {
 		final Station firstStation = station(interchangeData, "First", 0);
 		final Station secondStation = station(interchangeData, "Second", 10);
 		final Platform firstPlatform = platform(interchangeData, firstStation, 0);
+		final Platform alternateFirstPlatform = platform(interchangeData, firstStation, 2);
 		final Platform secondPlatform = platform(interchangeData, secondStation, 10);
 		firstPlatform.setName("U1");
+		alternateFirstPlatform.setName("U2");
 		secondPlatform.setName("R1");
 		interchangeData.stations.add(firstStation);
 		interchangeData.stations.add(secondStation);
 		interchangeData.platforms.add(firstPlatform);
+		interchangeData.platforms.add(alternateFirstPlatform);
 		interchangeData.platforms.add(secondPlatform);
 		interchangeData.sync();
 
@@ -58,11 +62,18 @@ public final class RouteAssetClientSnapshotAdapterTest {
 		route.getRoutePlatforms().add(new RoutePlatformData(firstPlatform.getId()));
 		route.getRoutePlatforms().add(new RoutePlatformData(secondPlatform.getId()));
 		interchangeData.routes.add(route);
+		final Route alternateRoute = new Route(TransportMode.TRAIN, interchangeData);
+		alternateRoute.setName("High Speed 2");
+		alternateRoute.setRouteType(RouteType.HIGH_SPEED);
+		alternateRoute.getRoutePlatforms().add(new RoutePlatformData(alternateFirstPlatform.getId()));
+		alternateRoute.getRoutePlatforms().add(new RoutePlatformData(secondPlatform.getId()));
+		interchangeData.routes.add(alternateRoute);
 		interchangeData.sync();
 
 		final MinecraftClientData localData = MinecraftClientData.getInstance();
 		final ObjectArrayList<SimplifiedRoute> simplifiedRoutes = new ObjectArrayList<>();
 		SimplifiedRoute.addToList(simplifiedRoutes, route);
+		SimplifiedRoute.addToList(simplifiedRoutes, alternateRoute);
 		localData.simplifiedRoutes.addAll(simplifiedRoutes);
 		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.routeMap(
 				"minecraft/overworld", firstPlatform.getId(), 1, "NORMAL",
@@ -111,6 +122,14 @@ public final class RouteAssetClientSnapshotAdapterTest {
 		Assertions.assertEquals(topologySignature(railway.getSnapshot()), topologySignature(normal.getSnapshot()));
 		Assertions.assertNotEquals(auto.getDependencyFingerprint(), railway.getDependencyFingerprint());
 		Assertions.assertNotEquals(railway.getDependencyFingerprint(), normal.getDependencyFingerprint());
+
+		final RouteAssetKey multiKey = RouteAssetCanonicalKeyFactory.routeSignMap("minecraft/overworld",
+				Set.of(firstPlatform.getId(), alternateFirstPlatform.getId()), 1, "NORMAL", RouteSignStyleMode.RAILWAY,
+				"Custom platforms|Custom platforms", true, false, 37F / 22, false);
+		final RouteAssetRenderSnapshot multi = RouteAssetClientSnapshotAdapter.resolve(multiKey, "a".repeat(64)).orElseThrow().getSnapshot();
+		Assertions.assertEquals(Set.of(firstPlatform.getId(), alternateFirstPlatform.getId()), multi.getSelectedPlatformIds());
+		Assertions.assertEquals("Custom platforms|Custom platforms", multi.getPlatformDisplayName());
+		Assertions.assertEquals(2, multi.getRoutes().size());
 	}
 
 	@Test

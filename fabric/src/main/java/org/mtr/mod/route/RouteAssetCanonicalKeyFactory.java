@@ -1,10 +1,16 @@
 package org.mtr.mod.route;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.Collections;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.SortedSet;
 import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 public final class RouteAssetCanonicalKeyFactory {
 
@@ -14,11 +20,11 @@ public final class RouteAssetCanonicalKeyFactory {
 	private static final int MAX_READABLE_DENOMINATOR = 4096;
 	private static final int MAX_CONTINUED_FRACTION_STEPS = 32;
 	private static final Set<String> ROUTE_MAP_PARAMETERS = Set.of("a", "f", "p", "t", "v");
-	private static final Set<String> ROUTE_SIGN_MAP_PARAMETERS = Set.of("a", "f", "p", "s", "t", "v");
+	private static final Set<String> ROUTE_SIGN_MAP_PARAMETERS = Set.of("a", "f", "hdr", "p", "ps", "s", "t", "v");
 	private static final Set<String> DIRECTION_ARROW_PARAMETERS = Set.of("a", "align", "bg", "left", "pad", "right", "show", "text", "transparent");
 	private static final Set<String> ROUTE_SQUARE_PARAMETERS = Set.of("align");
 	private static final Set<String> ROUTE_COLOR_STRIP_PARAMETERS = Set.of("style");
-	private static final Set<String> DESTINATION_SIGN_PARAMETERS = Set.of("d", "eta", "h", "s", "v", "w");
+	private static final Set<String> DESTINATION_SIGN_PARAMETERS = Set.of("d", "eta", "h", "hdr", "s", "v", "w");
 
 	private RouteAssetCanonicalKeyFactory() {
 	}
@@ -33,18 +39,41 @@ public final class RouteAssetCanonicalKeyFactory {
 			float aspectRatio, boolean transparentWhite) {
 		final RouteMapPurpose checkedPurpose = Objects.requireNonNull(purpose, "purpose");
 		final RouteSignStyleMode checkedStyleMode = Objects.requireNonNull(styleMode, "styleMode");
+		if (checkedPurpose == RouteMapPurpose.ROUTE_SIGN) {
+			return routeSignMap(dimension, Set.of(platformId), resolution, language, checkedStyleMode, "",
+					vertical, flip, aspectRatio, transparentWhite);
+		}
+		if (checkedStyleMode != RouteSignStyleMode.AUTO) throw new IllegalArgumentException("Generic route maps cannot override Route Sign style");
 		final TreeMap<String, String> parameters = new TreeMap<>();
 		parameters.put("a", encodeAspect(aspectRatio));
 		parameters.put("f", encodeBoolean(flip));
 		parameters.put("p", checkedPurpose.name());
 		parameters.put("t", encodeBoolean(transparentWhite));
 		parameters.put("v", encodeBoolean(vertical));
-		if (checkedPurpose == RouteMapPurpose.ROUTE_SIGN) {
-			parameters.put("s", checkedStyleMode.name());
-		} else if (checkedStyleMode != RouteSignStyleMode.AUTO) {
-			throw new IllegalArgumentException("Generic route maps cannot override Route Sign style");
-		}
 		return key(dimension, RouteAssetType.ROUTE_MAP, platformId, resolution, language, parameters);
+	}
+
+	public static RouteAssetKey routeSignMap(String dimension, Set<Long> platformIds, int resolution, String language,
+			RouteSignStyleMode styleMode, String customPlatformHeader, boolean vertical, boolean flip,
+			float aspectRatio, boolean transparentWhite) {
+		final RouteSignStyleMode checkedStyleMode = Objects.requireNonNull(styleMode, "styleMode");
+		final TreeSet<Long> checkedPlatformIds = new TreeSet<>(Objects.requireNonNull(platformIds, "platformIds"));
+		final String checkedHeader = Objects.requireNonNull(customPlatformHeader, "customPlatformHeader");
+		if (checkedPlatformIds.isEmpty() || checkedPlatformIds.size() > RouteAssetProtocol.MAX_ROUTE_SIGN_PLATFORMS
+				|| checkedPlatformIds.contains(0L) || checkedHeader.getBytes(StandardCharsets.UTF_8).length > RouteAssetProtocol.MAX_ROUTE_SIGN_CUSTOM_HEADER_UTF8_BYTES
+				|| checkedStyleMode != RouteSignStyleMode.RAILWAY && (checkedPlatformIds.size() > 1 || !checkedHeader.isEmpty())) {
+			throw new IllegalArgumentException("Invalid Route Sign key");
+		}
+		return key(dimension, RouteAssetType.ROUTE_MAP, checkedPlatformIds.first(), resolution, language, Map.of(
+				"a", encodeAspect(aspectRatio),
+				"f", encodeBoolean(flip),
+				"hdr", encodeHeader(checkedHeader),
+				"p", RouteMapPurpose.ROUTE_SIGN.name(),
+				"ps", encodeIds(checkedPlatformIds),
+				"s", checkedStyleMode.name(),
+				"t", encodeBoolean(transparentWhite),
+				"v", encodeBoolean(vertical)
+		));
 	}
 
 	public static RouteAssetKey directionArrow(String dimension, long platformId, int resolution, String language, boolean hasLeft, boolean hasRight, RouteAssetTextRasterizer.Alignment alignment, boolean showToString, float paddingScale, float aspectRatio, int backgroundColor, int textColor, int transparentColor) {
@@ -71,15 +100,24 @@ public final class RouteAssetCanonicalKeyFactory {
 
 	public static RouteAssetKey destinationSign(String dimension, long sourceStationId, long destinationStationId, int resolution,
 			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
+		return destinationSign(dimension, sourceStationId, Set.of(destinationStationId), "", resolution, style, widthBlocks, heightBlocks, showEta);
+	}
+
+	public static RouteAssetKey destinationSign(String dimension, long sourceStationId, Set<Long> destinationStationIds, String customHeader, int resolution,
+			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
 		final DestinationSignStyle checkedStyle = Objects.requireNonNull(style, "style");
-		if (sourceStationId == 0 || destinationStationId == 0
+		final TreeSet<Long> checkedDestinations = new TreeSet<>(Objects.requireNonNull(destinationStationIds, "destinationStationIds"));
+		final String checkedHeader = DestinationSignAssetSnapshot.validateCustomHeader(customHeader);
+		if (sourceStationId == 0 || checkedDestinations.isEmpty() || checkedDestinations.size() > RouteAssetProtocol.MAX_DESTINATION_SIGN_DESTINATIONS
+				|| checkedDestinations.contains(0L)
 				|| !DestinationSignAtlasLayout.isValidFootprint(checkedStyle, widthBlocks, heightBlocks)) {
 			throw new IllegalArgumentException("Invalid destination sign key");
 		}
 		return key(dimension, RouteAssetType.DESTINATION_SIGN_ATLAS, sourceStationId, resolution, "MULTI", Map.of(
-				"d", Long.toString(destinationStationId),
+				"d", encodeIds(checkedDestinations),
 				"eta", encodeBoolean(showEta),
 				"h", Integer.toString(heightBlocks),
+				"hdr", encodeHeader(checkedHeader),
 				"s", checkedStyle.name(),
 				"v", "1",
 				"w", Integer.toString(widthBlocks)
@@ -91,18 +129,43 @@ public final class RouteAssetCanonicalKeyFactory {
 				|| !key.getVariant().getParameters().keySet().equals(DESTINATION_SIGN_PARAMETERS)) return null;
 		final Map<String, String> parameters = key.getVariant().getParameters();
 		try {
-			final long destinationStationId = Long.parseLong(parameters.get("d"));
+			final SortedSet<Long> destinationStationIds = decodeIds(parameters.get("d"), RouteAssetProtocol.MAX_DESTINATION_SIGN_DESTINATIONS);
+			final String customHeader = decodeHeader(parameters.get("hdr"));
 			final Boolean showEta = decodeBoolean(parameters.get("eta"));
 			final int widthBlocks = Integer.parseInt(parameters.get("w"));
 			final int heightBlocks = Integer.parseInt(parameters.get("h"));
 			final DestinationSignStyle style = DestinationSignStyle.valueOf(parameters.get("s"));
 			if (!"1".equals(parameters.get("v")) || showEta == null) return null;
-			final RouteAssetKey canonical = destinationSign(key.getDimension(), key.getPrimaryId(), destinationStationId,
+			final RouteAssetKey canonical = destinationSign(key.getDimension(), key.getPrimaryId(), destinationStationIds, customHeader,
 					key.getVariant().getResolution(), style, widthBlocks, heightBlocks, showEta);
-			return canonical.equals(key) ? new DestinationSignParameters(destinationStationId, style, widthBlocks, heightBlocks, showEta) : null;
+			return canonical.equals(key) ? new DestinationSignParameters(destinationStationIds, customHeader, style, widthBlocks, heightBlocks, showEta) : null;
 		} catch (IllegalArgumentException exception) {
 			return null;
 		}
+	}
+
+	private static String encodeIds(SortedSet<Long> ids) {
+		return ids.stream().map(value -> Long.toString(value)).collect(Collectors.joining(":"));
+	}
+
+	private static SortedSet<Long> decodeIds(String value, int maximum) {
+		final TreeSet<Long> result = new TreeSet<>();
+		for (final String item : Objects.requireNonNull(value, "ids").split(":", -1)) {
+			if (!result.add(Long.parseLong(item))) throw new IllegalArgumentException("Duplicate ids");
+		}
+		if (result.isEmpty() || result.size() > maximum || result.contains(0L)) throw new IllegalArgumentException("Invalid ids");
+		return result;
+	}
+
+	private static String encodeHeader(String value) {
+		return value.isEmpty() ? "-" : Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+	}
+
+	private static String decodeHeader(String value) {
+		if ("-".equals(value)) return "";
+		final String result = new String(Base64.getUrlDecoder().decode(Objects.requireNonNull(value, "header")), StandardCharsets.UTF_8);
+		if (result.getBytes(StandardCharsets.UTF_8).length > RouteAssetProtocol.MAX_DESTINATION_SIGN_CUSTOM_HEADER_UTF8_BYTES) throw new IllegalArgumentException("Header is too long");
+		return result;
 	}
 
 	static RouteMapParameters decodeRouteMap(RouteAssetKey key) {
@@ -117,8 +180,27 @@ public final class RouteAssetCanonicalKeyFactory {
 				? decodeRouteSignStyleMode(parameters.get("s")) : RouteSignStyleMode.AUTO;
 		final Boolean transparentWhite = decodeBoolean(parameters.get("t"));
 		final Boolean vertical = decodeBoolean(parameters.get("v"));
-		return aspectRatio == null || flip == null || styleMode == null || transparentWhite == null || vertical == null
-				? null : new RouteMapParameters(purpose, styleMode, vertical, flip, aspectRatio, transparentWhite);
+		if (aspectRatio == null || flip == null || styleMode == null || transparentWhite == null || vertical == null) return null;
+		try {
+			final SortedSet<Long> platformIds = purpose == RouteMapPurpose.ROUTE_SIGN
+					? decodeIds(parameters.get("ps"), RouteAssetProtocol.MAX_ROUTE_SIGN_PLATFORMS) : Collections.emptySortedSet();
+			final String customPlatformHeader = purpose == RouteMapPurpose.ROUTE_SIGN ? decodeHeader(parameters.get("hdr")) : "";
+			final RouteAssetKey canonical = purpose == RouteMapPurpose.ROUTE_SIGN
+					? routeSignMap(key.getDimension(), platformIds, key.getVariant().getResolution(), key.getVariant().getLanguage(),
+							styleMode, customPlatformHeader, vertical, flip, aspectRatio, transparentWhite)
+					: routeMap(key.getDimension(), key.getPrimaryId(), key.getVariant().getResolution(), key.getVariant().getLanguage(),
+							purpose, styleMode, vertical, flip, aspectRatio, transparentWhite);
+			return canonical.equals(key) ? new RouteMapParameters(purpose, styleMode, platformIds, customPlatformHeader,
+					vertical, flip, aspectRatio, transparentWhite) : null;
+		} catch (IllegalArgumentException exception) {
+			return null;
+		}
+	}
+
+	public static SortedSet<Long> routeSignPlatformIds(RouteAssetKey key) {
+		final RouteMapParameters parameters = decodeRouteMap(Objects.requireNonNull(key, "key"));
+		return parameters == null || parameters.purpose != RouteMapPurpose.ROUTE_SIGN
+				? Collections.emptySortedSet() : parameters.platformIds;
 	}
 
 	private static RouteMapPurpose decodeRouteMapPurpose(String value) {
@@ -301,14 +383,19 @@ public final class RouteAssetCanonicalKeyFactory {
 	static final class RouteMapParameters {
 		final RouteMapPurpose purpose;
 		final RouteSignStyleMode styleMode;
+		final SortedSet<Long> platformIds;
+		final String customPlatformHeader;
 		final boolean vertical;
 		final boolean flip;
 		final float aspectRatio;
 		final boolean transparentWhite;
 
-		private RouteMapParameters(RouteMapPurpose purpose, RouteSignStyleMode styleMode, boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite) {
+		private RouteMapParameters(RouteMapPurpose purpose, RouteSignStyleMode styleMode, Set<Long> platformIds, String customPlatformHeader,
+				boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite) {
 			this.purpose = purpose;
 			this.styleMode = styleMode;
+			this.platformIds = Collections.unmodifiableSortedSet(new TreeSet<>(platformIds));
+			this.customPlatformHeader = customPlatformHeader;
 			this.vertical = vertical;
 			this.flip = flip;
 			this.aspectRatio = aspectRatio;
@@ -317,14 +404,18 @@ public final class RouteAssetCanonicalKeyFactory {
 	}
 
 	static final class DestinationSignParameters {
+		final SortedSet<Long> destinationStationIds;
 		final long destinationStationId;
+		final String customHeader;
 		final DestinationSignStyle style;
 		final int widthBlocks;
 		final int heightBlocks;
 		final boolean showEta;
 
-		private DestinationSignParameters(long destinationStationId, DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
-			this.destinationStationId = destinationStationId;
+		private DestinationSignParameters(Set<Long> destinationStationIds, String customHeader, DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
+			this.destinationStationIds = java.util.Collections.unmodifiableSortedSet(new TreeSet<>(destinationStationIds));
+			destinationStationId = this.destinationStationIds.first();
+			this.customHeader = customHeader;
 			this.style = style;
 			this.widthBlocks = widthBlocks;
 			this.heightBlocks = heightBlocks;

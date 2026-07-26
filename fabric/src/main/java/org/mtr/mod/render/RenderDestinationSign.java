@@ -28,7 +28,6 @@ import org.mtr.mod.data.DisplayCadence;
 import org.mtr.mod.data.IGui;
 import org.mtr.mod.route.DestinationSignAssetSnapshot;
 import org.mtr.mod.route.DestinationSignAtlasLayout;
-import org.mtr.mod.route.RouteAssetCanonicalKeyFactory;
 import org.mtr.mod.route.RouteAssetKey;
 
 import java.util.ArrayList;
@@ -47,6 +46,7 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 	private static final Map<String, List<String>> ETA_PIECE_CACHE = new LinkedHashMap<String, List<String>>(32, 0.75F, true) {
 		@Override protected boolean removeEldestEntry(Map.Entry<String, List<String>> eldest) { return size() > 128; }
 	};
+	private final CompositionCache compositionCache = new CompositionCache(DestinationSignClientState.MAX_ANCHORS);
 
 	public RenderDestinationSign(Argument dispatcher) {
 		super(dispatcher);
@@ -66,8 +66,7 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 		final Direction facing = IBlock.getStatePropertySafe(state, DirectionHelper.FACING);
 		final RouteAssetKey key;
 		try {
-			key = RouteAssetCanonicalKeyFactory.destinationSign(Init.getWorldId(world), config.getSourceStationId(), config.getDestinationStationId(),
-					currentResolution(), config.getStyle(), config.getWidth(), config.getHeight(), config.isShowEta());
+			key = entity.getCachedKey(currentResolution());
 		} catch (RuntimeException ignored) {
 			return;
 		}
@@ -81,7 +80,7 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 		} else {
 			final DestinationSignArrivalsClientCache.Snapshot arrivals = DestinationSignArrivalsClientCache.INSTANCE.request(prepared.getArrivalKeys());
 			final DestinationSignClientState.RenderRows rows = clientState.resolveRenderRows(anchor.asLong(), prepared, arrivals);
-			composition = compose(prepared, rows, arrivals.getServerNowMillis(), Math.floorDiv(InitClient.getGameMillis(), 50));
+			composition = compositionCache.resolve(anchor.asLong(), prepared, rows, arrivals.getServerNowMillis(), Math.floorDiv(InitClient.getGameMillis(), 50));
 		}
 		draw(composition, atlas.identifier, facing, graphicsHolder, light);
 	}
@@ -94,7 +93,9 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 		return -Objects.requireNonNull(facing, "facing").asRotation();
 	}
 
-	// Vertical sign faces use the same 180-degree UV convention as RenderRouteSign.
+	// After the facing rotation, local +x runs from the viewer's right to the viewer's left. Quads therefore
+	// draw at horizontally mirrored positions with swapped UVs so glyphs stay readable; quad/sprite x values
+	// everywhere else are in design space (measured from the viewer's left), matching the server atlas.
 	static float readableUvStart(float start, float end) { return end; }
 	static float readableUvEnd(float start, float end) { return start; }
 
@@ -146,10 +147,9 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 					if (row.getState() == DestinationSignArrivalState.LEAVING || row.getState() == DestinationSignArrivalState.NO_SERVICE) {
 						final DestinationSignAssetSnapshot.SpriteKind kind = row.getState() == DestinationSignArrivalState.LEAVING
 								? DestinationSignAssetSnapshot.SpriteKind.LEAVING : DestinationSignAssetSnapshot.SpriteKind.NO_SERVICE;
-						final int sourceX = DestinationSignAtlasLayout.readableSourceX(layout.getSurfaceWidth(), geometry.getEtaX(), geometry.getEtaWidth());
 						atlasQuads.add(atlasRegionQuad(checkedPrepared.label(kind, phase), geometry.getEtaX(), rowY,
 								geometry.getEtaWidth(), snapshot.getStyle().getRowHeight(),
-								sourceX, geometry.getEtaWidth(), layout.getSurfaceWidth(), snapshot.getAtlasHeight(), checkedPrepared.getStaticKey().getVariant().getResolution()));
+								geometry.getEtaX(), geometry.getEtaWidth(), layout.getSurfaceWidth(), snapshot.getAtlasHeight(), checkedPrepared.getStaticKey().getVariant().getResolution()));
 					} else {
 						addEtaPieces(dynamicQuads, eta(row, serverNowMillis, phase), geometry, rowY, snapshot.getStyle().getRowHeight());
 					}
@@ -183,8 +183,9 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 
 	private static void drawAtlasQuad(GraphicsHolder graphicsHolder, Composition composition, AtlasQuad quad, Direction facing, int light) {
 		final float scale = 1F / DestinationSignAtlasLayout.LOGICAL_PIXELS_PER_BLOCK;
+		final float left = composition.widthBlocks - (quad.x + quad.width) * scale;
 		final float bottom = composition.heightBlocks - (quad.y + quad.height) * scale;
-		IDrawing.drawTexture(graphicsHolder, quad.x * scale, bottom, -SMALL_OFFSET, (quad.x + quad.width) * scale,
+		IDrawing.drawTexture(graphicsHolder, left, bottom, -SMALL_OFFSET, left + quad.width * scale,
 				bottom + quad.height * scale, -SMALL_OFFSET,
 				readableUvStart(quad.u1, quad.u2), readableUvStart(quad.v1, quad.v2),
 				readableUvEnd(quad.u1, quad.u2), readableUvEnd(quad.v1, quad.v2), facing.getOpposite(), -1, light);
@@ -206,8 +207,9 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 			case LEFT:
 			default: x = quad.x * scale; break;
 		}
+		final float left = composition.widthBlocks - x - drawWidth;
 		final float bottom = composition.heightBlocks - (quad.y + quad.height) * scale + (regionHeight - drawHeight) / 2;
-		IDrawing.drawTexture(graphicsHolder, x, bottom, -SMALL_OFFSET * 2, x + drawWidth, bottom + drawHeight, -SMALL_OFFSET * 2,
+		IDrawing.drawTexture(graphicsHolder, left, bottom, -SMALL_OFFSET * 2, left + drawWidth, bottom + drawHeight, -SMALL_OFFSET * 2,
 				readableUvStart(0, 1), readableUvStart(0, 1), readableUvEnd(0, 1), readableUvEnd(0, 1), facing.getOpposite(), -1, light);
 	}
 
@@ -305,6 +307,87 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 		final double dy = anchor.getY() + blockEntity.getConfig().getHeight() / 2D - position.getYMapped();
 		final double dz = anchor.getZ() + 0.5 - position.getZMapped();
 		return dx * dx + dy * dy + dz * dz <= RENDER_DISTANCE * RENDER_DISTANCE;
+	}
+
+	static final class CompositionCache {
+		private final int maximumEntries;
+		private final LinkedHashMap<Long, CachedComposition> entries = new LinkedHashMap<>(16, 0.75F, true);
+
+		CompositionCache(int maximumEntries) {
+			if (maximumEntries <= 0) throw new IllegalArgumentException("Composition cache must be bounded");
+			this.maximumEntries = maximumEntries;
+		}
+
+		Composition resolve(long anchor, DestinationSignClientState.Prepared prepared, DestinationSignClientState.RenderRows renderRows,
+				long serverNowMillis, long gameTick) {
+			final DestinationSignClientState.Prepared checkedPrepared = Objects.requireNonNull(prepared, "prepared");
+			final DestinationSignClientState.RenderRows checkedRenderRows = Objects.requireNonNull(renderRows, "renderRows");
+			final int page = DisplayCadence.page(gameTick, checkedRenderRows.getLanguageCyclesByPage());
+			final int phase = DisplayCadence.languagePhase(gameTick);
+			final CachedComposition cached = entries.get(anchor);
+			if (cached != null && cached.prepared == checkedPrepared && cached.renderRows == checkedRenderRows
+					&& cached.page == page && cached.phase == phase && serverNowMillis >= cached.serverNowMillis
+					&& serverNowMillis < cached.validUntilServerMillis) {
+				return cached.composition;
+			}
+
+			final Composition composition = compose(checkedPrepared, checkedRenderRows, serverNowMillis, gameTick);
+			entries.put(anchor, new CachedComposition(checkedPrepared, checkedRenderRows, page, phase, serverNowMillis,
+					nextEtaBoundary(checkedPrepared, checkedRenderRows, page, serverNowMillis), composition));
+			if (entries.size() > maximumEntries) entries.remove(entries.keySet().iterator().next());
+			return composition;
+		}
+
+		private static long nextEtaBoundary(DestinationSignClientState.Prepared prepared,
+				DestinationSignClientState.RenderRows renderRows, int page, long serverNowMillis) {
+			if (!prepared.getSnapshot().isShowEta()) return Long.MAX_VALUE;
+			final int capacity = prepared.getLayout().getRowsPerPage();
+			final List<DestinationSignRows.Row> rows = renderRows.getRows().getRows();
+			final int start = page * capacity;
+			final int end = Math.min(rows.size(), start + capacity);
+			long boundary = Long.MAX_VALUE;
+			for (int index = start; index < end; index++) {
+				final DestinationSignRows.Row row = rows.get(index);
+				if (row.getState() == DestinationSignArrivalState.APPROACHING && row.getResult() != null && row.getResult().isPresent()) {
+					boundary = Math.min(boundary, nextEtaBoundary(row.getResult().getArrivalMillis(), serverNowMillis));
+				}
+			}
+			return boundary;
+		}
+
+		private static long nextEtaBoundary(long arrivalMillis, long serverNowMillis) {
+			try {
+				final long remainingMillis = Math.subtractExact(arrivalMillis, serverNowMillis);
+				if (remainingMillis <= 0) return serverNowMillis;
+				final long remainingSeconds = remainingMillis / 1_000;
+				// Integer division changes one millisecond after an exact remaining-second boundary.
+				return remainingSeconds == 0 ? arrivalMillis : Math.addExact(
+						Math.subtractExact(arrivalMillis, Math.multiplyExact(remainingSeconds, 1_000)), 1);
+			} catch (ArithmeticException ignored) {
+				return serverNowMillis;
+			}
+		}
+	}
+
+	private static final class CachedComposition {
+		private final DestinationSignClientState.Prepared prepared;
+		private final DestinationSignClientState.RenderRows renderRows;
+		private final int page;
+		private final int phase;
+		private final long serverNowMillis;
+		private final long validUntilServerMillis;
+		private final Composition composition;
+
+		private CachedComposition(DestinationSignClientState.Prepared prepared, DestinationSignClientState.RenderRows renderRows,
+				int page, int phase, long serverNowMillis, long validUntilServerMillis, Composition composition) {
+			this.prepared = prepared;
+			this.renderRows = renderRows;
+			this.page = page;
+			this.phase = phase;
+			this.serverNowMillis = serverNowMillis;
+			this.validUntilServerMillis = validUntilServerMillis;
+			this.composition = composition;
+		}
 	}
 
 	public static final class Composition {

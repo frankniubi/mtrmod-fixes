@@ -53,7 +53,12 @@ public class RenderRouteSign<T extends BlockRouteSignBase.BlockEntityBase> exten
 			return;
 		}
 
-		final Platform platform = station.savedRails.stream().filter(checkPlatform -> checkPlatform.getId() == entity.getPlatformId()).findFirst().orElse(null);
+		Platform platform = null;
+		for (final long platformId : entity.getPlatformIds()) {
+			final Platform selectedPlatform = station.savedRails.stream().filter(checkPlatform -> checkPlatform.getId() == platformId).findFirst().orElse(null);
+			if (selectedPlatform == null) return;
+			if (platform == null) platform = selectedPlatform;
+		}
 		if (platform == null) {
 			return;
 		}
@@ -67,7 +72,7 @@ public class RenderRouteSign<T extends BlockRouteSignBase.BlockEntityBase> exten
 		IDrawing.drawTexture(graphicsHolder, 1 - SIDE, TOP + (isTop ? 0 : 1), 0, SIDE, MIDDLE + (isTop ? 0 : 1), 0, 0, 0, 1, 1, facing.getOpposite(), -1, light);
 
 		graphicsHolder.createVertexConsumer(MoreRenderLayers.getExterior(DynamicTextureCache.instance.getRouteSignMap(
-				platform.getId(), entity.getStyleMode(), HEIGHT_BOTTOM / WIDTH).identifier));
+				entity.getPlatformIds(), entity.getStyleMode(), entity.getCustomPlatformHeader(), HEIGHT_BOTTOM / WIDTH).identifier));
 		IDrawing.drawTexture(graphicsHolder, 1 - SIDE, MIDDLE + (isTop ? 0 : 1), 0, 1 - SIDE, isTop ? 0 : BOTTOM, 0, SIDE, isTop ? 0 : BOTTOM, 0, SIDE, MIDDLE + (isTop ? 0 : 1), 0, 0, 0, isTop ? TEXTURE_BREAK : 1, 1, facing.getOpposite(), -1, light);
 
 		graphicsHolder.pop();

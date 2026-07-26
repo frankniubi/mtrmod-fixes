@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -64,14 +65,20 @@ public final class RouteAssetDependencyCatalog {
 		final RouteAssetRenderSnapshot snapshot;
 		switch (key.getType()) {
 			case ROUTE_MAP:
-				platform = dimension.getPlatforms().get(key.getPrimaryId());
 				final RouteAssetCanonicalKeyFactory.RouteMapParameters mapParameters = RouteAssetCanonicalKeyFactory.decodeRouteMap(key);
-				if (platform == null || mapParameters == null) return Optional.empty();
-				snapshot = buildSnapshotBuilder(platform, null, mapParameters.vertical, mapParameters.aspectRatio)
-						.routeMapPurpose(mapParameters.purpose)
-						.flip(mapParameters.flip)
-						.transparentColor(mapParameters.transparentWhite ? 0xFFFFFFFF : 0)
-						.build();
+				if (mapParameters == null) return Optional.empty();
+				platform = dimension.getPlatforms().get(key.getPrimaryId());
+				if (platform == null) return Optional.empty();
+				if (mapParameters.purpose == RouteMapPurpose.ROUTE_SIGN) {
+					snapshot = buildRouteSignSnapshot(dimension, mapParameters).orElse(null);
+					if (snapshot == null) return Optional.empty();
+				} else {
+					snapshot = buildSnapshotBuilder(platform, null, mapParameters.vertical, mapParameters.aspectRatio)
+							.routeMapPurpose(mapParameters.purpose)
+							.flip(mapParameters.flip)
+							.transparentColor(mapParameters.transparentWhite ? 0xFFFFFFFF : 0)
+							.build();
+				}
 				break;
 			case DIRECTION_ARROW:
 				platform = dimension.getPlatforms().get(key.getPrimaryId());
@@ -119,10 +126,9 @@ public final class RouteAssetDependencyCatalog {
 	public Optional<Entry> resolveConfiguredRouteSign(ConfiguredSignAssetIndex.Entry configured, int resolution, String language, RouteAssetDataMirror.Snapshot data, String resourceFingerprint) {
 		Objects.requireNonNull(configured, "configured");
 		if (!configured.getRouteSignStyleMode().isExplicit()) return Optional.empty();
-		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.routeMap(
-				configured.getDimension(), configured.getPrimaryId(), resolution, requireLanguage(language),
-				RouteMapPurpose.ROUTE_SIGN, configured.getRouteSignStyleMode(), true, false, 37F / 22, false
-		);
+		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.routeSignMap(
+				configured.getDimension(), configured.getPlatformIds(), resolution, requireLanguage(language),
+				configured.getRouteSignStyleMode(), configured.getCustomPlatformHeader(), true, false, 37F / 22, false);
 		return resolveObserved(key, data, resourceFingerprint);
 	}
 
@@ -136,7 +142,7 @@ public final class RouteAssetDependencyCatalog {
 		if (dimension == null) return Optional.empty();
 		try {
 			final DestinationSignAssetSnapshot destination = DestinationSignAssetSnapshot.create(
-					dimension.getDestinationSignTopology(), key.getPrimaryId(), parameters.destinationStationId,
+					dimension.getDestinationSignTopology(), key.getPrimaryId(), parameters.destinationStationIds, parameters.customHeader,
 					parameters.style, parameters.widthBlocks, parameters.heightBlocks, parameters.showEta);
 			final RouteAssetRenderSnapshot snapshot = RouteAssetRenderSnapshot.builder()
 					.aspectRatio((float) parameters.widthBlocks / parameters.heightBlocks)
@@ -217,7 +223,8 @@ public final class RouteAssetDependencyCatalog {
 		canonical.writeInt(purpose.ordinal());
 		if (purpose == RouteMapPurpose.ROUTE_SIGN) {
 			canonical.writeInt(RouteAssetProtocol.CORRIDOR_SCHEMA_VERSION);
-			canonical.writeLong(snapshot.getSelectedPlatformId());
+			canonical.writeInt(snapshot.getSelectedPlatformIds().size());
+			for (final long platformId : snapshot.getSelectedPlatformIds()) canonical.writeLong(platformId);
 			canonical.writeLong(snapshot.getSelectedStationId());
 			writeString(canonical, snapshot.getPlatformDisplayName());
 			writeRoutes(canonical, snapshot.getRoutes(), true);
@@ -255,7 +262,9 @@ public final class RouteAssetDependencyCatalog {
 
 	private static void writeDestinationSignDependencies(DataOutputStream canonical, DestinationSignAssetSnapshot snapshot) throws IOException {
 		canonical.writeLong(snapshot.getSourceStationId());
-		canonical.writeLong(snapshot.getDestinationStationId());
+		canonical.writeInt(snapshot.getDestinationStationIds().size());
+		for (final long destinationStationId : snapshot.getDestinationStationIds()) canonical.writeLong(destinationStationId);
+		writeString(canonical, snapshot.getCustomHeader());
 		writeString(canonical, snapshot.getDestinationStationName());
 		canonical.writeInt(snapshot.getStyle().ordinal());
 		canonical.writeInt(snapshot.getWidthBlocks());
@@ -335,6 +344,49 @@ public final class RouteAssetDependencyCatalog {
 				.aspectRatio(aspectRatio)
 				.vertical(vertical)
 				.routes(selectedRoute == null ? platform.getRoutes() : Collections.emptyList());
+	}
+
+	private static Optional<RouteAssetRenderSnapshot> buildRouteSignSnapshot(RouteAssetDataMirror.DimensionSnapshot dimension,
+			RouteAssetCanonicalKeyFactory.RouteMapParameters parameters) {
+		if (parameters.platformIds.isEmpty()) return Optional.empty();
+		final ArrayList<RouteAssetDataMirror.PlatformSnapshot> platforms = new ArrayList<>(parameters.platformIds.size());
+		long selectedStationId = 0;
+		for (final long platformId : parameters.platformIds) {
+			final RouteAssetDataMirror.PlatformSnapshot platform = dimension.getPlatforms().get(platformId);
+			if (platform == null || platform.getOwningStationId() == 0) return Optional.empty();
+			if (selectedStationId == 0) selectedStationId = platform.getOwningStationId();
+			if (platform.getOwningStationId() != selectedStationId) return Optional.empty();
+			platforms.add(platform);
+		}
+
+		final LinkedHashMap<Long, RouteAssetRenderSnapshot.Route> routesById = new LinkedHashMap<>();
+		for (final RouteAssetDataMirror.PlatformSnapshot platform : platforms) {
+			for (final RouteAssetRenderSnapshot.Route route : platform.getRoutes()) routesById.putIfAbsent(route.getId(), route);
+		}
+		final RouteAssetDataMirror.PlatformSnapshot primary = platforms.get(0);
+		final String platformDisplayName = parameters.customPlatformHeader.isEmpty()
+				? automaticPlatformHeader(platforms) : parameters.customPlatformHeader;
+		return Optional.of(buildSnapshotBuilder(primary, null, parameters.vertical, parameters.aspectRatio)
+				.platformDisplayName(platformDisplayName)
+				.selectedPlatformIds(parameters.platformIds)
+				.selectedStationId(selectedStationId)
+				.routeMapPurpose(parameters.purpose)
+				.flip(parameters.flip)
+				.transparentColor(parameters.transparentWhite ? 0xFFFFFFFF : 0)
+				.routes(new ArrayList<>(routesById.values()))
+				.build());
+	}
+
+	private static String automaticPlatformHeader(List<RouteAssetDataMirror.PlatformSnapshot> platforms) {
+		if (platforms.size() == 1) return platforms.get(0).getDisplayName();
+		final ArrayList<String> cjk = new ArrayList<>(platforms.size());
+		final ArrayList<String> latin = new ArrayList<>(platforms.size());
+		for (final RouteAssetDataMirror.PlatformSnapshot platform : platforms) {
+			final String[] parts = platform.getDisplayName().split("\\|", -1);
+			cjk.add(parts[0]);
+			latin.add(parts.length > 1 ? parts[1] : parts[0]);
+		}
+		return String.join(" ", cjk) + " \u6708\u53f0|Platforms " + String.join(" ", latin);
 	}
 
 	private static String requireLanguage(String language) {

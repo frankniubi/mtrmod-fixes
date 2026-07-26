@@ -53,7 +53,7 @@ public final class DestinationSignEndToEndTest {
 		final StaticAsset initial = staticAsset(topology);
 		final DestinationSignDirectServiceModel.Model model = initial.snapshot.getModel();
 
-		Assertions.assertEquals("\u8C6B\u56ED|Yuyuan Garden Railway", initial.snapshot.getDestinationStationName());
+		Assertions.assertEquals("\u5f80\u8C6B\u56ED\u65b9\u5411|To Yuyuan Garden Railway", initial.snapshot.getDestinationStationName());
 		Assertions.assertEquals(DestinationSignStyle.ARRIVAL_ORDER, initial.snapshot.getStyle());
 		Assertions.assertEquals(3, initial.snapshot.getWidthBlocks());
 		Assertions.assertEquals(2, initial.snapshot.getHeightBlocks());

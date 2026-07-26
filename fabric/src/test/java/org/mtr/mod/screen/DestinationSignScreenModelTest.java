@@ -8,6 +8,9 @@ import org.mtr.mod.route.DestinationSignTopology;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 public final class DestinationSignScreenModelTest {
 
@@ -19,9 +22,14 @@ public final class DestinationSignScreenModelTest {
 		Assertions.assertEquals("Source|Source EN", draft.getSourceStationName());
 
 		draft.selectDestination(-20);
-		Assertions.assertEquals(-20, draft.getDestinationStationId());
+		Assertions.assertEquals(Set.of(-20L), draft.getDestinationStationIds());
 		draft.selectDestination(-30);
-		Assertions.assertEquals(-30, draft.getDestinationStationId(), "single-select replaces the prior destination");
+		Assertions.assertEquals(Set.of(-20L, -30L), draft.getDestinationStationIds());
+		draft.selectDestination(-20);
+		Assertions.assertEquals(Set.of(-30L), draft.getDestinationStationIds(), "selecting an existing destination toggles it off");
+		draft.selectDestinations(Set.of(-20L, -30L));
+		draft.setCustomHeader("Custom|Header");
+		Assertions.assertEquals("Custom|Header", draft.toConfig().getCustomHeader());
 		Assertions.assertThrows(IllegalArgumentException.class, () -> draft.selectDestination(-99));
 	}
 
@@ -66,6 +74,18 @@ public final class DestinationSignScreenModelTest {
 		draft.selectDestination(-20);
 		Assertions.assertFalse(draft.canSave());
 		Assertions.assertTrue(draft.findMinimumFootprint(DestinationSignStyle.ARRIVAL_ORDER).isEmpty());
+	}
+
+	@Test
+	public void configScreenUsesTrueMultiSelectAndPersistsTheHeaderField() throws Exception {
+		Path path = Path.of("src", "main", "java", "org", "mtr", "mod", "screen", "DestinationSignConfigScreen.java");
+		if (!Files.exists(path)) path = Path.of("fabric").resolve(path);
+		final String source = Files.readString(path);
+		Assertions.assertTrue(source.contains("model.selectDestinations"));
+		Assertions.assertFalse(source.contains("selectedDestination.firstLong()"));
+		Assertions.assertTrue(source.contains("textFieldCustomHeader"));
+		Assertions.assertTrue(source.contains("selectedDestination, false, false"));
+		Assertions.assertTrue(source.contains("selectedDestination.size() > DestinationSignConfig.MAX_DESTINATIONS"));
 	}
 
 	private static DestinationSignTopology topology(int routeCount) {

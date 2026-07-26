@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+	import java.util.Set;
 
 public final class DestinationSignAssetIdentityTest {
 
@@ -14,7 +15,7 @@ public final class DestinationSignAssetIdentityTest {
 	@Test
 	public void canonicalKeyContainsOnlyStaticConfigurationAndAllowsSignedIds() {
 		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
-		Assertions.assertEquals("minecraft/overworld|DESTINATION_SIGN_ATLAS|10|1|MULTI|d=30,eta=1,h=2,s=ARRIVAL_ORDER,v=1,w=3", key.toString());
+		Assertions.assertEquals("minecraft/overworld|DESTINATION_SIGN_ATLAS|10|1|MULTI|d=30,eta=1,h=2,hdr=-,s=ARRIVAL_ORDER,v=1,w=3", key.toString());
 		final RouteAssetKey signed = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, -10, -30, 0, DestinationSignStyle.DESTINATION_FLAG, 3, 2, false);
 		Assertions.assertEquals(-10, signed.getPrimaryId());
 		Assertions.assertEquals("-30", signed.getVariant().getParameters().get("d"));
@@ -27,6 +28,22 @@ public final class DestinationSignAssetIdentityTest {
 		}
 		Assertions.assertThrows(IllegalArgumentException.class,
 				() -> RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 1, 1, true));
+	}
+
+	@Test
+	public void multiDestinationKeyIsOrderIndependentAndRoundTripsHeader() {
+		final String header = "\u5f80\u4e1c/\u897f\u65b9\u5411|To East/West";
+		final RouteAssetKey first = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, -10, Set.of(-20L, -30L), header,
+				1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		final RouteAssetKey second = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, -10, Set.of(-30L, -20L), header,
+				1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		final RouteAssetCanonicalKeyFactory.DestinationSignParameters decoded = RouteAssetCanonicalKeyFactory.decodeDestinationSign(first);
+
+		Assertions.assertEquals(first, second);
+		Assertions.assertEquals("-30:-20", first.getVariant().getParameters().get("d"));
+		Assertions.assertNotNull(decoded);
+		Assertions.assertEquals(Set.of(-30L, -20L), decoded.destinationStationIds);
+		Assertions.assertEquals(header, decoded.customHeader);
 	}
 
 	@Test
@@ -61,6 +78,22 @@ public final class DestinationSignAssetIdentityTest {
 		Assertions.assertEquals(2, rowSprites, "only route and platform language segments control row sprite cycles");
 	}
 
+	@Test
+	public void configuredMultiDestinationSnapshotAndFingerprintIncludeHeaderAndEveryId() {
+		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
+		final RouteAssetKey firstKey = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, Set.of(30L, 40L), "Custom|Header",
+				1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		final RouteAssetKey secondKey = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, Set.of(30L, 40L), "Other|Header",
+				1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		final RouteAssetDependencyCatalog.Entry first = catalog.resolveDestinationSign(firstKey, snapshot(), FINGERPRINT).orElseThrow();
+		final RouteAssetDependencyCatalog.Entry second = catalog.resolveDestinationSign(secondKey, snapshot(), FINGERPRINT).orElseThrow();
+		final DestinationSignAssetSnapshot resolved = first.getSnapshot().getDestinationSignAssetSnapshot().orElseThrow();
+
+		Assertions.assertEquals(Set.of(30L, 40L), resolved.getDestinationStationIds());
+		Assertions.assertEquals("Custom|Header", resolved.getDestinationStationName());
+		Assertions.assertNotEquals(first.getDependencyFingerprint(), second.getDependencyFingerprint());
+	}
+
 	private static RouteAssetDataMirror.Snapshot snapshot() {
 		return snapshot("Source|Source EN", "Target|Target EN");
 	}
@@ -69,8 +102,10 @@ public final class DestinationSignAssetIdentityTest {
 		final DestinationSignTopology topology = new DestinationSignTopology(List.of(
 				new DestinationSignTopology.ServiceRoute(100, 0, "R1|Route One", 0x14755E, List.of(
 						new DestinationSignTopology.StopOccurrence(1000, 10, "U1", sourceStationName, "Target|Target EN"),
-						new DestinationSignTopology.StopOccurrence(2000, 30, "D1", unusedDestinationOccurrenceName, "")))
-		), List.of(new DestinationSignTopology.StationZone(10, sourceStationName), new DestinationSignTopology.StationZone(30, "Target|Target EN")));
+						new DestinationSignTopology.StopOccurrence(2000, 30, "D1", unusedDestinationOccurrenceName, ""),
+						new DestinationSignTopology.StopOccurrence(3000, 40, "D2", "Other|Other EN", "")))
+		), List.of(new DestinationSignTopology.StationZone(10, sourceStationName),
+				new DestinationSignTopology.StationZone(30, "Target|Target EN"), new DestinationSignTopology.StationZone(40, "Other|Other EN")));
 		return new RouteAssetDataMirror.Snapshot(1, Map.of(DIMENSION, new RouteAssetDataMirror.DimensionSnapshot(DIMENSION, 1, Map.of(), topology)));
 	}
 }

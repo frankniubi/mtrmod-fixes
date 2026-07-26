@@ -7,6 +7,7 @@ import org.mtr.mapping.holder.CompoundTag;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 public final class ConfiguredSignAssetIndexTest {
 
@@ -48,7 +49,8 @@ public final class ConfiguredSignAssetIndexTest {
 	@Test
 	public void routeAndDestinationEntriesShareOneTaggedPersistentIndex() {
 		final ConfiguredSignAssetIndex index = new ConfiguredSignAssetIndex();
-		final DestinationSignConfiguredEntry destination = new DestinationSignConfiguredEntry(-10, -30, 3, 2, DestinationSignStyle.PLATFORM_GROUPS, true);
+		final DestinationSignConfiguredEntry destination = new DestinationSignConfiguredEntry(-10, Set.of(-30L, -40L), "Custom|Header",
+				3, 2, DestinationSignStyle.PLATFORM_GROUPS, true);
 		index.configureRouteSign(1, 20, RouteSignStyleMode.RAILWAY);
 		index.configureDestinationSign(2, destination);
 		index.configureDestinationSign(3, destination);
@@ -64,6 +66,49 @@ public final class ConfiguredSignAssetIndexTest {
 
 		Assertions.assertTrue(restored.configureDestinationSign(1, destination), "an anchor may atomically change sign type");
 		Assertions.assertTrue(restored.snapshot("minecraft/overworld").get(0).isDestinationSign());
+	}
+
+	@Test
+	public void destinationIdentityIsOrderIndependentAndIncludesCustomHeader() {
+		final DestinationSignConfiguredEntry first = new DestinationSignConfiguredEntry(-10, Set.of(-20L, -30L), "A|B",
+				3, 2, DestinationSignStyle.ARRIVAL_ORDER, true);
+		final DestinationSignConfiguredEntry reordered = new DestinationSignConfiguredEntry(-10, Set.of(-30L, -20L), "A|B",
+				3, 2, DestinationSignStyle.ARRIVAL_ORDER, true);
+		final DestinationSignConfiguredEntry otherHeader = new DestinationSignConfiguredEntry(-10, Set.of(-30L, -20L), "Other|Header",
+				3, 2, DestinationSignStyle.ARRIVAL_ORDER, true);
+		final ConfiguredSignAssetIndex index = new ConfiguredSignAssetIndex();
+		index.configureDestinationSign(1, first);
+		index.configureDestinationSign(2, reordered);
+		index.configureDestinationSign(3, otherHeader);
+		final List<ConfiguredSignAssetIndex.Entry> entries = index.snapshot("minecraft/overworld");
+		Assertions.assertEquals(entries.get(0).canonicalAssetIdentity(), entries.get(1).canonicalAssetIdentity());
+		Assertions.assertNotEquals(entries.get(0).canonicalAssetIdentity(), entries.get(2).canonicalAssetIdentity());
+		final String tooManySegments = String.join("|", java.util.Collections.nCopies(
+				RouteAssetProtocol.MAX_DESTINATION_SIGN_PIPE_SEGMENTS + 1, "x"));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> new DestinationSignConfiguredEntry(
+				-10, Set.of(-20L), tooManySegments, 3, 2, DestinationSignStyle.ARRIVAL_ORDER, true));
+	}
+
+	@Test
+	public void routeSignIdentityAndPersistenceIncludeEverySortedPlatformAndHeader() {
+		final ConfiguredSignAssetIndex index = new ConfiguredSignAssetIndex();
+		Assertions.assertTrue(index.configureRouteSign(1, Set.of(30L, 10L, 20L), RouteSignStyleMode.RAILWAY, "Custom|Header"));
+		Assertions.assertFalse(index.configureRouteSign(1, Set.of(20L, 30L, 10L), RouteSignStyleMode.RAILWAY, "Custom|Header"));
+		Assertions.assertTrue(index.configureRouteSign(2, Set.of(20L, 10L, 30L), RouteSignStyleMode.RAILWAY, "Custom|Header"));
+		Assertions.assertTrue(index.configureRouteSign(3, Set.of(10L, 20L, 30L), RouteSignStyleMode.RAILWAY, "Other|Header"));
+
+		final List<ConfiguredSignAssetIndex.Entry> before = index.snapshot("minecraft/overworld");
+		Assertions.assertEquals(Set.of(10L, 20L, 30L), before.get(0).getPlatformIds());
+		Assertions.assertEquals(10, before.get(0).getPrimaryId());
+		Assertions.assertEquals("Custom|Header", before.get(0).getCustomPlatformHeader());
+		Assertions.assertEquals(before.get(0).canonicalAssetIdentity(), before.get(1).canonicalAssetIdentity());
+		Assertions.assertNotEquals(before.get(0).canonicalAssetIdentity(), before.get(2).canonicalAssetIdentity());
+
+		final CompoundTag tag = new CompoundTag();
+		index.write(tag);
+		final ConfiguredSignAssetIndex restored = new ConfiguredSignAssetIndex();
+		restored.read(tag);
+		Assertions.assertEquals(before, restored.snapshot("minecraft/overworld"));
 	}
 
 	@Test

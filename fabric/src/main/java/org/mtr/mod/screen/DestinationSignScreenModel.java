@@ -8,9 +8,14 @@ import org.mtr.mod.route.DestinationSignDirectServiceModel;
 import org.mtr.mod.route.DestinationSignStyle;
 import org.mtr.mod.route.DestinationSignTopology;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 /** Shared mutable draft used by the content and style pages. */
 public final class DestinationSignScreenModel {
@@ -19,7 +24,8 @@ public final class DestinationSignScreenModel {
 	private final String sourceStationName;
 	private final DestinationSignTopology topology;
 	private final List<DestinationSignTopology.StationZone> destinations;
-	private long destinationStationId;
+	private final TreeSet<Long> destinationStationIds = new TreeSet<>();
+	private String customHeader;
 	private int width;
 	private int height;
 	private DestinationSignStyle style;
@@ -35,12 +41,25 @@ public final class DestinationSignScreenModel {
 		height = initial.getHeight();
 		style = initial.getStyle();
 		showEta = initial.isShowEta();
-		if (initial.getDestinationStationId() != 0 && containsDestination(initial.getDestinationStationId())) destinationStationId = initial.getDestinationStationId();
+		customHeader = initial.getCustomHeader();
+		initial.getDestinationStationIds().stream().filter(this::containsDestination).forEach(destinationStationIds::add);
 	}
 
 	public void selectDestination(long stationId) {
 		if (!containsDestination(stationId)) throw new IllegalArgumentException("Destination is not directly reachable");
-		destinationStationId = stationId;
+		if (!destinationStationIds.remove(stationId)) {
+			if (destinationStationIds.size() >= DestinationSignConfig.MAX_DESTINATIONS) throw new IllegalArgumentException("Too many destination stations");
+			destinationStationIds.add(stationId);
+		}
+	}
+
+	public void selectDestinations(Set<Long> stationIds) {
+		final TreeSet<Long> checked = new TreeSet<>(Objects.requireNonNull(stationIds, "stationIds"));
+		if (checked.size() > DestinationSignConfig.MAX_DESTINATIONS || checked.stream().anyMatch(stationId -> !containsDestination(stationId))) {
+			throw new IllegalArgumentException("Invalid destination stations");
+		}
+		destinationStationIds.clear();
+		destinationStationIds.addAll(checked);
 	}
 
 	public void adjustWidth(int delta) {
@@ -69,6 +88,11 @@ public final class DestinationSignScreenModel {
 	}
 
 	public void setShowEta(boolean showEta) { this.showEta = showEta; }
+	public void setCustomHeader(String customHeader) {
+		final String checked = Objects.requireNonNull(customHeader, "customHeader");
+		if (checked.getBytes(StandardCharsets.UTF_8).length > DestinationSignConfig.MAX_CUSTOM_HEADER_UTF8_BYTES) throw new IllegalArgumentException("Custom header is too long");
+		this.customHeader = checked;
+	}
 
 	public Footprint minimumFootprint(DestinationSignStyle candidateStyle) {
 		return findMinimumFootprint(candidateStyle).orElseThrow(() -> new IllegalStateException("Direct services exceed destination sign render limits"));
@@ -78,7 +102,7 @@ public final class DestinationSignScreenModel {
 		final int minimumWidth = Math.max(DestinationSignFootprint.MIN_WIDTH, candidateStyle.getMinimumWidthBlocks());
 		for (int candidateHeight = DestinationSignFootprint.MIN_HEIGHT; candidateHeight <= DestinationSignFootprint.MAX_HEIGHT; candidateHeight++) {
 			for (int candidateWidth = minimumWidth; candidateWidth <= DestinationSignFootprint.MAX_WIDTH; candidateWidth++) {
-				if (destinationStationId == 0) {
+				if (destinationStationIds.isEmpty()) {
 					if (DestinationSignAtlasLayout.isValidFootprint(candidateStyle, candidateWidth, candidateHeight)) return Optional.of(new Footprint(candidateWidth, candidateHeight));
 				} else if (projectedSnapshot(candidateStyle, candidateWidth, candidateHeight) != null) {
 					return Optional.of(new Footprint(candidateWidth, candidateHeight));
@@ -95,13 +119,13 @@ public final class DestinationSignScreenModel {
 
 	public DestinationSignConfig toConfig() {
 		if (!canSave()) throw new IllegalStateException("Destination sign draft is incomplete or undersized");
-		return DestinationSignConfig.configured(sourceStationId, destinationStationId, width, height, style, showEta);
+		return DestinationSignConfig.configured(sourceStationId, destinationStationIds, width, height, style, showEta, customHeader);
 	}
 
 	private DestinationSignAssetSnapshot projectedSnapshot(DestinationSignStyle candidateStyle, int candidateWidth, int candidateHeight) {
-		if (destinationStationId == 0) return null;
+		if (destinationStationIds.isEmpty()) return null;
 		try {
-			return DestinationSignAssetSnapshot.create(topology, sourceStationId, destinationStationId, candidateStyle, candidateWidth, candidateHeight, showEta);
+			return DestinationSignAssetSnapshot.create(topology, sourceStationId, destinationStationIds, customHeader, candidateStyle, candidateWidth, candidateHeight, showEta);
 		} catch (IllegalArgumentException exception) {
 			return null;
 		}
@@ -114,7 +138,9 @@ public final class DestinationSignScreenModel {
 	public long getSourceStationId() { return sourceStationId; }
 	public String getSourceStationName() { return sourceStationName; }
 	public List<DestinationSignTopology.StationZone> getDestinations() { return destinations; }
-	public long getDestinationStationId() { return destinationStationId; }
+	public long getDestinationStationId() { return destinationStationIds.isEmpty() ? 0 : destinationStationIds.first(); }
+	public SortedSet<Long> getDestinationStationIds() { return Collections.unmodifiableSortedSet(destinationStationIds); }
+	public String getCustomHeader() { return customHeader; }
 	public int getWidth() { return width; }
 	public int getHeight() { return height; }
 	public DestinationSignStyle getStyle() { return style; }

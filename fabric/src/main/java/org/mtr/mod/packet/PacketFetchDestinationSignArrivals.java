@@ -161,7 +161,7 @@ public final class PacketFetchDestinationSignArrivals extends PacketHandler {
 				for (final ConfiguredSignAssetIndex.Entry entry : index.snapshot(dimension)) {
 					if (!entry.isDestinationSign() || !projected.add(entry.getDestinationSign())) continue;
 					try {
-						DestinationSignDirectServiceModel.project(topology, entry.getDestinationSign().getSourceStationId(), entry.getDestinationSign().getDestinationStationId()).getOptions().forEach(option ->
+						DestinationSignDirectServiceModel.project(topology, entry.getDestinationSign().getSourceStationId(), entry.getDestinationSign().getDestinationStationIds()).getOptions().forEach(option ->
 								keys.add(new DestinationSignArrivalKey(option.getRoute().getRouteId(), option.getSource().getPlatformId())));
 					} catch (IllegalArgumentException ignored) { }
 					if (keys.size() > MAX_AUTHORIZED_KEYS) { overflow = true; break; }

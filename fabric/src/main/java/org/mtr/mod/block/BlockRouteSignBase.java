@@ -14,7 +14,8 @@ import org.mtr.mod.route.RouteSignStyleMode;
 
 import javax.annotation.Nonnull;
 import java.util.List;
-import java.util.Objects;
+import java.util.Set;
+import java.util.SortedSet;
 
 public abstract class BlockRouteSignBase extends BlockDirectionalDoubleBlockBase implements IBlock, BlockWithEntity {
 
@@ -65,11 +66,8 @@ public abstract class BlockRouteSignBase extends BlockDirectionalDoubleBlockBase
 
 	public static abstract class BlockEntityBase extends BlockEntityExtension {
 
-		private long platformId;
-		private RouteSignStyleMode styleMode = RouteSignStyleMode.AUTO;
+		private RouteSignConfig config = RouteSignConfig.empty();
 		private boolean configuredIndexReconciled;
-		private static final String KEY_PLATFORM_ID = "platform_id";
-		private static final String KEY_STYLE_OVERRIDE = "route_sign_style";
 
 		public BlockEntityBase(BlockEntityType<?> type, BlockPos pos, BlockState state) {
 			super(type, pos, state);
@@ -77,18 +75,13 @@ public abstract class BlockRouteSignBase extends BlockDirectionalDoubleBlockBase
 
 		@Override
 		public void readCompoundTag(CompoundTag compoundTag) {
-			platformId = compoundTag.getLong(KEY_PLATFORM_ID);
-			styleMode = RouteSignStyleMode.fromPersisted(compoundTag.getString(KEY_STYLE_OVERRIDE));
+			config = RouteSignConfig.read(compoundTag);
+			configuredIndexReconciled = false;
 		}
 
 		@Override
 		public void writeCompoundTag(CompoundTag compoundTag) {
-			compoundTag.putLong(KEY_PLATFORM_ID, platformId);
-			if (styleMode.isExplicit()) {
-				compoundTag.putString(KEY_STYLE_OVERRIDE, styleMode.name());
-			} else {
-				compoundTag.remove(KEY_STYLE_OVERRIDE);
-			}
+			config.write(compoundTag);
 		}
 
 		@Override
@@ -99,28 +92,47 @@ public abstract class BlockRouteSignBase extends BlockDirectionalDoubleBlockBase
 			configuredIndexReconciled = true;
 			if (IBlock.getStatePropertySafe(getCachedState2(), HALF) == DoubleBlockHalf.UPPER) return;
 			final PersistentStateData persistentState = (PersistentStateData) PersistenceStateExtension.register(ServerWorld.cast(world), PersistentStateData::new, Init.MOD_ID);
-			if (persistentState.configureRouteSign(getPos2().asLong(), platformId, styleMode)) {
+			if (persistentState.configureRouteSign(getPos2().asLong(), config)) {
 				final RouteAssetServerManager manager = Init.getRouteAssetServerManager();
 				if (manager != null) manager.configuredSignsChanged(world.getServer(), "route-sign-reconcile");
 			}
 		}
 
 		public void setPlatformId(long platformId) {
-			setData(platformId, styleMode);
+			setData(RouteSignConfig.create(platformId, config.getStyleMode()));
 		}
 
 		public void setData(long platformId, RouteSignStyleMode styleMode) {
-			this.platformId = platformId;
-			this.styleMode = Objects.requireNonNull(styleMode, "styleMode");
+			setData(RouteSignConfig.create(platformId, styleMode));
+		}
+
+		public void setData(Set<Long> platformIds, RouteSignStyleMode styleMode, String customPlatformHeader) {
+			setData(RouteSignConfig.create(platformIds, styleMode, customPlatformHeader));
+		}
+
+		public void setData(RouteSignConfig config) {
+			this.config = java.util.Objects.requireNonNull(config, "config");
 			markDirty2();
 		}
 
 		public long getPlatformId() {
-			return platformId;
+			return config.getPlatformId();
+		}
+
+		public SortedSet<Long> getPlatformIds() {
+			return config.getPlatformIds();
 		}
 
 		public RouteSignStyleMode getStyleMode() {
-			return styleMode;
+			return config.getStyleMode();
+		}
+
+		public String getCustomPlatformHeader() {
+			return config.getCustomPlatformHeader();
+		}
+
+		public RouteSignConfig getConfig() {
+			return config;
 		}
 	}
 }

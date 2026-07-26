@@ -16,7 +16,7 @@ public final class RouteAssetVariant {
 
 	private static final Pattern LANGUAGE_PATTERN = Pattern.compile("[A-Z0-9_-]{1,32}");
 	private static final Pattern PARAMETER_NAME_PATTERN = Pattern.compile("[a-z][a-z0-9_]{0,31}");
-	private static final Pattern PARAMETER_VALUE_PATTERN = Pattern.compile("[A-Za-z0-9._:+/-]{1,96}");
+	private static final Pattern PARAMETER_VALUE_PATTERN = Pattern.compile("[A-Za-z0-9._:+/-]{1,192}");
 
 	public RouteAssetVariant(int resolution, String language, Map<String, String> parameters) {
 		if (resolution < 0 || resolution > 3) {

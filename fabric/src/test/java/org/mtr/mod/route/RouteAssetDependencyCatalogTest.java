@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public final class RouteAssetDependencyCatalogTest {
 
@@ -76,11 +77,46 @@ public final class RouteAssetDependencyCatalogTest {
 	}
 
 	@Test
+	public void configuredRailwaySignMergesSameStationPlatformsAndCustomHeader() {
+		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
+		final RouteAssetDataMirror.Snapshot data = multiPlatformSnapshot(100);
+		final ConfiguredSignAssetIndex index = new ConfiguredSignAssetIndex();
+		index.configureRouteSign(1, Set.of(17L, PLATFORM_ID), RouteSignStyleMode.RAILWAY, "Custom platforms|Custom platforms");
+		final ConfiguredSignAssetIndex.Entry configured = index.snapshot(DIMENSION).get(0);
+
+		final RouteAssetDependencyCatalog.Entry resolved = catalog.resolveConfiguredRouteSign(
+				configured, 1, "NORMAL", data, RESOURCE_FINGERPRINT).orElseThrow();
+		final RouteAssetRenderSnapshot merged = resolved.getSnapshot();
+		Assertions.assertEquals(Set.of(PLATFORM_ID, 17L), merged.getSelectedPlatformIds());
+		Assertions.assertEquals("Custom platforms|Custom platforms", merged.getPlatformDisplayName());
+		Assertions.assertEquals(List.of(700L, 1700L), merged.getRoutes().stream().map(RouteAssetRenderSnapshot.Route::getId).toList());
+		Assertions.assertEquals(2, RouteSignCorridorModel.tryBuild(merged, RouteSignStyleMode.RAILWAY).orElseThrow().getRows().size());
+		Assertions.assertEquals(RouteAssetCanonicalKeyFactory.routeSignMap(
+				DIMENSION, Set.of(17L, PLATFORM_ID), 1, "NORMAL", RouteSignStyleMode.RAILWAY,
+				"Custom platforms|Custom platforms", true, false, 37F / 22, false), resolved.getKey());
+
+		final ConfiguredSignAssetIndex renamed = new ConfiguredSignAssetIndex();
+		renamed.configureRouteSign(1, Set.of(PLATFORM_ID, 17L), RouteSignStyleMode.RAILWAY, "Other|Header");
+		final RouteAssetDependencyCatalog.Entry renamedEntry = catalog.resolveConfiguredRouteSign(
+				renamed.snapshot(DIMENSION).get(0), 1, "NORMAL", data, RESOURCE_FINGERPRINT).orElseThrow();
+		Assertions.assertNotEquals(resolved.getDependencyFingerprint(), renamedEntry.getDependencyFingerprint());
+		Assertions.assertTrue(catalog.resolveConfiguredRouteSign(configured, 1, "NORMAL", multiPlatformSnapshot(101), RESOURCE_FINGERPRINT).isEmpty());
+
+		final ConfiguredSignAssetIndex automatic = new ConfiguredSignAssetIndex();
+		automatic.configureRouteSign(1, Set.of(PLATFORM_ID, 17L), RouteSignStyleMode.RAILWAY, "");
+		final RouteAssetRenderSnapshot automaticSnapshot = catalog.resolveConfiguredRouteSign(
+				automatic.snapshot(DIMENSION).get(0), 1, "NORMAL", data, RESOURCE_FINGERPRINT).orElseThrow().getSnapshot();
+		Assertions.assertEquals("P1 P2 \u6708\u53f0|Platforms P1 P2", automaticSnapshot.getPlatformDisplayName());
+		Assertions.assertEquals(2, automaticSnapshot.getRoutes().size(), "a route exposed by both platforms must be merged only once");
+	}
+
+	@Test
 	public void compatibilityVersionsSeparateTheReadableCorridorAndDynamicValuesAreAbsent() {
+		Assertions.assertEquals(2, RouteAssetProtocol.PROTOCOL_VERSION);
 		Assertions.assertEquals(3, RouteAssetProtocol.RENDERER_VERSION);
 		Assertions.assertEquals(4, RouteAssetProtocol.ROUTE_MAP_RENDERER_VERSION);
-		Assertions.assertEquals(2, RouteAssetProtocol.CORRIDOR_SCHEMA_VERSION);
-		Assertions.assertEquals(3, RouteAssetProtocol.DESTINATION_SIGN_RENDERER_VERSION);
+		Assertions.assertEquals(4, RouteAssetProtocol.CORRIDOR_SCHEMA_VERSION);
+		Assertions.assertEquals(5, RouteAssetProtocol.DESTINATION_SIGN_RENDERER_VERSION);
 		Assertions.assertEquals(1, RouteAssetProtocol.MIN_REUSABLE_PNG_RENDERER_VERSION);
 		for (final java.lang.reflect.Field field : RouteAssetRenderSnapshot.class.getDeclaredFields()) {
 			final String name = field.getName().toLowerCase(java.util.Locale.ROOT);
@@ -111,6 +147,22 @@ public final class RouteAssetDependencyCatalogTest {
 		final RouteAssetDataMirror.PlatformSnapshot platform = new RouteAssetDataMirror.PlatformSnapshot(PLATFORM_ID, selectedPlatformName, 100, List.of(route));
 		final RouteAssetDataMirror.DimensionSnapshot dimension = new RouteAssetDataMirror.DimensionSnapshot(DIMENSION, 1, Map.of(PLATFORM_ID, platform));
 		return new RouteAssetDataMirror.Snapshot(1, Map.of(DIMENSION, dimension));
+	}
+
+	private static RouteAssetDataMirror.Snapshot multiPlatformSnapshot(long secondOwningStationId) {
+		final RouteAssetRenderSnapshot.Interchange interchange = RouteAssetRenderSnapshot.Interchange.empty();
+		final RouteAssetRenderSnapshot.Route firstRoute = new RouteAssetRenderSnapshot.Route(700, "R7", 0x14755E,
+				RouteAssetRenderSnapshot.CircularState.NONE, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED, 0, List.of(
+				new RouteAssetRenderSnapshot.Station(PLATFORM_ID, "P1", 100, 100, "Current|Current", "Terminal|Terminal", interchange),
+				new RouteAssetRenderSnapshot.Station(8, "N1", 200, 200, "Next 1|Next 1", "Terminal|Terminal", interchange)));
+		final RouteAssetRenderSnapshot.Route secondRoute = new RouteAssetRenderSnapshot.Route(1700, "R17", 0x654321,
+				RouteAssetRenderSnapshot.CircularState.NONE, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED, 0, List.of(
+				new RouteAssetRenderSnapshot.Station(17, "P2", secondOwningStationId, secondOwningStationId, "Current|Current", "Terminal|Terminal", interchange),
+				new RouteAssetRenderSnapshot.Station(18, "N2", 300, 300, "Next 2|Next 2", "Terminal|Terminal", interchange)));
+		final RouteAssetDataMirror.PlatformSnapshot first = new RouteAssetDataMirror.PlatformSnapshot(PLATFORM_ID, "P1", 100, List.of(firstRoute));
+		final RouteAssetDataMirror.PlatformSnapshot second = new RouteAssetDataMirror.PlatformSnapshot(17, "P2", secondOwningStationId, List.of(firstRoute, secondRoute));
+		return new RouteAssetDataMirror.Snapshot(1, Map.of(DIMENSION,
+				new RouteAssetDataMirror.DimensionSnapshot(DIMENSION, 1, Map.of(PLATFORM_ID, first, 17L, second))));
 	}
 
 	private static RouteAssetDataMirror.PlatformSnapshot platform(RouteAssetDataMirror.Snapshot snapshot) {

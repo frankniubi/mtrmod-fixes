@@ -2,21 +2,25 @@ package org.mtr.mod.route;
 
 public final class RouteAssetProtocol {
 
-	public static final int PROTOCOL_VERSION = 1;
+	public static final int PROTOCOL_VERSION = 2;
 	public static final int RENDERER_VERSION = 3;
 	public static final int ROUTE_MAP_RENDERER_VERSION = 4;
-	public static final int CORRIDOR_SCHEMA_VERSION = 2;
-	public static final int DESTINATION_SIGN_RENDERER_VERSION = 3;
+	public static final int CORRIDOR_SCHEMA_VERSION = 4;
+	public static final int DESTINATION_SIGN_RENDERER_VERSION = 5;
 	public static final int MIN_REUSABLE_PNG_RENDERER_VERSION = 1;
 	public static final String BUNDLED_RESOURCE_FINGERPRINT = "6c145f55dc6afc6248b7e39518da9c3c68ef2ee308c04c92ccacbf4223c02be7";
 	public static final int MAX_MANIFEST_ENTRIES = 200_000;
 	public static final int MAX_MANIFEST_BYTES = 64 * 1024 * 1024;
-	public static final int MAX_KEY_UTF8_BYTES = 512;
+	public static final int MAX_KEY_UTF8_BYTES = 768;
 	public static final int MAX_PNG_BYTES = 16 * 1024 * 1024;
 	public static final int MAX_PNG_AXIS = 16_384;
 	public static final int MAX_PNG_PIXELS = 32_000_000;
 	public static final int MAX_DESTINATION_SIGN_PIPE_SEGMENTS = 16;
 	public static final int MAX_DESTINATION_SIGN_FIELD_UTF8_BYTES = 512;
+	public static final int MAX_DESTINATION_SIGN_DESTINATIONS = 8;
+	public static final int MAX_DESTINATION_SIGN_CUSTOM_HEADER_UTF8_BYTES = 128;
+	public static final int MAX_ROUTE_SIGN_PLATFORMS = 8;
+	public static final int MAX_ROUTE_SIGN_CUSTOM_HEADER_UTF8_BYTES = 128;
 	public static final int MAX_DESTINATION_SIGN_ATLAS_SPRITES = 4096;
 	public static final int MAX_DESTINATION_SIGN_ATLAS_PIXELS = MAX_PNG_PIXELS;
 	public static final long DEFAULT_GPU_CACHE_BYTES = 256L * 1024 * 1024;

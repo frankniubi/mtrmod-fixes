@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public final class RouteSignCorridorModelTest {
 
@@ -95,6 +96,61 @@ public final class RouteSignCorridorModelTest {
 		Assertions.assertEquals(0, row.getCurrentOccurrenceIndex());
 		Assertions.assertEquals(List.of(2), row.getSelectedZoneRevisitIndices());
 		Assertions.assertFalse(row.continuesAfterReturn());
+	}
+
+	@Test
+	public void multipleSelectedPlatformsAtOneStationProduceRowsAndUseTheConfiguredMasthead() {
+		final long secondPlatform = 101;
+		final RouteAssetRenderSnapshot multi = RouteAssetRenderSnapshot.builder()
+				.selectedPlatformIds(Set.of(SELECTED_PLATFORM, secondPlatform))
+				.selectedStationId(SELECTED_STATION)
+				.platformDisplayName("Custom platforms|Custom platforms")
+				.routeMapPurpose(RouteMapPurpose.ROUTE_SIGN)
+				.vertical(true)
+				.aspectRatio(37F / 22)
+				.routes(List.of(
+						route(1, "A", 0x123456, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED,
+								station(SELECTED_PLATFORM, SELECTED_STATION, "P1"), station(2, 20, "N1")),
+						route(2, "B", 0x654321, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED,
+								station(secondPlatform, SELECTED_STATION, "P2"), station(3, 30, "N2"))))
+				.build();
+
+		final RouteSignCorridorModel.Model model = RouteSignCorridorModel.tryBuild(multi, RouteSignStyleMode.RAILWAY).orElseThrow();
+		Assertions.assertEquals(Set.of(SELECTED_PLATFORM, secondPlatform), model.getSelectedPlatformIds());
+		Assertions.assertEquals(List.of("A", "B"), model.getRows().stream().map(RouteSignCorridorModel.RouteRow::getRouteName).sorted().toList());
+		Assertions.assertEquals("Custom platforms|Custom platforms", model.getSelectedPlatformDisplayName());
+	}
+
+	@Test
+	public void multipleSelectedPlatformsMustResolveToTheSameOwningStation() {
+		final RouteAssetRenderSnapshot invalid = RouteAssetRenderSnapshot.builder()
+				.selectedPlatformIds(Set.of(SELECTED_PLATFORM, 101L))
+				.selectedStationId(SELECTED_STATION)
+				.platformDisplayName("P1 P2")
+				.routeMapPurpose(RouteMapPurpose.ROUTE_SIGN)
+				.vertical(true)
+				.aspectRatio(37F / 22)
+				.routes(List.of(route(1, "A", 0x123456, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED,
+						station(SELECTED_PLATFORM, SELECTED_STATION, "P1"),
+						station(101, SELECTED_STATION + 1, "P2"), station(2, 20, "N1"))))
+				.build();
+		Assertions.assertTrue(RouteSignCorridorModel.tryBuild(invalid, RouteSignStyleMode.RAILWAY).isEmpty());
+	}
+
+	@Test
+	public void everySelectedPlatformAndEveryMergedRouteMustParticipate() {
+		final RouteAssetRenderSnapshot missingSelection = RouteAssetRenderSnapshot.builder()
+				.selectedPlatformIds(Set.of(SELECTED_PLATFORM, 101L)).selectedStationId(SELECTED_STATION)
+				.platformDisplayName("P1 P2").routeMapPurpose(RouteMapPurpose.ROUTE_SIGN).vertical(true).aspectRatio(37F / 22)
+				.routes(List.of(simpleRoute())).build();
+		Assertions.assertTrue(RouteSignCorridorModel.tryBuild(missingSelection, RouteSignStyleMode.RAILWAY).isEmpty());
+
+		final RouteAssetRenderSnapshot unrelatedRoute = RouteAssetRenderSnapshot.builder()
+				.selectedPlatformIds(Set.of(SELECTED_PLATFORM)).selectedStationId(SELECTED_STATION)
+				.platformDisplayName("P1").routeMapPurpose(RouteMapPurpose.ROUTE_SIGN).vertical(true).aspectRatio(37F / 22)
+				.routes(List.of(simpleRoute(), route(2, "Other", 0x654321, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED,
+						station(500, 50, "P5"), station(501, 51, "P6")))).build();
+		Assertions.assertTrue(RouteSignCorridorModel.tryBuild(unrelatedRoute, RouteSignStyleMode.RAILWAY).isEmpty());
 	}
 
 	@Test

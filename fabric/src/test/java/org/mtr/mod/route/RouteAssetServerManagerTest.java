@@ -80,9 +80,13 @@ public final class RouteAssetServerManagerTest {
 			Assertions.assertTrue(manager.awaitIdle(10_000));
 			final RouteAssetHello current = hello(RouteAssetProtocol.RENDERER_VERSION);
 			final RouteAssetHello old = hello(RouteAssetProtocol.RENDERER_VERSION - 1);
+			final RouteAssetHello oldProtocol = new RouteAssetHello(RouteAssetProtocol.PROTOCOL_VERSION - 1,
+					RouteAssetProtocol.RENDERER_VERSION, 2, "NORMAL", "f".repeat(64), "", true, false,
+					RouteAssetProtocol.MAX_REVISION_DOWNLOAD_BYTES, 2);
 
 			Assertions.assertNotEquals(RouteAssetNegotiation.Mode.FALLBACK, manager.negotiate(current).getMode());
 			Assertions.assertEquals(RouteAssetNegotiation.Mode.FALLBACK, manager.negotiate(old).getMode());
+			Assertions.assertEquals(RouteAssetNegotiation.Mode.FALLBACK, manager.negotiate(oldProtocol).getMode());
 		}
 	}
 
@@ -184,6 +188,36 @@ public final class RouteAssetServerManagerTest {
 	}
 
 	@Test
+	public void configuredRouteSignSetsAndHeadersRemainDistinctAndPruneIndependently() throws Exception {
+		try (final RouteAssetServerManager manager = manager(1, (key, snapshot) -> image(key.toString().hashCode()))) {
+			final ConfiguredSignAssetIndex all = new ConfiguredSignAssetIndex();
+			all.configureRouteSign(1, Set.of(20L, 30L), RouteSignStyleMode.RAILWAY, "A|A");
+			all.configureRouteSign(2, Set.of(20L), RouteSignStyleMode.RAILWAY, "B|B");
+			all.configureRouteSign(3, Set.of(30L, 20L), RouteSignStyleMode.RAILWAY, "A|A");
+			manager.submitSnapshot(multiRouteSignSnapshot("Configured"), all.snapshot("minecraft/overworld"), "multi-configured-add");
+			Assertions.assertTrue(manager.awaitIdle(10_000));
+			RouteAssetManifest manifest = manager.getRepository().loadManifest(manager.getRepository().loadHead().getRevision());
+			Assertions.assertEquals(24, manifest.getEntries().keySet().stream().filter(RouteAssetServerManagerTest::isExplicitRailwayRouteSign).count());
+
+			final ConfiguredSignAssetIndex stillBoth = new ConfiguredSignAssetIndex();
+			stillBoth.configureRouteSign(2, Set.of(20L), RouteSignStyleMode.RAILWAY, "B|B");
+			stillBoth.configureRouteSign(3, Set.of(20L, 30L), RouteSignStyleMode.RAILWAY, "A|A");
+			manager.submitSnapshot(multiRouteSignSnapshot("Configured"), stillBoth.snapshot("minecraft/overworld"), "multi-configured-one-anchor-removed");
+			Assertions.assertTrue(manager.awaitIdle(10_000));
+			manifest = manager.getRepository().loadManifest(manager.getRepository().loadHead().getRevision());
+			Assertions.assertEquals(24, manifest.getEntries().keySet().stream().filter(RouteAssetServerManagerTest::isExplicitRailwayRouteSign).count());
+
+			final ConfiguredSignAssetIndex onlyHeaderB = new ConfiguredSignAssetIndex();
+			onlyHeaderB.configureRouteSign(2, Set.of(20L), RouteSignStyleMode.RAILWAY, "B|B");
+			manager.submitSnapshot(multiRouteSignSnapshot("Configured"), onlyHeaderB.snapshot("minecraft/overworld"), "multi-configured-identity-removed");
+			Assertions.assertTrue(manager.awaitIdle(10_000));
+			manifest = manager.getRepository().loadManifest(manager.getRepository().loadHead().getRevision());
+			Assertions.assertEquals(12, manifest.getEntries().keySet().stream().filter(RouteAssetServerManagerTest::isExplicitRailwayRouteSign).count());
+			Assertions.assertEquals(12, manager.getMetrics().getLastSummary().getDelete());
+		}
+	}
+
+	@Test
 	public void duplicateConfiguredDestinationSignsPublishFourCanonicalAtlases() throws Exception {
 		final AtomicInteger renderCalls = new AtomicInteger();
 		try (final RouteAssetServerManager manager = manager(1, (key, snapshot) -> {
@@ -267,9 +301,18 @@ public final class RouteAssetServerManagerTest {
 				new RouteAssetRenderSnapshot.Station(2, "Two", false, false, false, false)
 		);
 		final RouteAssetRenderSnapshot.Route route = new RouteAssetRenderSnapshot.Route(10, routeName, 0x14755E, stations);
-		final RouteAssetDataMirror.PlatformSnapshot platform = new RouteAssetDataMirror.PlatformSnapshot(20, "Platform", List.of(route));
+		final RouteAssetDataMirror.PlatformSnapshot platform = new RouteAssetDataMirror.PlatformSnapshot(20, "Platform", 100, List.of(route));
 		final RouteAssetDataMirror.DimensionSnapshot dimension = new RouteAssetDataMirror.DimensionSnapshot("minecraft/overworld", 1, Map.of(20L, platform));
 		return new RouteAssetDataMirror.Snapshot(1, Map.of("minecraft/overworld", dimension));
+	}
+
+	private static RouteAssetDataMirror.Snapshot multiRouteSignSnapshot(String routeName) {
+		final RouteAssetDataMirror.Snapshot base = snapshot(routeName);
+		final RouteAssetDataMirror.DimensionSnapshot original = base.getDimensions().get("minecraft/overworld");
+		final RouteAssetDataMirror.PlatformSnapshot first = original.getPlatforms().get(20L);
+		final RouteAssetDataMirror.PlatformSnapshot second = new RouteAssetDataMirror.PlatformSnapshot(30, "Platform 2", 100, first.getRoutes());
+		return new RouteAssetDataMirror.Snapshot(1, Map.of("minecraft/overworld",
+				new RouteAssetDataMirror.DimensionSnapshot("minecraft/overworld", 1, Map.of(20L, first, 30L, second))));
 	}
 
 	private static RouteAssetDataMirror.Snapshot destinationSnapshot(String routeName) {

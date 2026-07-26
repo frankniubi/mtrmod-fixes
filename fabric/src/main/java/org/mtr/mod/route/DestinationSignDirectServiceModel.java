@@ -6,19 +6,30 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 public final class DestinationSignDirectServiceModel {
 
 	public static final int MAX_OPTIONS = 128;
 	public static final int MAX_SCANNED_FUTURE_OCCURRENCES = 4096;
+	public static final int MAX_DESTINATIONS = RouteAssetProtocol.MAX_DESTINATION_SIGN_DESTINATIONS;
 
 	private DestinationSignDirectServiceModel() {
 	}
 
 	public static Model project(DestinationSignTopology topology, long sourceStationId, long destinationStationId) {
+		return project(topology, sourceStationId, Set.of(destinationStationId));
+	}
+
+	public static Model project(DestinationSignTopology topology, long sourceStationId, Set<Long> destinationStationIds) {
 		final DestinationSignTopology checkedTopology = Objects.requireNonNull(topology, "topology");
 		requireConfiguredStation(sourceStationId);
-		requireConfiguredStation(destinationStationId);
+		final TreeSet<Long> checkedDestinations = new TreeSet<>(Objects.requireNonNull(destinationStationIds, "destinationStationIds"));
+		if (checkedDestinations.isEmpty() || checkedDestinations.size() > MAX_DESTINATIONS || checkedDestinations.contains(0L)) {
+			throw new IllegalArgumentException("Destination sign destinations are not configured");
+		}
 		final List<Option> options = new ArrayList<>();
 		int scanned = 0;
 		for (final DestinationSignTopology.ServiceRoute route : checkedTopology.getRoutes()) {
@@ -29,7 +40,7 @@ public final class DestinationSignDirectServiceModel {
 				for (int destinationIndex = sourceIndex + 1; destinationIndex < stops.size(); destinationIndex++) {
 					if (++scanned > MAX_SCANNED_FUTURE_OCCURRENCES) throw new ProjectionLimitException("Too many future stop occurrences");
 					final DestinationSignTopology.StopOccurrence destination = stops.get(destinationIndex);
-					if (destination.getStationZoneId() == destinationStationId) {
+					if (checkedDestinations.contains(destination.getStationZoneId())) {
 						options.add(new Option(new OptionKey(route.getRouteId(), source.getPlatformId(), sourceIndex, destinationIndex), route, source, destination));
 						if (options.size() > MAX_OPTIONS) throw new ProjectionLimitException("Too many direct service options");
 						break;
@@ -37,7 +48,7 @@ public final class DestinationSignDirectServiceModel {
 				}
 			}
 		}
-		return new Model(sourceStationId, destinationStationId, options);
+		return new Model(sourceStationId, checkedDestinations, options);
 	}
 
 	public static List<DestinationSignTopology.StationZone> reachableDestinations(DestinationSignTopology topology, long sourceStationId) {
@@ -68,17 +79,18 @@ public final class DestinationSignDirectServiceModel {
 
 	public static final class Model {
 		private final long sourceStationId;
-		private final long destinationStationId;
+		private final SortedSet<Long> destinationStationIds;
 		private final List<Option> options;
 
-		private Model(long sourceStationId, long destinationStationId, List<Option> options) {
+		private Model(long sourceStationId, Set<Long> destinationStationIds, List<Option> options) {
 			this.sourceStationId = sourceStationId;
-			this.destinationStationId = destinationStationId;
+			this.destinationStationIds = Collections.unmodifiableSortedSet(new TreeSet<>(destinationStationIds));
 			this.options = Collections.unmodifiableList(new ArrayList<>(options));
 		}
 
 		public long getSourceStationId() { return sourceStationId; }
-		public long getDestinationStationId() { return destinationStationId; }
+		public long getDestinationStationId() { return destinationStationIds.first(); }
+		public SortedSet<Long> getDestinationStationIds() { return destinationStationIds; }
 		public List<Option> getOptions() { return options; }
 	}
 

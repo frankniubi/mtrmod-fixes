@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+	import java.util.Set;
 
 public final class DestinationSignDirectServiceModelTest {
 
@@ -72,6 +73,26 @@ public final class DestinationSignDirectServiceModelTest {
 		final DestinationSignDirectServiceModel.Model model = DestinationSignDirectServiceModel.project(topology, 10, 10);
 		Assertions.assertEquals(List.of(new DestinationSignDirectServiceModel.OptionKey(7, 701, 0, 3)), model.getOptions().stream().map(DestinationSignDirectServiceModel.Option::getKey).toList());
 		Assertions.assertEquals(List.of(20L, 30L, 10L), DestinationSignDirectServiceModel.reachableDestinations(topology, 10).stream().map(DestinationSignTopology.StationZone::getId).toList());
+	}
+
+	@Test
+	public void multipleDestinationsMergeRoutesAndUseTheFirstSelectedStopPerOccurrence() {
+		final DestinationSignTopology topology = new DestinationSignTopology(List.of(
+				route(2, 1, "Later", stop(201, 10), stop(202, 40), stop(203, 30)),
+				route(1, 0, "Earlier", stop(101, 10), stop(102, 20), stop(103, 30))
+		), List.of(
+				new DestinationSignTopology.StationZone(10, "Source"),
+				new DestinationSignTopology.StationZone(20, "Twenty"),
+				new DestinationSignTopology.StationZone(30, "Thirty"),
+				new DestinationSignTopology.StationZone(40, "Forty")
+		));
+
+		final DestinationSignDirectServiceModel.Model model = DestinationSignDirectServiceModel.project(topology, 10, Set.of(20L, 30L));
+		Assertions.assertEquals(List.of(
+				new DestinationSignDirectServiceModel.OptionKey(1, 101, 0, 1),
+				new DestinationSignDirectServiceModel.OptionKey(2, 201, 0, 2)
+		), model.getOptions().stream().map(DestinationSignDirectServiceModel.Option::getKey).toList());
+		Assertions.assertEquals(Set.of(20L, 30L), model.getDestinationStationIds());
 	}
 
 	private static DestinationSignTopology.ServiceRoute route(long id, int order, String name, DestinationSignTopology.StopOccurrence... stops) {

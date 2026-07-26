@@ -67,6 +67,55 @@ public final class RouteSignCorridorLayoutTest {
 	}
 
 	@Test
+	public void continuationTextPlacesOptionalPlatformBeforeViaSuffixes() {
+		final RouteSignCorridorLayout.DisplayToken withPlatform = token(fit(snapshot(List.of(route(1, "R1",
+				station(SELECTED_PLATFORM, SELECTED_STATION, "P1", "Current"),
+				station(2, 20, "N", "Next"),
+				stationWithName(3, SELECTED_STATION, "P2", "Origin|\u8D77\u70B9"),
+				station(4, 40, "T", "Terminal")
+		))), constantText(20)).row("R1"), RouteSignCorridorLayout.DisplayToken.Kind.CONTINUES);
+		Assertions.assertEquals("\u8D77\u70B9 P2 \u7ECF|Origin P2 Via", withPlatform.getDisplayText());
+
+		final RouteSignCorridorLayout.DisplayToken withoutPlatform = token(fit(snapshot(List.of(route(2, "R2",
+				station(SELECTED_PLATFORM, SELECTED_STATION, "P1", "Current"),
+				station(2, 20, "N", "Next"),
+				stationWithName(3, SELECTED_STATION, "", "Origin|\u8D77\u70B9"),
+				station(4, 40, "T", "Terminal")
+		))), constantText(20)).row("R2"), RouteSignCorridorLayout.DisplayToken.Kind.CONTINUES);
+		Assertions.assertEquals("\u8D77\u70B9 \u7ECF|Origin Via", withoutPlatform.getDisplayText());
+	}
+
+	@Test
+	public void circularReturnsUseLoopTextWhileOrdinaryReturnsStayUnchanged() {
+		final RouteSignCorridorLayout.Layout layout = fit(snapshot(List.of(
+				route(1, "Ordinary", RouteAssetRenderSnapshot.CircularState.NONE,
+						station(SELECTED_PLATFORM, SELECTED_STATION, "P1", "Current"),
+						station(2, 20, "N", "Next"),
+						station(3, SELECTED_STATION, "P2", "Current")),
+				route(2, "Clockwise", RouteAssetRenderSnapshot.CircularState.CLOCKWISE,
+						station(SELECTED_PLATFORM, SELECTED_STATION, "P1", "Current"),
+						station(2, 20, "N", "Next"),
+						station(3, SELECTED_STATION, "P2", "Current")),
+				route(3, "Anticlockwise", RouteAssetRenderSnapshot.CircularState.ANTICLOCKWISE,
+						station(SELECTED_PLATFORM, SELECTED_STATION, "P1", "Current"),
+						station(2, 20, "N", "Next"),
+						station(3, SELECTED_STATION, "P2", "Current"))
+		)), constantText(20));
+
+		final RouteSignCorridorLayout.DisplayToken ordinary = token(layout.row("Ordinary"), RouteSignCorridorLayout.DisplayToken.Kind.RETURN);
+		Assertions.assertEquals("\u8FD4\u56DE P2|RETURN P2", ordinary.getDisplayText());
+		Assertions.assertEquals("RETURN P2", ordinary.getSemanticLabel());
+		Assertions.assertEquals("P2", ordinary.getPlatformLabel());
+
+		for (final String routeName : List.of("Clockwise", "Anticlockwise")) {
+			final RouteSignCorridorLayout.DisplayToken loop = token(layout.row(routeName), RouteSignCorridorLayout.DisplayToken.Kind.RETURN);
+			Assertions.assertEquals("\u73AF Loop", loop.getDisplayText());
+			Assertions.assertEquals("LOOP", loop.getSemanticLabel());
+			Assertions.assertEquals("", loop.getPlatformLabel());
+		}
+	}
+
+	@Test
 	public void denseInputStepsDownDeterministicallyThenRejectsWithoutDroppingTokens() {
 		final RouteAssetRenderSnapshot snapshot = snapshot(List.of(route(1, "R1",
 				station(SELECTED_PLATFORM, SELECTED_STATION, "P1", "Current"),
@@ -121,6 +170,11 @@ public final class RouteSignCorridorLayoutTest {
 
 	private static List<String> semanticTokens(RouteSignCorridorLayout.RouteRowBox row) {
 		return row.getTokens().stream().map(RouteSignCorridorLayout.DisplayToken::getSemanticLabel).toList();
+	}
+
+	private static RouteSignCorridorLayout.DisplayToken token(RouteSignCorridorLayout.RouteRowBox row,
+			RouteSignCorridorLayout.DisplayToken.Kind kind) {
+		return row.getTokens().stream().filter(token -> token.getKind() == kind).findFirst().orElseThrow();
 	}
 
 	private static void assertBounds(RouteSignCorridorLayout.Layout layout) {
@@ -190,13 +244,23 @@ public final class RouteSignCorridorLayoutTest {
 	}
 
 	private static RouteAssetRenderSnapshot.Route route(long id, String name, RouteAssetRenderSnapshot.Station... stations) {
+		return route(id, name, RouteAssetRenderSnapshot.CircularState.NONE, stations);
+	}
+
+	private static RouteAssetRenderSnapshot.Route route(long id, String name,
+			RouteAssetRenderSnapshot.CircularState circularState, RouteAssetRenderSnapshot.Station... stations) {
 		return new RouteAssetRenderSnapshot.Route(id, name, (int) id & 0xFFFFFF,
-				RouteAssetRenderSnapshot.CircularState.NONE, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED, 0, List.of(stations));
+				circularState, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED, 0, List.of(stations));
 	}
 
 	private static RouteAssetRenderSnapshot.Station station(long platformId, long stationId, String platformName, String stationName) {
+		return stationWithName(platformId, stationId, platformName, stationName + "|" + stationName);
+	}
+
+	private static RouteAssetRenderSnapshot.Station stationWithName(long platformId, long stationId,
+			String platformName, String stationName) {
 		return new RouteAssetRenderSnapshot.Station(platformId, platformName, stationId, stationId,
-				stationName + "|" + stationName, "Destination|Destination",
+				stationName, "Destination|Destination",
 				new RouteAssetRenderSnapshot.Interchange(List.of(), List.of(), true, false));
 	}
 }

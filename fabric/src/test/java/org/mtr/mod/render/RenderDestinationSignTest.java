@@ -8,6 +8,7 @@ import org.mtr.mod.client.DestinationSignClientState;
 import org.mtr.mod.data.DestinationSignArrivalKey;
 import org.mtr.mod.data.DestinationSignArrivalResult;
 import org.mtr.mod.data.DestinationSignRows;
+import org.mtr.mod.data.DisplayCadence;
 import org.mtr.mod.route.DestinationSignAssetSnapshot;
 import org.mtr.mod.route.DestinationSignAtlasLayout;
 import org.mtr.mod.route.DestinationSignDirectServiceModel;
@@ -75,9 +76,9 @@ public final class RenderDestinationSignTest {
 				.filter(quad -> quad.getSprite().getKind() == DestinationSignAssetSnapshot.SpriteKind.LEAVING).findFirst().orElseThrow();
 		final DestinationSignAtlasLayout.RowGeometry geometry = DestinationSignAtlasLayout.rowGeometry(DestinationSignStyle.ARRIVAL_ORDER,
 				fixture.snapshot.getLayout().getSurfaceWidth(), DestinationSignStyle.ARRIVAL_ORDER.getRowHeight(), true);
-		final int sourceX = DestinationSignAtlasLayout.readableSourceX(fixture.snapshot.getLayout().getSurfaceWidth(), geometry.getEtaX(), geometry.getEtaWidth());
 		final int scaledWidth = DestinationSignAtlasLayout.scaledSize(fixture.snapshot.getAtlasWidth(), fixture.key.getVariant().getResolution());
-		Assertions.assertEquals((float) DestinationSignAtlasLayout.scaledEdge(sourceX, fixture.key.getVariant().getResolution()) / scaledWidth, leavingLabel.getU1());
+		Assertions.assertEquals(geometry.getEtaX(), leavingLabel.getX());
+		Assertions.assertEquals((float) DestinationSignAtlasLayout.scaledEdge(geometry.getEtaX(), fixture.key.getVariant().getResolution()) / scaledWidth, leavingLabel.getU1());
 		Assertions.assertTrue(leaving.getDynamicQuads().stream().noneMatch(quad -> quad.getText().contains("Leaving") || quad.getText().contains("\u5c06\u79bb")));
 	}
 
@@ -93,6 +94,77 @@ public final class RenderDestinationSignTest {
 
 		Assertions.assertEquals(before.getStaticKey(), after.getStaticKey());
 		Assertions.assertNotEquals(before.getDynamicQuads(), after.getDynamicQuads());
+	}
+
+	@Test
+	public void compositionCacheUsesArrivalRelativeEtaDeadlineAndInvalidatesOnClockRollback() {
+		final Fixture fixture = fixture(DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		final DestinationSignClientState.RenderRows rows = renderRows(fixture,
+				arrivals(fixture.snapshot.getModel(), 10_050, "Central|Central EN"), 1_001);
+		final RenderDestinationSign.CompositionCache cache = new RenderDestinationSign.CompositionCache(4);
+
+		final RenderDestinationSign.Composition first = cache.resolve(1, fixture.prepared, rows, 1_001, 0);
+		Assertions.assertSame(first, cache.resolve(1, fixture.prepared, rows, 1_010, 0));
+		Assertions.assertSame(first, cache.resolve(1, fixture.prepared, rows, 1_050, 0));
+		Assertions.assertEquals(RenderDestinationSign.compose(fixture.prepared, rows, 1_001, 0).getDynamicQuads(), first.getDynamicQuads());
+
+		final RenderDestinationSign.Composition nextSecond = cache.resolve(1, fixture.prepared, rows, 1_051, 0);
+		Assertions.assertNotSame(first, nextSecond);
+		Assertions.assertEquals(RenderDestinationSign.compose(fixture.prepared, rows, 1_051, 0).getDynamicQuads(), nextSecond.getDynamicQuads());
+
+		final RenderDestinationSign.Composition rolledBack = cache.resolve(1, fixture.prepared, rows, 1_050, 0);
+		Assertions.assertNotSame(nextSecond, rolledBack);
+		Assertions.assertEquals(RenderDestinationSign.compose(fixture.prepared, rows, 1_050, 0).getDynamicQuads(), rolledBack.getDynamicQuads());
+	}
+
+	@Test
+	public void compositionCacheReusesStaticFramesAndInvalidatesLanguageAndPageCadence() {
+		final Fixture fixture = fixture(DestinationSignStyle.ARRIVAL_ORDER, 3, 2, false);
+		final DestinationSignClientState.RenderRows rows = renderRows(fixture, Map.of(), 0);
+		final RenderDestinationSign.CompositionCache cache = new RenderDestinationSign.CompositionCache(4);
+		final RenderDestinationSign.Composition first = cache.resolve(1, fixture.prepared, rows, 0, 0);
+
+		Assertions.assertSame(first, cache.resolve(1, fixture.prepared, rows, 1_000_000, 59));
+		Assertions.assertNotSame(first, cache.resolve(1, fixture.prepared, rows, 1_000_000, 60));
+
+		final Fixture paged = fixture(DestinationSignStyle.ARRIVAL_ORDER, 2, 1, false);
+		final DestinationSignClientState.RenderRows pagedRows = renderRows(paged, Map.of(), 0);
+		Assertions.assertNotEquals(DisplayCadence.page(119, pagedRows.getLanguageCyclesByPage()),
+				DisplayCadence.page(120, pagedRows.getLanguageCyclesByPage()));
+		final RenderDestinationSign.Composition beforePage = cache.resolve(2, paged.prepared, pagedRows, 0, 119);
+		Assertions.assertNotSame(beforePage, cache.resolve(2, paged.prepared, pagedRows, 0, 120));
+	}
+
+	@Test
+	public void compositionCacheInvalidatesPreparedAndRenderRowsIdentities() {
+		final Fixture fixture = fixture(DestinationSignStyle.ARRIVAL_ORDER, 3, 2, false);
+		final DestinationSignRows.Snapshot rowSnapshot = DestinationSignRows.resolve(fixture.snapshot.getModel(), Map.of(), false,
+				0, false, DestinationSignStyle.ARRIVAL_ORDER);
+		final DestinationSignClientState.RenderRows firstRows = DestinationSignClientState.buildRenderRows(fixture.prepared, rowSnapshot);
+		final DestinationSignClientState.RenderRows replacementRows = DestinationSignClientState.buildRenderRows(fixture.prepared, rowSnapshot);
+		final RenderDestinationSign.CompositionCache cache = new RenderDestinationSign.CompositionCache(4);
+
+		final RenderDestinationSign.Composition first = cache.resolve(1, fixture.prepared, firstRows, 0, 0);
+		final RenderDestinationSign.Composition rowsChanged = cache.resolve(1, fixture.prepared, replacementRows, 0, 0);
+		Assertions.assertNotSame(first, rowsChanged);
+
+		final Fixture replacement = fixture(DestinationSignStyle.ARRIVAL_ORDER, 3, 2, false);
+		final DestinationSignClientState.RenderRows replacementPreparedRows = renderRows(replacement, Map.of(), 0);
+		Assertions.assertEquals(fixture.key, replacement.key);
+		Assertions.assertNotSame(rowsChanged, cache.resolve(1, replacement.prepared, replacementPreparedRows, 0, 0));
+	}
+
+	@Test
+	public void compositionCacheEvictsLeastRecentlyUsedAnchorAtItsBound() {
+		final Fixture fixture = fixture(DestinationSignStyle.ARRIVAL_ORDER, 3, 2, false);
+		final DestinationSignClientState.RenderRows rows = renderRows(fixture, Map.of(), 0);
+		final RenderDestinationSign.CompositionCache cache = new RenderDestinationSign.CompositionCache(2);
+		final RenderDestinationSign.Composition first = cache.resolve(1, fixture.prepared, rows, 0, 0);
+		final RenderDestinationSign.Composition second = cache.resolve(2, fixture.prepared, rows, 0, 0);
+
+		Assertions.assertSame(first, cache.resolve(1, fixture.prepared, rows, 0, 0));
+		cache.resolve(3, fixture.prepared, rows, 0, 0);
+		Assertions.assertNotSame(second, cache.resolve(2, fixture.prepared, rows, 0, 0));
 	}
 
 	@Test
@@ -140,6 +212,12 @@ public final class RenderDestinationSignTest {
 			result.put(new DestinationSignArrivalKey(option.getRoute().getRouteId(), option.getSource().getPlatformId()), DestinationSignArrivalResult.present(arrival, destination, true));
 		}
 		return result;
+	}
+
+	private static DestinationSignClientState.RenderRows renderRows(Fixture fixture,
+			Map<DestinationSignArrivalKey, DestinationSignArrivalResult> arrivals, long serverNowMillis) {
+		return DestinationSignClientState.buildRenderRows(fixture.prepared, DestinationSignRows.resolve(fixture.snapshot.getModel(), arrivals,
+				true, serverNowMillis, fixture.snapshot.isShowEta(), fixture.snapshot.getStyle()));
 	}
 
 	private static Fixture fixture(DestinationSignStyle style, int width, int height, boolean showEta) {

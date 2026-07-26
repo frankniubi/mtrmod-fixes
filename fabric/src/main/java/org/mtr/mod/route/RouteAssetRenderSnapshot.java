@@ -6,12 +6,16 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 /** Immutable, client-independent input to the route texture renderer. */
 public final class RouteAssetRenderSnapshot {
 
 	private final String platformDisplayName;
 	private final long selectedPlatformId;
+	private final SortedSet<Long> selectedPlatformIds;
 	private final long selectedStationId;
 	private final RouteMapPurpose routeMapPurpose;
 	private final int routeColor;
@@ -35,7 +39,13 @@ public final class RouteAssetRenderSnapshot {
 
 	private RouteAssetRenderSnapshot(Builder builder) {
 		platformDisplayName = builder.platformDisplayName;
-		selectedPlatformId = builder.selectedPlatformId;
+		final TreeSet<Long> checkedSelectedPlatformIds = new TreeSet<>(builder.selectedPlatformIds);
+		if (checkedSelectedPlatformIds.isEmpty() && builder.selectedPlatformId != 0) checkedSelectedPlatformIds.add(builder.selectedPlatformId);
+		if (checkedSelectedPlatformIds.size() > RouteAssetProtocol.MAX_ROUTE_SIGN_PLATFORMS || checkedSelectedPlatformIds.contains(0L)) {
+			throw new IllegalArgumentException("Invalid selected Route Sign platforms");
+		}
+		selectedPlatformIds = Collections.unmodifiableSortedSet(checkedSelectedPlatformIds);
+		selectedPlatformId = selectedPlatformIds.isEmpty() ? 0 : selectedPlatformIds.first();
 		selectedStationId = builder.selectedStationId;
 		routeMapPurpose = builder.routeMapPurpose;
 		routeColor = builder.routeColor & 0xFFFFFF;
@@ -65,6 +75,7 @@ public final class RouteAssetRenderSnapshot {
 
 	public String getPlatformDisplayName() { return platformDisplayName; }
 	public long getSelectedPlatformId() { return selectedPlatformId; }
+	public SortedSet<Long> getSelectedPlatformIds() { return selectedPlatformIds; }
 	public long getSelectedStationId() { return selectedStationId; }
 	public RouteMapPurpose getRouteMapPurpose() { return routeMapPurpose; }
 	public int getRouteColor() { return routeColor; }
@@ -109,6 +120,7 @@ public final class RouteAssetRenderSnapshot {
 	public static final class Builder {
 		private String platformDisplayName = "";
 		private long selectedPlatformId;
+		private Set<Long> selectedPlatformIds = Collections.emptySet();
 		private long selectedStationId;
 		private RouteMapPurpose routeMapPurpose = RouteMapPurpose.GENERIC;
 		private int routeColor;
@@ -131,7 +143,8 @@ public final class RouteAssetRenderSnapshot {
 		private DestinationSignAssetSnapshot destinationSignAssetSnapshot;
 
 		public Builder platformDisplayName(String value) { platformDisplayName = Objects.requireNonNull(value); return this; }
-		public Builder selectedPlatformId(long value) { selectedPlatformId = value; return this; }
+		public Builder selectedPlatformId(long value) { selectedPlatformId = value; selectedPlatformIds = Collections.emptySet(); return this; }
+		public Builder selectedPlatformIds(Set<Long> value) { selectedPlatformIds = Objects.requireNonNull(value); selectedPlatformId = 0; return this; }
 		public Builder selectedStationId(long value) { selectedStationId = value; return this; }
 		public Builder routeMapPurpose(RouteMapPurpose value) { routeMapPurpose = Objects.requireNonNull(value); return this; }
 		public Builder routeColor(int value) { routeColor = value; return this; }

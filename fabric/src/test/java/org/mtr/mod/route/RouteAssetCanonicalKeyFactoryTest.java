@@ -3,6 +3,8 @@ package org.mtr.mod.route;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.Set;
+
 public final class RouteAssetCanonicalKeyFactoryTest {
 
 	@Test
@@ -10,7 +12,7 @@ public final class RouteAssetCanonicalKeyFactoryTest {
 		final RouteAssetKey generic = RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, 2, "normal", RouteMapPurpose.GENERIC, true, false, 37F / 22, false);
 		final RouteAssetKey routeSign = RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, 2, "normal", RouteMapPurpose.ROUTE_SIGN, true, false, 37F / 22, false);
 		Assertions.assertEquals("minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=37:22,f=0,p=GENERIC,t=0,v=1", generic.toString());
-		Assertions.assertEquals("minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=37:22,f=0,p=ROUTE_SIGN,s=AUTO,t=0,v=1", routeSign.toString());
+		Assertions.assertEquals("minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=37:22,f=0,hdr=-,p=ROUTE_SIGN,ps=7,s=AUTO,t=0,v=1", routeSign.toString());
 		Assertions.assertNotEquals(generic, routeSign);
 		Assertions.assertEquals(RouteMapPurpose.ROUTE_SIGN, RouteAssetCanonicalKeyFactory.decodeRouteMap(routeSign).purpose);
 		Assertions.assertNull(RouteAssetCanonicalKeyFactory.decodeRouteMap(RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=37:22,f=0,t=0,v=1")));
@@ -25,13 +27,35 @@ public final class RouteAssetCanonicalKeyFactoryTest {
 		final RouteAssetKey auto = routeSign(RouteSignStyleMode.AUTO);
 		final RouteAssetKey railway = routeSign(RouteSignStyleMode.RAILWAY);
 		final RouteAssetKey normal = routeSign(RouteSignStyleMode.NORMAL);
-		Assertions.assertTrue(auto.toString().endsWith("a=37:22,f=0,p=ROUTE_SIGN,s=AUTO,t=0,v=1"));
+		Assertions.assertTrue(auto.toString().endsWith("a=37:22,f=0,hdr=-,p=ROUTE_SIGN,ps=7,s=AUTO,t=0,v=1"));
 		Assertions.assertNotEquals(auto, railway);
 		Assertions.assertNotEquals(railway, normal);
 		Assertions.assertEquals(RouteSignStyleMode.NORMAL, RouteAssetCanonicalKeyFactory.decodeRouteMap(normal).styleMode);
 		Assertions.assertFalse(genericRouteMap().toString().contains(",s="));
 		Assertions.assertNull(RouteAssetCanonicalKeyFactory.decodeRouteMap(RouteAssetKey.parse(
 				"minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=37:22,f=0,p=ROUTE_SIGN,s=railway,t=0,v=1")));
+	}
+
+	@Test
+	public void multiPlatformRouteSignsHaveSortedReversiblePixelIdentity() {
+		final RouteAssetKey first = RouteAssetCanonicalKeyFactory.routeSignMap(
+				"minecraft/overworld", Set.of(-30L, -10L, -20L), 2, "NORMAL", RouteSignStyleMode.RAILWAY,
+				"Custom|Header", true, false, 37F / 22, false);
+		final RouteAssetKey reordered = RouteAssetCanonicalKeyFactory.routeSignMap(
+				"minecraft/overworld", Set.of(-20L, -30L, -10L), 2, "NORMAL", RouteSignStyleMode.RAILWAY,
+				"Custom|Header", true, false, 37F / 22, false);
+		final RouteAssetCanonicalKeyFactory.RouteMapParameters decoded = RouteAssetCanonicalKeyFactory.decodeRouteMap(first);
+
+		Assertions.assertEquals(first, reordered);
+		Assertions.assertEquals(-30, first.getPrimaryId());
+		Assertions.assertEquals(Set.of(-30L, -20L, -10L), decoded.platformIds);
+		Assertions.assertEquals("Custom|Header", decoded.customPlatformHeader);
+		Assertions.assertNotEquals(first, RouteAssetCanonicalKeyFactory.routeSignMap(
+				"minecraft/overworld", Set.of(-30L, -20L, -10L), 2, "NORMAL", RouteSignStyleMode.RAILWAY,
+				"Other|Header", true, false, 37F / 22, false));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> RouteAssetCanonicalKeyFactory.routeSignMap(
+				"minecraft/overworld", Set.of(-30L, -20L), 2, "NORMAL", RouteSignStyleMode.NORMAL,
+				"", true, false, 37F / 22, false));
 	}
 
 	@Test

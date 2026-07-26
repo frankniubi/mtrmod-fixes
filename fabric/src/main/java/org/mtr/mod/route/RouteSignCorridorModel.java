@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.SortedSet;
 import java.util.TreeSet;
 
 /** Immutable, bounded route-sign projection grouped by the immediate next Station Zone. */
@@ -85,6 +86,7 @@ public final class RouteSignCorridorModel {
 	private static final class Builder {
 		private final RouteAssetRenderSnapshot snapshot;
 		private final List<MutableRow> rows = new ArrayList<>();
+		private final Set<Long> observedSelectedPlatformIds = new HashSet<>();
 		private int departingOccurrenceCount;
 		private int totalFutureStopCount;
 		private String selectedStationName = "";
@@ -94,20 +96,22 @@ public final class RouteSignCorridorModel {
 		}
 
 		private boolean collectOccurrences() {
-			if (snapshot.getSelectedPlatformId() == 0 || snapshot.getSelectedStationId() == 0) return false;
+			if (snapshot.getSelectedPlatformIds().isEmpty() || snapshot.getSelectedStationId() == 0) return false;
 			int occurrenceOrder = 0;
 			for (int routeOrder = 0; routeOrder < snapshot.getRoutes().size(); routeOrder++) {
 				final RouteAssetRenderSnapshot.Route route = snapshot.getRoutes().get(routeOrder);
 				final List<RouteAssetRenderSnapshot.Station> stations = route.getStations();
 				final List<Integer> selectedIndices = new ArrayList<>();
 				for (int index = 0; index < stations.size(); index++) {
-					if (stations.get(index).getPlatformId() == snapshot.getSelectedPlatformId()) selectedIndices.add(index);
+					if (snapshot.getSelectedPlatformIds().contains(stations.get(index).getPlatformId())) selectedIndices.add(index);
 				}
 				if (selectedIndices.isEmpty()) return false;
 
 				for (final int selectedIndex : selectedIndices) {
 					final RouteAssetRenderSnapshot.Station selected = stations.get(selectedIndex);
-					if (!hasValidPlatformMetadata(selected) || selected.getStationId() != snapshot.getSelectedStationId()) return false;
+					if (!hasValidPlatformMetadata(selected) || selected.getStationId() != snapshot.getSelectedStationId()
+							|| selected.getOwningStationId() != snapshot.getSelectedStationId()) return false;
+					observedSelectedPlatformIds.add(selected.getPlatformId());
 					if (selectedStationName.isEmpty()) selectedStationName = selected.getName();
 					if (selectedIndex + 1 < stations.size()) {
 						final int futureStopCount = stations.size() - selectedIndex - 1;
@@ -136,7 +140,7 @@ public final class RouteSignCorridorModel {
 					rows.add(new MutableRow(route, routeOrder, occurrenceOrder++, selectedIndex, orderedStops, snapshot.getSelectedStationId()));
 				}
 			}
-			return !rows.isEmpty();
+			return !rows.isEmpty() && observedSelectedPlatformIds.containsAll(snapshot.getSelectedPlatformIds());
 		}
 
 		private boolean validateBoundsAndMetadata() {
@@ -169,7 +173,7 @@ public final class RouteSignCorridorModel {
 					.thenComparingLong(corridor -> corridor.stationId));
 			final List<Corridor> corridors = new ArrayList<>(mutableCorridors.size());
 			for (final MutableCorridor corridor : mutableCorridors) corridors.add(corridor.freeze());
-			return new Model(snapshot.getSelectedPlatformId(), snapshot.getSelectedStationId(), snapshot.getPlatformDisplayName(), selectedStationName, corridors);
+			return new Model(snapshot.getSelectedPlatformIds(), snapshot.getSelectedStationId(), snapshot.getPlatformDisplayName(), selectedStationName, corridors);
 		}
 
 		private Map<Long, Integer> corridorSharedZoneCounts(List<MutableRow> corridorRows) {
@@ -446,14 +450,16 @@ public final class RouteSignCorridorModel {
 
 	public static final class Model {
 		private final long selectedPlatformId;
+		private final SortedSet<Long> selectedPlatformIds;
 		private final long selectedStationId;
 		private final String selectedPlatformDisplayName;
 		private final String selectedStationName;
 		private final List<Corridor> corridors;
 		private final List<RouteRow> rows;
 
-		private Model(long selectedPlatformId, long selectedStationId, String selectedPlatformDisplayName, String selectedStationName, List<Corridor> corridors) {
-			this.selectedPlatformId = selectedPlatformId;
+		private Model(Set<Long> selectedPlatformIds, long selectedStationId, String selectedPlatformDisplayName, String selectedStationName, List<Corridor> corridors) {
+			this.selectedPlatformIds = Collections.unmodifiableSortedSet(new TreeSet<>(selectedPlatformIds));
+			selectedPlatformId = this.selectedPlatformIds.first();
 			this.selectedStationId = selectedStationId;
 			this.selectedPlatformDisplayName = selectedPlatformDisplayName;
 			this.selectedStationName = selectedStationName;
@@ -464,6 +470,7 @@ public final class RouteSignCorridorModel {
 		}
 
 		public long getSelectedPlatformId() { return selectedPlatformId; }
+		public SortedSet<Long> getSelectedPlatformIds() { return selectedPlatformIds; }
 		public long getSelectedStationId() { return selectedStationId; }
 		public String getSelectedPlatformDisplayName() { return selectedPlatformDisplayName; }
 		public String getPlatformDisplayName() { return selectedPlatformDisplayName; }

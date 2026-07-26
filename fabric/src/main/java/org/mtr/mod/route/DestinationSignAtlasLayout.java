@@ -75,13 +75,6 @@ public final class DestinationSignAtlasLayout {
 				&& (long) widthBlocks * heightBlocks >= MIN_AREA_BLOCKS;
 	}
 
-	public static int readableSourceX(int surfaceWidth, int displayX, int width) {
-		if (surfaceWidth <= 0 || displayX < 0 || width <= 0 || displayX + width > surfaceWidth) {
-			throw new IllegalArgumentException("Invalid destination sign source region");
-		}
-		return surfaceWidth - displayX - width;
-	}
-
 	public static String languageSegment(String value, int languagePhase) {
 		final String[] segments = Objects.requireNonNull(value, "value").split("\\|", -1);
 		return segments[Math.floorMod(languagePhase, segments.length)];

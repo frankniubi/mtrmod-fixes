@@ -5,6 +5,9 @@ import org.junit.jupiter.api.Test;
 import org.mtr.mapping.holder.CompoundTag;
 import org.mtr.mod.route.DestinationSignStyle;
 
+import java.util.List;
+import java.util.Set;
+
 public final class DestinationSignConfigTest {
 
 	@Test
@@ -14,6 +17,20 @@ public final class DestinationSignConfigTest {
 		config.write(tag);
 		Assertions.assertEquals(config, DestinationSignConfig.read(tag));
 		Assertions.assertTrue(config.isConfigured());
+	}
+
+	@Test
+	public void multipleDestinationsAndCustomHeaderRoundTripInSortedOrder() {
+		final DestinationSignConfig config = DestinationSignConfig.configured(-10, Set.of(-20L, -40L, -30L), 7, 4,
+				DestinationSignStyle.PLATFORM_GROUPS, false, "\u5f80\u4e1c\u7ad9/\u897f\u7ad9\u65b9\u5411|To East/West");
+		final CompoundTag tag = new CompoundTag();
+		config.write(tag);
+
+		Assertions.assertEquals(List.of(-40L, -30L, -20L), List.copyOf(config.getDestinationStationIds()));
+		Assertions.assertEquals(-40, config.getDestinationStationId());
+		Assertions.assertEquals("\u5f80\u4e1c\u7ad9/\u897f\u7ad9\u65b9\u5411|To East/West", config.getCustomHeader());
+		Assertions.assertEquals(3, tag.getLong("destination_station_ids_count"));
+		Assertions.assertEquals(config, DestinationSignConfig.read(tag));
 	}
 
 	@Test
@@ -37,6 +54,15 @@ public final class DestinationSignConfigTest {
 		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.configured(0, 5, 3, 2, DestinationSignStyle.ARRIVAL_ORDER, true));
 		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.configured(5, 0, 3, 2, DestinationSignStyle.ARRIVAL_ORDER, true));
 		Assertions.assertDoesNotThrow(() -> DestinationSignConfig.configured(5, 6, 2, 2, DestinationSignStyle.DESTINATION_FLAG, true));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.configured(5, Set.of(), 3, 2, DestinationSignStyle.ARRIVAL_ORDER, true, ""));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.configured(5, Set.of(6L, 0L), 3, 2, DestinationSignStyle.ARRIVAL_ORDER, true, ""));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.configured(5,
+				java.util.stream.LongStream.rangeClosed(1, DestinationSignConfig.MAX_DESTINATIONS + 1).boxed().collect(java.util.stream.Collectors.toSet()),
+				3, 2, DestinationSignStyle.ARRIVAL_ORDER, true, ""));
+		final String tooManySegments = String.join("|", java.util.Collections.nCopies(
+				org.mtr.mod.route.RouteAssetProtocol.MAX_DESTINATION_SIGN_PIPE_SEGMENTS + 1, "x"));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.configured(
+				5, Set.of(6L), 3, 2, DestinationSignStyle.ARRIVAL_ORDER, true, tooManySegments));
 		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.unconfigured(17, 2));
 	}
 

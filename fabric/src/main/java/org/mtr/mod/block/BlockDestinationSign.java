@@ -12,6 +12,8 @@ import org.mtr.mod.Init;
 import org.mtr.mod.data.PersistentStateData;
 import org.mtr.mod.packet.PacketOpenDestinationSignScreen;
 import org.mtr.mod.route.DestinationSignConfiguredEntry;
+import org.mtr.mod.route.RouteAssetCanonicalKeyFactory;
+import org.mtr.mod.route.RouteAssetKey;
 import org.mtr.mod.route.RouteAssetServerManager;
 
 import javax.annotation.Nonnull;
@@ -21,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 public final class BlockDestinationSign extends BlockExtension implements DirectionHelper, IBlock, BlockWithEntity {
@@ -264,7 +267,8 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 	}
 
 	private static DestinationSignConfiguredEntry configuredEntry(DestinationSignConfig config) {
-		return new DestinationSignConfiguredEntry(config.getSourceStationId(), config.getDestinationStationId(), config.getWidth(), config.getHeight(), config.getStyle(), config.isShowEta());
+		return new DestinationSignConfiguredEntry(config.getSourceStationId(), config.getDestinationStationIds(), config.getCustomHeader(),
+				config.getWidth(), config.getHeight(), config.getStyle(), config.isShowEta());
 	}
 
 	private static void notifyConfiguredAssets(World world, String cause) {
@@ -275,6 +279,8 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 	public static final class BlockEntity extends BlockEntityExtension {
 
 		private DestinationSignConfig config = DestinationSignConfig.unconfigured(DestinationSignConfig.DEFAULT_WIDTH, DestinationSignConfig.DEFAULT_HEIGHT);
+		private final DestinationSignKeyCache keyCache = new DestinationSignKeyCache();
+		private String cachedDimension;
 		private boolean configuredIndexReconciled;
 
 		public BlockEntity(BlockPos pos, BlockState state) {
@@ -300,6 +306,10 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 		}
 
 		public DestinationSignConfig getConfig() { return config; }
+		public RouteAssetKey getCachedKey(int resolution) {
+			if (cachedDimension == null) cachedDimension = Init.getWorldId(Objects.requireNonNull(getWorld2(), "world"));
+			return keyCache.get(config, cachedDimension, resolution);
+		}
 
 		public void setConfig(DestinationSignConfig config) {
 			this.config = config;
@@ -314,6 +324,27 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 			final boolean changed;
 			changed = updateConfiguredIndex(persistentState, getPos2(), config);
 			if (changed) notifyConfiguredAssets(world, "destination-sign-config");
+		}
+	}
+
+	static final class DestinationSignKeyCache {
+		private DestinationSignConfig cachedConfig;
+		private RouteAssetKey cachedKey;
+
+		RouteAssetKey get(DestinationSignConfig config, String dimension, int resolution) {
+			final DestinationSignConfig checkedConfig = Objects.requireNonNull(config, "config");
+			final String checkedDimension = Objects.requireNonNull(dimension, "dimension");
+			if (cachedKey != null && checkedConfig.equals(cachedConfig)
+					&& checkedDimension.equals(cachedKey.getDimension())
+					&& resolution == cachedKey.getVariant().getResolution()) {
+				return cachedKey;
+			}
+			final RouteAssetKey replacement = RouteAssetCanonicalKeyFactory.destinationSign(
+					checkedDimension, checkedConfig.getSourceStationId(), checkedConfig.getDestinationStationIds(), checkedConfig.getCustomHeader(), resolution,
+					checkedConfig.getStyle(), checkedConfig.getWidth(), checkedConfig.getHeight(), checkedConfig.isShowEta());
+			cachedConfig = checkedConfig;
+			cachedKey = replacement;
+			return replacement;
 		}
 	}
 }

@@ -10,6 +10,8 @@ import org.mtr.mapping.mapper.CheckboxWidgetExtension;
 import org.mtr.mapping.mapper.GraphicsHolder;
 import org.mtr.mapping.mapper.ScreenExtension;
 import org.mtr.mapping.mapper.TextHelper;
+import org.mtr.mapping.mapper.TextFieldWidgetExtension;
+import org.mtr.mapping.tool.TextCase;
 import org.mtr.mod.Init;
 import org.mtr.mod.InitClient;
 import org.mtr.mod.block.BlockDestinationSign;
@@ -17,6 +19,7 @@ import org.mtr.mod.block.DestinationSignConfig;
 import org.mtr.mod.client.IDrawing;
 import org.mtr.mod.client.MinecraftClientData;
 import org.mtr.mod.data.IGui;
+import org.mtr.mod.generated.lang.TranslationProvider;
 import org.mtr.mod.packet.PacketUpdateDestinationSignConfig;
 import org.mtr.mod.route.DestinationSignTopology;
 import org.mtr.mod.route.RouteAssetDataMirror;
@@ -28,6 +31,7 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 	private final LongAVLTreeSet selectedDestination = new LongAVLTreeSet();
 	private final ObjectImmutableList<DashboardListItem> destinationItems;
 	private final ButtonWidgetExtension buttonDestination;
+	private final TextFieldWidgetExtension textFieldCustomHeader;
 	private final ButtonWidgetExtension buttonWidthMinus;
 	private final ButtonWidgetExtension buttonWidthPlus;
 	private final ButtonWidgetExtension buttonHeightMinus;
@@ -35,6 +39,7 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 	private final CheckboxWidgetExtension checkboxEta;
 	private final ButtonWidgetExtension buttonStyle;
 	private final ButtonWidgetExtension buttonDone;
+	private boolean customHeaderValid = true;
 
 	public DestinationSignConfigScreen(BlockPos anchor) {
 		this.anchor = anchor;
@@ -56,11 +61,13 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 		final ObjectArrayList<DashboardListItem> items = new ObjectArrayList<>();
 		if (model != null) {
 			model.getDestinations().forEach(destination -> items.add(new DashboardListItem(destination.getId(), destination.getDisplayName(), 0)));
-			if (model.getDestinationStationId() != 0) selectedDestination.add(model.getDestinationStationId());
+			model.getDestinationStationIds().forEach(selectedDestination::add);
 		}
 		destinationItems = new ObjectImmutableList<>(items);
 
 		buttonDestination = new ButtonWidgetExtension(0, 0, 0, SQUARE_SIZE, TextHelper.translatable("gui.mtr.destination_sign_select_destination"), button -> openDestinationSelector());
+		textFieldCustomHeader = new TextFieldWidgetExtension(0, 0, 0, SQUARE_SIZE, DestinationSignConfig.MAX_CUSTOM_HEADER_UTF8_BYTES,
+				TextCase.DEFAULT, null, model == null ? "" : model.getCustomHeader());
 		buttonWidthMinus = stepButton("-", () -> model.adjustWidth(-1));
 		buttonWidthPlus = stepButton("+", () -> model.adjustWidth(1));
 		buttonHeightMinus = stepButton("-", () -> model.adjustHeight(-1));
@@ -82,6 +89,7 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 		final int panelWidth = Math.min(PANEL_WIDTH, Math.max(SQUARE_SIZE * 4, width - SQUARE_SIZE * 2));
 		final int x = (width - panelWidth) / 2;
 		IDrawing.setPositionAndWidth(buttonDestination, x, SQUARE_SIZE * 3, panelWidth);
+		IDrawing.setPositionAndWidth(textFieldCustomHeader, x + panelWidth / 3, SQUARE_SIZE * 4, panelWidth - panelWidth / 3);
 		IDrawing.setPositionAndWidth(buttonWidthMinus, x, SQUARE_SIZE * 5, SQUARE_SIZE);
 		IDrawing.setPositionAndWidth(buttonWidthPlus, x + panelWidth - SQUARE_SIZE, SQUARE_SIZE * 5, SQUARE_SIZE);
 		IDrawing.setPositionAndWidth(buttonHeightMinus, x, SQUARE_SIZE * 6, SQUARE_SIZE);
@@ -89,8 +97,22 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 		IDrawing.setPositionAndWidth(checkboxEta, x, SQUARE_SIZE * 8, panelWidth);
 		IDrawing.setPositionAndWidth(buttonStyle, x, SQUARE_SIZE * 10, panelWidth);
 		IDrawing.setPositionAndWidth(buttonDone, x, height - SQUARE_SIZE * 2, panelWidth);
-		for (final ClickableWidget widget : new ClickableWidget[] {new ClickableWidget(buttonDestination), new ClickableWidget(buttonWidthMinus), new ClickableWidget(buttonWidthPlus), new ClickableWidget(buttonHeightMinus), new ClickableWidget(buttonHeightPlus), new ClickableWidget(checkboxEta), new ClickableWidget(buttonStyle), new ClickableWidget(buttonDone)}) addChild(widget);
+		for (final ClickableWidget widget : new ClickableWidget[] {new ClickableWidget(buttonDestination), new ClickableWidget(textFieldCustomHeader), new ClickableWidget(buttonWidthMinus), new ClickableWidget(buttonWidthPlus), new ClickableWidget(buttonHeightMinus), new ClickableWidget(buttonHeightPlus), new ClickableWidget(checkboxEta), new ClickableWidget(buttonStyle), new ClickableWidget(buttonDone)}) addChild(widget);
 		updateControls();
+	}
+
+	@Override
+	public void tick2() {
+		textFieldCustomHeader.tick2();
+		if (model != null && !textFieldCustomHeader.getText2().equals(model.getCustomHeader())) {
+			try {
+				model.setCustomHeader(textFieldCustomHeader.getText2());
+				customHeaderValid = true;
+			} catch (IllegalArgumentException ignored) {
+				customHeaderValid = false;
+			}
+			updateControls();
+		}
 	}
 
 	@Override
@@ -100,6 +122,9 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 			graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_data_unavailable"), width / 2, SQUARE_SIZE * 2, ARGB_WHITE);
 		} else {
 			graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_current_station", model.getSourceStationName()), width / 2, SQUARE_SIZE, ARGB_WHITE);
+			final int panelWidth = Math.min(PANEL_WIDTH, Math.max(SQUARE_SIZE * 4, width - SQUARE_SIZE * 2));
+			graphicsHolder.drawCenteredText(TranslationProvider.GUI_MTR_DESTINATION_SIGN_CUSTOM_HEADER.getMutableText(),
+					(width - panelWidth) / 2 + panelWidth / 6, SQUARE_SIZE * 4 + TEXT_PADDING, ARGB_WHITE);
 			graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_width", model.getWidth()), width / 2, SQUARE_SIZE * 5 + TEXT_PADDING, ARGB_WHITE);
 			graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_height", model.getHeight()), width / 2, SQUARE_SIZE * 6 + TEXT_PADDING, ARGB_WHITE);
 			if (model.getDestinationStationId() != 0 && !model.canSave()) {
@@ -122,9 +147,12 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 	private void openDestinationSelector() {
 		if (model == null) return;
 		MinecraftClient.getInstance().openScreen(new Screen(new DashboardListSelectorScreen(() -> {
-			if (!selectedDestination.isEmpty()) model.selectDestination(selectedDestination.firstLong());
+			while (selectedDestination.size() > DestinationSignConfig.MAX_DESTINATIONS) selectedDestination.remove(selectedDestination.lastLong());
+			final java.util.TreeSet<Long> selected = new java.util.TreeSet<>();
+			for (final long destinationId : selectedDestination) selected.add(destinationId);
+			model.selectDestinations(selected);
 			updateControls();
-		}, destinationItems, selectedDestination, true, false, this)));
+		}, destinationItems, selectedDestination, false, false, this)));
 	}
 
 	private void updateControls() {
@@ -132,20 +160,21 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 		buttonDestination.active = available && !destinationItems.isEmpty();
 		buttonStyle.active = available;
 		checkboxEta.active = available;
+		textFieldCustomHeader.active = available;
 		if (available) {
 			checkboxEta.setChecked(model.isShowEta());
 			buttonWidthMinus.active = model.canAdjustWidth(-1);
 			buttonWidthPlus.active = model.canAdjustWidth(1);
 			buttonHeightMinus.active = model.canAdjustHeight(-1);
 			buttonHeightPlus.active = model.canAdjustHeight(1);
-			buttonDone.active = model.canSave();
+			buttonDone.active = customHeaderValid && model.canSave();
 		} else {
 			buttonWidthMinus.active = buttonWidthPlus.active = buttonHeightMinus.active = buttonHeightPlus.active = buttonDone.active = false;
 		}
 	}
 
 	private void saveAndClose() {
-		if (model != null && model.canSave()) InitClient.REGISTRY_CLIENT.sendPacketToServer(new PacketUpdateDestinationSignConfig(anchor, model.toConfig()));
+		if (model != null && customHeaderValid && model.canSave()) InitClient.REGISTRY_CLIENT.sendPacketToServer(new PacketUpdateDestinationSignConfig(anchor, model.toConfig()));
 		onClose2();
 	}
 }

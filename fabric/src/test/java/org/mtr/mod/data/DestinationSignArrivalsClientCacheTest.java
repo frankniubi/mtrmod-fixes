@@ -101,4 +101,73 @@ public final class DestinationSignArrivalsClientCacheTest {
 		Assertions.assertTrue(snapshot.getResults().isEmpty());
 		Assertions.assertTrue(snapshot.getAuthoritativeKeys().isEmpty());
 	}
+
+	@Test
+	public void unchangedGenerationReusesPublishedCollectionsWhileServerTimeAdvances() {
+		final AtomicLong now = new AtomicLong(1_000);
+		final List<PacketFetchDestinationSignArrivals.RequestPayload> sent = new ArrayList<>();
+		final DestinationSignArrivalsClientCache cache = new DestinationSignArrivalsClientCache(now::get, sent::add);
+		final DestinationSignArrivalKey key = new DestinationSignArrivalKey(-1, -10);
+		cache.request(List.of(key));
+		cache.tick();
+		cache.accept(new PacketFetchDestinationSignArrivals.ResponsePayload(sent.get(0).getCallbackId(), 5_000,
+				Map.of(key, DestinationSignArrivalResult.present(8_000, "A|B", true))));
+
+		final DestinationSignArrivalsClientCache.Snapshot first = cache.request(List.of(key));
+		now.addAndGet(125);
+		final DestinationSignArrivalsClientCache.Snapshot second = cache.request(List.of(key));
+
+		Assertions.assertNotSame(first, second);
+		Assertions.assertEquals(first.getServerNowMillis() + 125, second.getServerNowMillis());
+		Assertions.assertEquals(first.getGeneration(), second.getGeneration());
+		Assertions.assertSame(first.getResults(), second.getResults());
+		Assertions.assertSame(first.getAuthoritativeKeys(), second.getAuthoritativeKeys());
+		Assertions.assertThrows(UnsupportedOperationException.class, () -> first.getResults().clear());
+		Assertions.assertThrows(UnsupportedOperationException.class, () -> first.getAuthoritativeKeys().clear());
+	}
+
+	@Test
+	public void generationChangePublishesNewCollectionsWithoutMutatingOlderSnapshot() {
+		final AtomicLong now = new AtomicLong();
+		final List<PacketFetchDestinationSignArrivals.RequestPayload> sent = new ArrayList<>();
+		final DestinationSignArrivalsClientCache cache = new DestinationSignArrivalsClientCache(now::get, sent::add);
+		final DestinationSignArrivalKey key = new DestinationSignArrivalKey(-1, -10);
+		cache.request(List.of(key));
+		cache.tick();
+		final DestinationSignArrivalsClientCache.Snapshot before = cache.request(List.of(key));
+
+		cache.accept(new PacketFetchDestinationSignArrivals.ResponsePayload(sent.get(0).getCallbackId(), 0,
+				Map.of(key, DestinationSignArrivalResult.present(8_000, "A", true))));
+		final DestinationSignArrivalsClientCache.Snapshot after = cache.request(List.of(key));
+
+		Assertions.assertNotSame(before.getResults(), after.getResults());
+		Assertions.assertNotSame(before.getAuthoritativeKeys(), after.getAuthoritativeKeys());
+		Assertions.assertTrue(before.getResults().isEmpty());
+		Assertions.assertTrue(before.getAuthoritativeKeys().isEmpty());
+		Assertions.assertTrue(after.getResults().containsKey(key));
+		Assertions.assertTrue(after.getAuthoritativeKeys().contains(key));
+	}
+
+	@Test
+	public void clearDoesNotMutatePreviouslyPublishedSnapshot() {
+		final AtomicLong now = new AtomicLong();
+		final List<PacketFetchDestinationSignArrivals.RequestPayload> sent = new ArrayList<>();
+		final DestinationSignArrivalsClientCache cache = new DestinationSignArrivalsClientCache(now::get, sent::add);
+		final DestinationSignArrivalKey key = new DestinationSignArrivalKey(-1, -10);
+		cache.request(List.of(key));
+		cache.tick();
+		cache.accept(new PacketFetchDestinationSignArrivals.ResponsePayload(sent.get(0).getCallbackId(), 0,
+				Map.of(key, DestinationSignArrivalResult.present(8_000, "A", true))));
+		final DestinationSignArrivalsClientCache.Snapshot before = cache.request(List.of(key));
+
+		cache.clear();
+		final DestinationSignArrivalsClientCache.Snapshot after = cache.request(List.of());
+
+		Assertions.assertTrue(before.getResults().containsKey(key));
+		Assertions.assertTrue(before.getAuthoritativeKeys().contains(key));
+		Assertions.assertTrue(after.getResults().isEmpty());
+		Assertions.assertTrue(after.getAuthoritativeKeys().isEmpty());
+		Assertions.assertNotSame(before.getResults(), after.getResults());
+		Assertions.assertNotSame(before.getAuthoritativeKeys(), after.getAuthoritativeKeys());
+	}
 }

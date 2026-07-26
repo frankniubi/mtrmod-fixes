@@ -12,6 +12,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public final class DestinationSignAtlasRendererTest {
 
@@ -44,6 +46,15 @@ public final class DestinationSignAtlasRendererTest {
 			System.out.println("DESTINATION_SIGN_FIXTURE " + style.name() + '=' + value);
 			actual.put(style.name(), value);
 		}
+		final Set<Long> multiDestinations = DestinationSignDirectServiceModel.reachableDestinations(
+				topology, NorthTreetrunkRouteSignFixtures.NORTH_TREETRUNK).stream().limit(2)
+				.map(DestinationSignTopology.StationZone::getId).collect(Collectors.toSet());
+		final RouteAssetKey multiKey = RouteAssetCanonicalKeyFactory.destinationSign("minecraft/overworld",
+				NorthTreetrunkRouteSignFixtures.NORTH_TREETRUNK, multiDestinations, "All services|All services",
+				1, DestinationSignStyle.DESTINATION_FLAG, 3, 2, true);
+		final RouteAssetRenderSnapshot multiSnapshot = catalog.resolveDestinationSign(multiKey, data, "f".repeat(64)).orElseThrow().getSnapshot();
+		final RouteAssetImage multiImage = renderer.render(multiKey, multiSnapshot, text, sources);
+		actual.put("MULTI_CUSTOM", multiImage.getWidth() + "x" + multiImage.getHeight() + ':' + RouteAssetHash.sha256(multiImage.toPng()));
 		final Path fixture = testResourcePath("route-assets/destination-sign-fixtures.sha256");
 		if ("1".equals(System.getenv("UPDATE_DESTINATION_SIGN_GOLDENS"))) {
 			final List<String> lines = new ArrayList<>();
@@ -88,7 +99,7 @@ public final class DestinationSignAtlasRendererTest {
 	}
 
 	@Test
-	public void serverSpritesPreMirrorTheBottomSeparatorForReadableFaceUvRotation() {
+	public void serverSpritesDrawTheSeparatorAtTheTopOfEachBand() {
 		final DestinationSignAssetSnapshot snapshot = DestinationSignAssetSnapshot.create(NorthTreetrunkDestinationSignFixtures.topology(),
 				NorthTreetrunkRouteSignFixtures.NORTH_TREETRUNK, NorthTreetrunkRouteSignFixtures.YUYUAN_GARDEN,
 				DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);

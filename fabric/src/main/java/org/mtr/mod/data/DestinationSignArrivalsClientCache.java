@@ -43,6 +43,7 @@ public final class DestinationSignArrivalsClientCache {
 	private long nextRequestMillis;
 	private long serverMillisOffset;
 	private long generation;
+	private PublishedState publishedState;
 
 	public DestinationSignArrivalsClientCache(LongSupplier clock, Consumer<PacketFetchDestinationSignArrivals.RequestPayload> sender) {
 		this.clock = clock;
@@ -122,7 +123,23 @@ public final class DestinationSignArrivalsClientCache {
 	}
 
 	private Snapshot snapshot(long now) {
-		return new Snapshot(saturatingAdd(now, serverMillisOffset), generation, results, authoritativeKeys);
+		if (publishedState == null || publishedState.generation != generation) {
+			publishedState = new PublishedState(generation, results, authoritativeKeys);
+		}
+		return new Snapshot(saturatingAdd(now, serverMillisOffset), publishedState);
+	}
+
+	private static final class PublishedState {
+		private final long generation;
+		private final Map<DestinationSignArrivalKey, DestinationSignArrivalResult> results;
+		private final Set<DestinationSignArrivalKey> authoritativeKeys;
+
+		private PublishedState(long generation, Map<DestinationSignArrivalKey, DestinationSignArrivalResult> results,
+				Set<DestinationSignArrivalKey> authoritativeKeys) {
+			this.generation = generation;
+			this.results = Collections.unmodifiableMap(new TreeMap<>(results));
+			this.authoritativeKeys = Collections.unmodifiableSet(new TreeSet<>(authoritativeKeys));
+		}
 	}
 
 	public static final class Snapshot {
@@ -130,11 +147,11 @@ public final class DestinationSignArrivalsClientCache {
 		private final long generation;
 		private final Map<DestinationSignArrivalKey, DestinationSignArrivalResult> results;
 		private final Set<DestinationSignArrivalKey> authoritativeKeys;
-		private Snapshot(long serverNowMillis, long generation, Map<DestinationSignArrivalKey, DestinationSignArrivalResult> results, Set<DestinationSignArrivalKey> authoritativeKeys) {
+		private Snapshot(long serverNowMillis, PublishedState state) {
 			this.serverNowMillis = serverNowMillis;
-			this.generation = generation;
-			this.results = Collections.unmodifiableMap(new TreeMap<>(results));
-			this.authoritativeKeys = Collections.unmodifiableSet(new TreeSet<>(authoritativeKeys));
+			generation = state.generation;
+			results = state.results;
+			authoritativeKeys = state.authoritativeKeys;
 		}
 		public long getServerNowMillis() { return serverNowMillis; }
 		public long getGeneration() { return generation; }

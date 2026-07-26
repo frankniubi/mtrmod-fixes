@@ -447,8 +447,9 @@ public final class RouteAssetServerManager implements AutoCloseable {
 				} else {
 					final DestinationSignConfiguredEntry destination = configured.getDestinationSign();
 					for (int resolution = 0; resolution <= 3; resolution++) {
-						final RouteAssetKey key = RouteAssetCanonicalKeyFactory.destinationSign(configured.getDimension(), destination.getSourceStationId(), destination.getDestinationStationId(),
-								resolution, destination.getStyle(), destination.getWidthBlocks(), destination.getHeightBlocks(), destination.isShowEta());
+						final RouteAssetKey key = RouteAssetCanonicalKeyFactory.destinationSign(configured.getDimension(), destination.getSourceStationId(),
+								destination.getDestinationStationIds(), destination.getCustomHeader(), resolution,
+								destination.getStyle(), destination.getWidthBlocks(), destination.getHeightBlocks(), destination.isShowEta());
 						catalog.resolveDestinationSign(key, request.snapshot, resourceFingerprint).ifPresent(entry -> {
 							entries.put(entry.getKey(), entry);
 							configuredAssetKeys.add(entry.getKey());
@@ -671,9 +672,13 @@ public final class RouteAssetServerManager implements AutoCloseable {
 
 	private static boolean isInactiveExplicitRouteSign(RouteAssetKey key, Set<String> configuredIdentities) {
 		if (key.getType() != RouteAssetType.ROUTE_MAP || !RouteMapPurpose.ROUTE_SIGN.name().equals(key.getVariant().getParameters().get("p"))) return false;
-		final RouteSignStyleMode styleMode = RouteSignStyleMode.fromPersisted(key.getVariant().getParameters().get("s"));
-		if (!styleMode.isExplicit()) return false;
-		return !configuredIdentities.contains(key.getDimension() + "|ROUTE_SIGN|" + key.getPrimaryId() + "|" + styleMode.name());
+		final RouteAssetCanonicalKeyFactory.RouteMapParameters parameters = RouteAssetCanonicalKeyFactory.decodeRouteMap(key);
+		if (parameters == null) return true;
+		if (!parameters.styleMode.isExplicit()) return false;
+		final String platformIdentity = parameters.platformIds.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(":"));
+		final String configuredIdentity = key.getDimension() + "|ROUTE_SIGN|" + platformIdentity + '|'
+				+ parameters.customPlatformHeader.length() + ':' + parameters.customPlatformHeader + '|' + parameters.styleMode.name();
+		return !configuredIdentities.contains(configuredIdentity);
 	}
 
 	private static RenderFunction defaultRenderer() throws IOException {

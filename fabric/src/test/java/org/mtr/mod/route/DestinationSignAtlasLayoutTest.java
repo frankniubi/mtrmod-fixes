@@ -71,24 +71,6 @@ public final class DestinationSignAtlasLayoutTest {
 	}
 
 	@Test
-	public void staticAtlasColumnsMirrorIntoReadableFaceSourceSpace() {
-		for (final int surfaceWidth : List.of(120, 240, 360, 1920)) {
-			for (final DestinationSignStyle style : DestinationSignStyle.values()) {
-				final DestinationSignAtlasLayout.RowGeometry geometry = DestinationSignAtlasLayout.rowGeometry(style, surfaceWidth, style.getRowHeight(), true);
-				for (final int[] region : List.of(
-						new int[] {geometry.getRouteX(), geometry.getRouteWidth()},
-						new int[] {geometry.getPlatformX(), geometry.getPlatformWidth()},
-						new int[] {geometry.getDestinationX(), geometry.getDestinationWidth()},
-						new int[] {geometry.getEtaX(), geometry.getEtaWidth()})) {
-					final int sourceX = DestinationSignAtlasLayout.readableSourceX(surfaceWidth, region[0], region[1]);
-					Assertions.assertTrue(sourceX >= 0 && sourceX + region[1] <= surfaceWidth);
-					Assertions.assertEquals(region[0], DestinationSignAtlasLayout.readableSourceX(surfaceWidth, sourceX, region[1]));
-				}
-			}
-		}
-	}
-
-	@Test
 	public void pageCadenceCoversTheLargestVisiblePipeLanguageCount() {
 		final DestinationSignAtlasLayout.Layout layout = DestinationSignAtlasLayout.create(model(4), DestinationSignStyle.ARRIVAL_ORDER, 2, 2, true);
 		Assertions.assertEquals(3, layout.getPages().get(0).getLanguageCycleCount());

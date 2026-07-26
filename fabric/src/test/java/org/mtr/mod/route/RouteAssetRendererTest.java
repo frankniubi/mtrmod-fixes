@@ -115,6 +115,20 @@ public final class RouteAssetRendererTest {
 		Assertions.assertTrue(rasterized.stream().noneMatch(value -> value.startsWith("\u6811\u56ED\u5317|North Treetrunk:")));
 		Assertions.assertTrue(rasterized.stream().noneMatch(value -> value.startsWith("R1:")));
 		Assertions.assertTrue(rasterized.stream().noneMatch(value -> value.startsWith("XR1:")));
+
+		rasterized.clear();
+		final RouteAssetRenderSnapshot original = NorthTreetrunkRouteSignFixtures.u1Snapshot();
+		final RouteAssetRenderSnapshot customHeader = RouteAssetRenderSnapshot.builder()
+				.selectedPlatformIds(original.getSelectedPlatformIds())
+				.selectedStationId(original.getSelectedStationId())
+				.platformDisplayName("Custom platforms|Custom platforms")
+				.routeMapPurpose(RouteMapPurpose.ROUTE_SIGN)
+				.vertical(true)
+				.aspectRatio(37F / 22)
+				.routes(original.getRoutes())
+				.build();
+		renderRouteSign(customHeader, RouteSignStyleMode.RAILWAY, recording, 1);
+		Assertions.assertTrue(rasterized.contains("Custom platforms|Custom platforms:32:32"));
 	}
 
 	@Test

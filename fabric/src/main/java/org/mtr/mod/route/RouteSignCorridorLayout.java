@@ -29,7 +29,7 @@ public final class RouteSignCorridorLayout {
 	public static final int ICON_GAP = 2;
 	public static final String NEXT = "\u4E0B\u4E00\u7AD9|NEXT";
 	public static final String RETURN = "\u8FD4\u56DE|RETURN";
-	public static final String CONTINUES_VIA = "\u7ECF\u7531 %s %s|CONTINUES VIA %s %s";
+	public static final String CONTINUES_VIA = "%s \u7ECF|%s Via";
 
 	private static final int BADGE_TEXT_PADDING_X = 4;
 	private static final int UPPER_LINE_X = CONTENT_PADDING_X;
@@ -198,6 +198,9 @@ public final class RouteSignCorridorLayout {
 						(platform.isEmpty() ? "" : " " + platform);
 				return new TokenSeed(DisplayToken.Kind.CONTINUES, display, semantic, stop, platform);
 			}
+			if (row.getCircularState() != RouteAssetRenderSnapshot.CircularState.NONE) {
+				return new TokenSeed(DisplayToken.Kind.RETURN, "\u73AF Loop", "LOOP", stop, "");
+			}
 			final String display = appendToEachLanguage(RETURN, platform);
 			return new TokenSeed(DisplayToken.Kind.RETURN, display,
 					platform.isEmpty() ? "RETURN" : "RETURN " + platform, stop, platform);
@@ -224,8 +227,9 @@ public final class RouteSignCorridorLayout {
 	}
 
 	private static String continuesVia(String stationName, String platformName) {
-		return String.format(Locale.ROOT, CONTINUES_VIA, primaryPart(stationName), platformName,
-				englishPart(stationName), platformName).replace("  ", " ").trim();
+		final String platformSuffix = platformName.isEmpty() ? "" : " " + platformName;
+		return String.format(Locale.ROOT, CONTINUES_VIA,
+				primaryPart(stationName) + platformSuffix, englishPart(stationName) + platformSuffix);
 	}
 
 	private static String appendToEachLanguage(String value, String suffix) {

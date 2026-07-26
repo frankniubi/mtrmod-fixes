@@ -198,8 +198,25 @@ public class DynamicTextureCache implements IGui {
 	}
 
 	public DynamicResource getRouteSignMap(long platformId, RouteSignStyleMode styleMode, float aspectRatio) {
-		final String localKey = String.format("route_sign_map_%s_%s_%s", platformId, styleMode, aspectRatio);
-		return getRouteMap(platformId, RouteMapPurpose.ROUTE_SIGN, styleMode, true, false, aspectRatio, false, localKey);
+		return getRouteSignMap(Set.of(platformId), styleMode, "", aspectRatio);
+	}
+
+	public DynamicResource getRouteSignMap(Set<Long> platformIds, RouteSignStyleMode styleMode, String customPlatformHeader, float aspectRatio) {
+		final java.util.TreeSet<Long> checkedPlatformIds = new java.util.TreeSet<>(Objects.requireNonNull(platformIds, "platformIds"));
+		if (checkedPlatformIds.isEmpty()) throw new IllegalArgumentException("Route Sign platform is not set");
+		final long primaryPlatformId = checkedPlatformIds.first();
+		final Supplier<NativeImage> localSupplier = () -> RouteMapGenerator.generateRouteMap(primaryPlatformId, true, false, aspectRatio, false);
+		final String localKey = String.format(Locale.ROOT, "route_sign_map_%s_%s_%d:%s_%08X",
+				checkedPlatformIds, styleMode, customPlatformHeader.length(), customPlatformHeader, Float.floatToRawIntBits(aspectRatio));
+		final RouteAssetRequestContext context = getRouteAssetRequestContext();
+		if (context == null) return getResource(localKey, localSupplier, DefaultRenderingColor.WHITE);
+		try {
+			final RouteAssetKey key = RouteAssetCanonicalKeyFactory.routeSignMap(context.dimension, checkedPlatformIds,
+					context.resolution, context.language, styleMode, customPlatformHeader, true, false, aspectRatio, false);
+			return getRouteAssetResource(key, "route_sign_map_" + key, localSupplier, DefaultRenderingColor.WHITE, true);
+		} catch (IllegalArgumentException exception) {
+			return getResource(localKey, localSupplier, DefaultRenderingColor.WHITE);
+		}
 	}
 
 	public DynamicResource getDestinationSignAtlas(RouteAssetKey key) {

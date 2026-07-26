@@ -8,6 +8,7 @@ import org.mtr.mod.route.DestinationSignTopology;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public final class DestinationSignConfigPacketTest {
 
@@ -43,6 +44,42 @@ public final class DestinationSignConfigPacketTest {
 		Assertions.assertFalse(PacketUpdateDestinationSignConfig.withinInteractionDistance(anchor, 0.5, 0.5, 8.51));
 	}
 
+	@Test
+	public void multiDestinationPayloadPreservesSortedIdsAndHeader() {
+		final PacketUpdateDestinationSignConfig.Payload payload = new PacketUpdateDestinationSignConfig.Payload(
+				new BlockPos(0, 0, 0), -10, Set.of(-20L, -30L), "Custom|Header", 3, 2,
+				DestinationSignStyle.ARRIVAL_ORDER.ordinal(), true);
+		final org.mtr.mod.block.DestinationSignConfig config = payload.toConfig().orElseThrow();
+		Assertions.assertEquals(Set.of(-20L, -30L), config.getDestinationStationIds());
+		Assertions.assertEquals("Custom|Header", config.getCustomHeader());
+		Assertions.assertTrue(payload.validateAgainst(-10, multiTopology()).isPresent());
+	}
+
+	@Test
+	public void authoritativeValidationRejectsAnyUnreachableSelectedDestination() {
+		final DestinationSignTopology topology = new DestinationSignTopology(List.of(
+				new DestinationSignTopology.ServiceRoute(-100, 0, "R1", 0x14755E, List.of(
+						new DestinationSignTopology.StopOccurrence(-1000, -10, "U", "Source", ""),
+						new DestinationSignTopology.StopOccurrence(-2000, -20, "D", "Reachable", "")))
+		), List.of(new DestinationSignTopology.StationZone(-10, "Source"),
+				new DestinationSignTopology.StationZone(-20, "Reachable"), new DestinationSignTopology.StationZone(-30, "Unreachable")));
+		final PacketUpdateDestinationSignConfig.Payload payload = new PacketUpdateDestinationSignConfig.Payload(
+				new BlockPos(0, 0, 0), -10, Set.of(-20L, -30L), "", 3, 2,
+				DestinationSignStyle.ARRIVAL_ORDER.ordinal(), true);
+		Assertions.assertTrue(payload.toConfig().isPresent());
+		Assertions.assertTrue(payload.validateAgainst(-10, topology).isEmpty());
+	}
+
+	@Test
+	public void packetWritesCustomHeaderAfterTheFixedFields() throws Exception {
+		final String source = java.nio.file.Files.readString(java.nio.file.Path.of(
+				"src", "main", "java", "org", "mtr", "mod", "packet", "PacketUpdateDestinationSignConfig.java"));
+		final int writeWidth = source.indexOf("sender.writeInt(payload.width)");
+		final int writeEta = source.indexOf("sender.writeBoolean(payload.showEta)");
+		final int writeHeader = source.indexOf("sender.writeString(payload.customHeader)");
+		Assertions.assertTrue(writeWidth >= 0 && writeWidth < writeEta && writeEta < writeHeader);
+	}
+
 	private static PacketUpdateDestinationSignConfig.Payload payload(long source, long destination, int width, int height) {
 		return payload(source, destination, width, height, DestinationSignStyle.ARRIVAL_ORDER);
 	}
@@ -60,5 +97,15 @@ public final class DestinationSignConfigPacketTest {
 		}
 		return new DestinationSignTopology(routes, List.of(
 				new DestinationSignTopology.StationZone(-10, "Source"), new DestinationSignTopology.StationZone(-20, "Target")));
+	}
+
+	private static DestinationSignTopology multiTopology() {
+		return new DestinationSignTopology(List.of(
+				new DestinationSignTopology.ServiceRoute(-100, 0, "R1", 0x14755E, List.of(
+						new DestinationSignTopology.StopOccurrence(-1000, -10, "U", "Source", ""),
+						new DestinationSignTopology.StopOccurrence(-2000, -20, "D1", "First", ""),
+						new DestinationSignTopology.StopOccurrence(-3000, -30, "D2", "Second", "")))
+		), List.of(new DestinationSignTopology.StationZone(-10, "Source"),
+				new DestinationSignTopology.StationZone(-20, "First"), new DestinationSignTopology.StationZone(-30, "Second")));
 	}
 }

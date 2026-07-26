@@ -5,6 +5,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 /** Static-only atlas input. Live train state is intentionally not representable here. */
 public final class DestinationSignAssetSnapshot {
@@ -16,6 +19,8 @@ public final class DestinationSignAssetSnapshot {
 	private final long sourceStationId;
 	private final String sourceStationName;
 	private final long destinationStationId;
+	private final SortedSet<Long> destinationStationIds;
+	private final String customHeader;
 	private final String destinationStationName;
 	private final DestinationSignStyle style;
 	private final int widthBlocks;
@@ -27,11 +32,13 @@ public final class DestinationSignAssetSnapshot {
 	private final int atlasWidth;
 	private final int atlasHeight;
 
-	private DestinationSignAssetSnapshot(long sourceStationId, String sourceStationName, long destinationStationId, String destinationStationName,
+	private DestinationSignAssetSnapshot(long sourceStationId, String sourceStationName, Set<Long> destinationStationIds, String customHeader, String destinationStationName,
 			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta, DestinationSignDirectServiceModel.Model model) {
 		this.sourceStationId = sourceStationId;
 		this.sourceStationName = validateField(sourceStationName);
-		this.destinationStationId = destinationStationId;
+		this.destinationStationIds = Collections.unmodifiableSortedSet(new TreeSet<>(destinationStationIds));
+		destinationStationId = this.destinationStationIds.first();
+		this.customHeader = validateCustomHeader(customHeader);
 		this.destinationStationName = validateField(destinationStationName);
 		this.style = Objects.requireNonNull(style, "style");
 		this.widthBlocks = widthBlocks;
@@ -71,17 +78,50 @@ public final class DestinationSignAssetSnapshot {
 
 	public static DestinationSignAssetSnapshot create(DestinationSignTopology topology, long sourceStationId, long destinationStationId,
 			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
+		return create(topology, sourceStationId, Set.of(destinationStationId), "", style, widthBlocks, heightBlocks, showEta);
+	}
+
+	public static DestinationSignAssetSnapshot create(DestinationSignTopology topology, long sourceStationId, Set<Long> destinationStationIds,
+			String customHeader, DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
 		final DestinationSignTopology checkedTopology = Objects.requireNonNull(topology, "topology");
 		final DestinationSignTopology.StationZone source = checkedTopology.getStation(sourceStationId).orElseThrow(() -> new IllegalArgumentException("Unknown destination sign source station"));
-		final DestinationSignTopology.StationZone destination = checkedTopology.getStation(destinationStationId).orElseThrow(() -> new IllegalArgumentException("Unknown destination sign destination station"));
-		return new DestinationSignAssetSnapshot(sourceStationId, source.getDisplayName(), destinationStationId, destination.getDisplayName(), style, widthBlocks, heightBlocks, showEta,
-				DestinationSignDirectServiceModel.project(checkedTopology, sourceStationId, destinationStationId));
+		final TreeSet<Long> sortedDestinations = new TreeSet<>(Objects.requireNonNull(destinationStationIds, "destinationStationIds"));
+		if (sortedDestinations.isEmpty()) throw new IllegalArgumentException("Destination sign has no destinations");
+		final List<DestinationSignTopology.StationZone> destinations = new ArrayList<>();
+		for (final long destinationStationId : sortedDestinations) {
+			destinations.add(checkedTopology.getStation(destinationStationId).orElseThrow(() -> new IllegalArgumentException("Unknown destination sign destination station")));
+		}
+		final String checkedHeader = Objects.requireNonNull(customHeader, "customHeader");
+		final String header = checkedHeader.isEmpty() ? automaticHeader(destinations) : checkedHeader;
+		return new DestinationSignAssetSnapshot(sourceStationId, source.getDisplayName(), sortedDestinations, checkedHeader, header,
+				style, widthBlocks, heightBlocks, showEta, DestinationSignDirectServiceModel.project(checkedTopology, sourceStationId, sortedDestinations));
+	}
+
+	private static String automaticHeader(List<DestinationSignTopology.StationZone> destinations) {
+		final List<String> primary = new ArrayList<>();
+		final List<String> english = new ArrayList<>();
+		for (final DestinationSignTopology.StationZone destination : destinations) {
+			final String[] segments = destination.getDisplayName().split("\\|", -1);
+			final String primaryName = segments.length == 0 ? "" : segments[0];
+			primary.add(primaryName);
+			english.add(segments.length > 1 && !segments[1].isEmpty() ? segments[1] : primaryName);
+		}
+		return "\u5f80" + String.join("/", primary) + "\u65b9\u5411|To " + String.join("/", english);
 	}
 
 	private static String validateField(String value) {
 		final String checked = Objects.requireNonNull(value, "value");
 		if (checked.getBytes(StandardCharsets.UTF_8).length > RouteAssetProtocol.MAX_DESTINATION_SIGN_FIELD_UTF8_BYTES || segmentCount(checked) > RouteAssetProtocol.MAX_DESTINATION_SIGN_PIPE_SEGMENTS) {
 			throw new IllegalArgumentException("Destination sign stable field exceeds protocol limits");
+		}
+		return checked;
+	}
+
+	public static String validateCustomHeader(String value) {
+		final String checked = Objects.requireNonNull(value, "customHeader");
+		if (checked.getBytes(StandardCharsets.UTF_8).length > RouteAssetProtocol.MAX_DESTINATION_SIGN_CUSTOM_HEADER_UTF8_BYTES
+				|| segmentCount(checked) > RouteAssetProtocol.MAX_DESTINATION_SIGN_PIPE_SEGMENTS) {
+			throw new IllegalArgumentException("Destination sign custom header exceeds protocol limits");
 		}
 		return checked;
 	}
@@ -104,6 +144,8 @@ public final class DestinationSignAssetSnapshot {
 	public long getSourceStationId() { return sourceStationId; }
 	public String getSourceStationName() { return sourceStationName; }
 	public long getDestinationStationId() { return destinationStationId; }
+	public SortedSet<Long> getDestinationStationIds() { return destinationStationIds; }
+	public String getCustomHeader() { return customHeader; }
 	public String getDestinationStationName() { return destinationStationName; }
 	public DestinationSignStyle getStyle() { return style; }
 	public int getWidthBlocks() { return widthBlocks; }

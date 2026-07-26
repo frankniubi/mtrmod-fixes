@@ -5,6 +5,7 @@ import org.mtr.mapping.holder.CompoundTag;
 import org.mtr.mapping.holder.WorldChunk;
 import org.mtr.mapping.mapper.PersistenceStateExtension;
 import org.mtr.mod.Init;
+import org.mtr.mod.block.RouteSignConfig;
 import org.mtr.mod.route.ConfiguredSignAssetIndex;
 import org.mtr.mod.route.DestinationSignConfiguredEntry;
 import org.mtr.mod.route.RouteSignStyleMode;
@@ -61,7 +62,11 @@ public final class PersistentStateData extends PersistenceStateExtension {
 	}
 
 	public boolean configureRouteSign(long anchorPosition, long platformId, RouteSignStyleMode styleMode) {
-		final boolean changed = configuredSignAssetIndex.configureRouteSign(anchorPosition, platformId, styleMode);
+		return configureRouteSign(anchorPosition, RouteSignConfig.create(platformId, styleMode));
+	}
+
+	public boolean configureRouteSign(long anchorPosition, RouteSignConfig config) {
+		final boolean changed = configuredSignAssetIndex.configureRouteSign(anchorPosition, config.getPlatformIds(), config.getStyleMode(), config.getCustomPlatformHeader());
 		if (changed) markDirty2();
 		return changed;
 	}
