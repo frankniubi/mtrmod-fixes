@@ -116,6 +116,26 @@ public final class RouteAssetDependencyCatalog {
 		return Optional.of(entry(key, snapshot, platform, fingerprint));
 	}
 
+	public String resolveLocalGenericFingerprint(String descriptor, RouteAssetDataMirror.PlatformSnapshot platform, String resourceFingerprint) {
+		final String checkedDescriptor = Objects.requireNonNull(descriptor, "descriptor");
+		if (checkedDescriptor.isEmpty()) throw new IllegalArgumentException("Local route map descriptor is empty");
+		final String fingerprint = RouteAssetHash.requireValid(resourceFingerprint);
+		final RouteAssetRenderSnapshot snapshot = buildSnapshot(Objects.requireNonNull(platform, "platform"), null, false, 1);
+		try {
+			final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+			final DataOutputStream canonical = new DataOutputStream(bytes);
+			canonical.writeInt(RouteAssetProtocol.RENDERER_VERSION);
+			canonical.writeInt(RouteAssetProtocol.ROUTE_MAP_RENDERER_VERSION);
+			writeString(canonical, fingerprint);
+			writeString(canonical, checkedDescriptor);
+			writeGenericRouteMapDependencies(canonical, snapshot);
+			canonical.flush();
+			return RouteAssetHash.sha256(bytes.toByteArray());
+		} catch (IOException exception) {
+			throw new IllegalStateException("Unable to fingerprint local generic route map dependencies", exception);
+		}
+	}
+
 	private static void addFixedSquares(Map<RouteAssetKey, Entry> entries, String dimension, long routeId, int resolution, String language, RouteAssetRenderSnapshot snapshot, RouteAssetDataMirror.PlatformSnapshot platform, String resourceFingerprint) {
 		add(entries, RouteAssetCanonicalKeyFactory.routeSquare(dimension, routeId, resolution, language, RouteAssetTextRasterizer.Alignment.LEFT), snapshot, platform, resourceFingerprint);
 		add(entries, RouteAssetCanonicalKeyFactory.routeSquare(dimension, routeId, resolution, language, RouteAssetTextRasterizer.Alignment.RIGHT), snapshot, platform, resourceFingerprint);
@@ -164,8 +184,14 @@ public final class RouteAssetDependencyCatalog {
 			canonical.writeLong(snapshot.getSelectedPlatformId());
 			canonical.writeLong(snapshot.getSelectedStationId());
 			writeString(canonical, snapshot.getPlatformDisplayName());
+			writeRoutes(canonical, snapshot.getRoutes(), true);
+		} else {
+			writeGenericRouteMapDependencies(canonical, snapshot);
 		}
-		writeRoutes(canonical, snapshot.getRoutes(), purpose == RouteMapPurpose.ROUTE_SIGN);
+	}
+
+	private static void writeGenericRouteMapDependencies(DataOutputStream canonical, RouteAssetRenderSnapshot snapshot) throws IOException {
+		writeRoutes(canonical, snapshot.getRoutes(), false);
 	}
 
 	private static void writeDirectionArrowDependencies(DataOutputStream canonical, RouteAssetRenderSnapshot snapshot) throws IOException {

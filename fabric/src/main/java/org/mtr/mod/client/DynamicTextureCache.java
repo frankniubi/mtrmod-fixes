@@ -8,6 +8,8 @@ import org.mtr.mapping.holder.*;
 import org.mtr.mapping.mapper.ResourceManagerHelper;
 import org.mtr.mod.Init;
 import org.mtr.mod.client.asset.ClientRouteAssetManager;
+import org.mtr.mod.client.asset.ClientRouteAssetResourceFingerprint;
+import org.mtr.mod.client.asset.ClientRouteAssetResources;
 import org.mtr.mod.client.asset.DynamicTextureDependencyTracker;
 import org.mtr.mod.config.Client;
 import org.mtr.mod.config.Config;
@@ -29,6 +31,7 @@ import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
 import java.text.AttributedString;
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -193,9 +196,18 @@ public class DynamicTextureCache implements IGui {
 		final RouteAssetRequestContext context = getRouteAssetRequestContext();
 		if (context == null) return getResource(localKey, localSupplier, defaultRenderingColor);
 		try {
-			return getRouteAssetResource(RouteAssetCanonicalKeyFactory.routeMap(context.dimension, platformId, context.resolution, context.language, purpose, vertical, flip, aspectRatio, transparentWhite), localKey, localSupplier, defaultRenderingColor);
+			return getRouteAssetResource(
+					RouteAssetCanonicalKeyFactory.routeMap(context.dimension, platformId, context.resolution, context.language, purpose, vertical, flip, aspectRatio, transparentWhite),
+					localKey, localSupplier, defaultRenderingColor, purpose == RouteMapPurpose.ROUTE_SIGN
+			);
 		} catch (IllegalArgumentException exception) {
-			return getResource(localKey, localSupplier, defaultRenderingColor);
+			if (purpose != RouteMapPurpose.GENERIC) return getResource(localKey, localSupplier, defaultRenderingColor);
+			final String descriptor = String.format(Locale.ROOT, "LOCAL_ROUTE_MAP|%s|%d|%s|%s|%s|%08X|%s",
+					context.dimension, platformId, purpose, vertical, flip, Float.floatToRawIntBits(aspectRatio), transparentWhite);
+			return getResource(context.dimension + '|' + localKey, localSupplier, defaultRenderingColor, () ->
+					RouteAssetClientSnapshotAdapter.resolveLocalGenericFingerprint(
+							descriptor, platformId, ClientRouteAssetResourceFingerprint.get()
+					).orElse(""));
 		}
 	}
 
@@ -298,6 +310,11 @@ public class DynamicTextureCache implements IGui {
 	}
 
 	private DynamicResource getRouteAssetResource(RouteAssetKey key, String localKey, Supplier<NativeImage> localSupplier, DefaultRenderingColor defaultRenderingColor) {
+		return getRouteAssetResource(key, localKey, localSupplier, defaultRenderingColor, false);
+	}
+
+	private DynamicResource getRouteAssetResource(RouteAssetKey key, String localKey, Supplier<NativeImage> localSupplier,
+			DefaultRenderingColor defaultRenderingColor, boolean preparedRouteSignFallback) {
 		final ClientRouteAssetManager.RouteTextureLookup lookup = ClientRouteAssetManager.getInstance().lookupRouteTexture(key);
 		switch (lookup.getState()) {
 			case READY:
@@ -306,7 +323,11 @@ public class DynamicTextureCache implements IGui {
 				return defaultRenderingColor.dynamicResource;
 			case LOCAL:
 			default:
-				return getResource(key.getDimension() + '|' + localKey, localSupplier, defaultRenderingColor, () -> RouteMapGenerator.getRouteAssetFingerprint(key));
+				final String dependencyKey = key.getDimension() + '|' + localKey;
+				if (preparedRouteSignFallback && ClientRouteAssetResources.getActive() != null) {
+					return getPreparedRouteSignResource(dependencyKey, key, defaultRenderingColor);
+				}
+				return getResource(dependencyKey, localSupplier, defaultRenderingColor, () -> RouteMapGenerator.getRouteAssetFingerprint(key));
 		}
 	}
 
@@ -337,6 +358,73 @@ public class DynamicTextureCache implements IGui {
 
 	private static RouteAssetTextRasterizer.Alignment routeAssetAlignment(IGui.HorizontalAlignment horizontalAlignment) {
 		return RouteAssetTextRasterizer.Alignment.valueOf(Objects.requireNonNull(horizontalAlignment, "horizontalAlignment").name());
+	}
+
+	private DynamicResource getPreparedRouteSignResource(String key, RouteAssetKey routeAssetKey, DefaultRenderingColor defaultRenderingColor) {
+		resourceRegistryQueue.process(Runnable::run);
+		final long currentTimeMillis = System.currentTimeMillis();
+		final DynamicResource dynamicResource = dynamicResources.get(key);
+		final DynamicTextureDependencyTracker.Resolution<ClientRouteAssetRenderer.Prepared> resolution =
+				dependencyTracker.currentResolved(key, ClientRouteAssetRenderer.Prepared.class);
+		if (resolution == null) {
+			schedulePreparedRouteSignEvaluation(key, routeAssetKey, currentTimeMillis);
+			return getExistingOrDefault(dynamicResource, defaultRenderingColor, currentTimeMillis);
+		}
+
+		final DynamicTextureDependencyTracker.Token dependencyToken = resolution.getToken();
+		if (dynamicResource != null && !dynamicResource.needsRefresh && dynamicResource.dependencyToken == dependencyToken) {
+			dynamicResource.expiryTime = currentTimeMillis + COOLDOWN_TIME;
+			return dynamicResource;
+		}
+		if (generationTracker.isActive(key, dependencyToken) || generationTracker.isRetryBlocked(key, dependencyToken, currentTimeMillis)) {
+			return getExistingOrDefault(dynamicResource, defaultRenderingColor, currentTimeMillis);
+		}
+
+		final DynamicTextureGenerationTracker.Token generationToken = generationTracker.start(key, dependencyToken);
+		boolean generationScheduled = false;
+		try {
+			MainRenderer.WORKER_THREAD.scheduleDynamicTextures(() -> generateResource(
+					key, generationToken, dependencyToken, () -> ClientRouteAssetRenderer.render(resolution.getValue()), false
+			));
+			generationScheduled = true;
+		} finally {
+			if (!generationScheduled) generationTracker.completeFailure(
+					key, generationToken, dependencyToken, currentTimeMillis + FAILURE_RETRY_TIME
+			);
+		}
+		return getExistingOrDefault(dynamicResource, defaultRenderingColor, currentTimeMillis);
+	}
+
+	private void schedulePreparedRouteSignEvaluation(String key, RouteAssetKey routeAssetKey, long currentTimeMillis) {
+		final Long retryTime = dependencyEvaluationRetryTimes.get(key);
+		if (retryTime != null && currentTimeMillis < retryTime || !dependencyEvaluations.add(key)) return;
+		boolean scheduled = false;
+		try {
+			MainRenderer.WORKER_THREAD.scheduleDynamicTextures(() -> {
+				boolean successful = false;
+				try {
+					dependencyTracker.evaluateResolved(
+							key,
+							() -> ClientRouteAssetRenderer.prepare(routeAssetKey).orElseThrow(() -> new IllegalStateException("Route sign resources are unavailable")),
+							ClientRouteAssetRenderer.Prepared::getDependencyFingerprint
+					);
+					successful = true;
+				} finally {
+					final boolean evaluationSuccessful = successful;
+					resourceRegistryQueue.put(() -> {
+						dependencyEvaluations.remove(key);
+						if (evaluationSuccessful) dependencyEvaluationRetryTimes.remove(key);
+						else dependencyEvaluationRetryTimes.put(key, System.currentTimeMillis() + FAILURE_RETRY_TIME);
+					});
+				}
+			});
+			scheduled = true;
+		} finally {
+			if (!scheduled) {
+				dependencyEvaluations.remove(key);
+				dependencyEvaluationRetryTimes.put(key, currentTimeMillis + FAILURE_RETRY_TIME);
+			}
+		}
 	}
 
 	private DynamicResource getResource(String key, Supplier<NativeImage> supplier, DefaultRenderingColor defaultRenderingColor) {
@@ -414,10 +502,15 @@ public class DynamicTextureCache implements IGui {
 	}
 
 	private void generateResource(String key, DynamicTextureGenerationTracker.Token generationToken, DynamicTextureDependencyTracker.Token dependencyToken, Supplier<NativeImage> supplier) {
+		generateResource(key, generationToken, dependencyToken, supplier, true);
+	}
+
+	private void generateResource(String key, DynamicTextureGenerationTracker.Token generationToken,
+			DynamicTextureDependencyTracker.Token dependencyToken, Supplier<NativeImage> supplier, boolean loadLegacyFonts) {
 		NativeImage nativeImage = null;
 		boolean registryTaskQueued = false;
 		try {
-			while (font == null) {
+			while (loadLegacyFonts && font == null) {
 				ResourceManagerHelper.readResource(new Identifier(Init.MOD_ID, "font/noto-sans-semibold.ttf"), inputStream -> {
 					try {
 						font = Font.createFont(Font.TRUETYPE_FONT, inputStream);
@@ -427,7 +520,7 @@ public class DynamicTextureCache implements IGui {
 				});
 			}
 
-			while (fontCjk == null) {
+			while (loadLegacyFonts && fontCjk == null) {
 				ResourceManagerHelper.readResource(new Identifier(Init.MOD_ID, "font/noto-serif-cjk-tc-semibold.ttf"), inputStream -> {
 					try {
 						fontCjk = Font.createFont(Font.TRUETYPE_FONT, inputStream);

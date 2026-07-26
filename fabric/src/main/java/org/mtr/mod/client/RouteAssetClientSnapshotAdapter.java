@@ -1,6 +1,7 @@
 package org.mtr.mod.client;
 
 import org.mtr.core.data.SimplifiedRoute;
+import org.mtr.mod.client.asset.ClientRouteAssetResources;
 import org.mtr.mod.route.RouteAssetDataMirror;
 import org.mtr.mod.route.RouteAssetDependencyCatalog;
 import org.mtr.mod.route.RouteAssetKey;
@@ -13,12 +14,16 @@ import java.util.Optional;
 /** Client-only bridge from live Core data to the immutable shared render model. */
 public final class RouteAssetClientSnapshotAdapter {
 	private static final RouteAssetDependencyCatalog CATALOG = new RouteAssetDependencyCatalog();
-	private static final String LOCAL_RESOURCE_FINGERPRINT = "0".repeat(64);
 
 	private RouteAssetClientSnapshotAdapter() { }
 
 	public static Optional<ResolvedSnapshot> resolve(RouteAssetKey key) {
+		return resolve(key, ClientRouteAssetResources.getFingerprint());
+	}
+
+	public static Optional<ResolvedSnapshot> resolve(RouteAssetKey key, String resourceFingerprint) {
 		Objects.requireNonNull(key, "key");
+		Objects.requireNonNull(resourceFingerprint, "resourceFingerprint");
 		final MinecraftClientData data = MinecraftClientData.getInstance();
 		final long platformId;
 		if (key.getType() == org.mtr.mod.route.RouteAssetType.ROUTE_SQUARE) {
@@ -27,17 +32,35 @@ public final class RouteAssetClientSnapshotAdapter {
 			if (found == null) return Optional.empty();
 			platformId = found;
 		} else platformId = key.getPrimaryId();
-		final RouteAssetDataMirror.PlatformSnapshot platform = RouteAssetDataMirror.materializePlatform(data, platformId, MinecraftClientData::getInterchangeStation, MinecraftClientData::getInterchangeRoute, MinecraftClientData::getInterchangePlatform);
+		final RouteAssetDataMirror.PlatformSnapshot platform = materializePlatform(data, platformId);
 		final RouteAssetDataMirror.DimensionSnapshot dimension = new RouteAssetDataMirror.DimensionSnapshot(key.getDimension(), 0, Map.of(platformId, platform));
 		final RouteAssetDataMirror.Snapshot snapshot = new RouteAssetDataMirror.Snapshot(0, Map.of(key.getDimension(), dimension));
-		return CATALOG.resolveObserved(key, snapshot, LOCAL_RESOURCE_FINGERPRINT).map(entry -> new ResolvedSnapshot(entry.getSnapshot(), entry.getDependencyFingerprint()));
+		return CATALOG.resolveObserved(key, snapshot, resourceFingerprint).map(entry -> new ResolvedSnapshot(entry.getSnapshot(), entry.getDependencyFingerprint()));
+	}
+
+	public static Optional<String> resolveLocalGenericFingerprint(String descriptor, long platformId, String resourceFingerprint) {
+		final MinecraftClientData data = MinecraftClientData.getInstance();
+		return Optional.of(CATALOG.resolveLocalGenericFingerprint(
+				Objects.requireNonNull(descriptor, "descriptor"),
+				materializePlatform(data, platformId),
+				Objects.requireNonNull(resourceFingerprint, "resourceFingerprint")
+		));
+	}
+
+	private static RouteAssetDataMirror.PlatformSnapshot materializePlatform(MinecraftClientData data, long platformId) {
+		return RouteAssetDataMirror.materializePlatform(data, platformId, MinecraftClientData::getInterchangeStation,
+				MinecraftClientData::getInterchangeRoute, MinecraftClientData::getInterchangePlatform);
 	}
 
 	public static final class ResolvedSnapshot {
 		private final RouteAssetRenderSnapshot snapshot;
 		private final String fingerprint;
-		public ResolvedSnapshot(RouteAssetRenderSnapshot snapshot, String fingerprint) { this.snapshot = snapshot; this.fingerprint = fingerprint; }
+		public ResolvedSnapshot(RouteAssetRenderSnapshot snapshot, String fingerprint) {
+			this.snapshot = Objects.requireNonNull(snapshot, "snapshot");
+			this.fingerprint = Objects.requireNonNull(fingerprint, "fingerprint");
+		}
 		public RouteAssetRenderSnapshot getSnapshot() { return snapshot; }
 		public String getFingerprint() { return fingerprint; }
+		public String getDependencyFingerprint() { return fingerprint; }
 	}
 }

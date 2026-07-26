@@ -94,8 +94,10 @@ public final class RouteAssetSourceImagesTest {
 		Assertions.assertFalse(routeMapGenerator.contains("NativeImage.read(NativeImageFormat.getAbgrMapped(), inputStream)"));
 		final String customResourceLoader = Files.readString(sourcePath("client", "CustomResourceLoader.java"));
 		final int sourceClear = customResourceLoader.indexOf("RouteMapGenerator.clearSourceImages()");
+		final int routeResourcesReload = customResourceLoader.indexOf("ClientRouteAssetResourceFingerprint.reload()");
 		final int textureReload = customResourceLoader.indexOf("DynamicTextureCache.instance.reload()");
-		Assertions.assertTrue(sourceClear >= 0 && sourceClear < textureReload);
+		Assertions.assertTrue(sourceClear >= 0 && sourceClear < routeResourcesReload && routeResourcesReload < textureReload,
+				"the active resource holder must be swapped before the dependency epoch is advanced");
 	}
 
 	@Test

@@ -90,8 +90,8 @@ public class CustomResourceLoader {
 		LIFTS.clear();
 		LIFTS_CACHE.clear();
 		RouteMapGenerator.clearSourceImages();
-		DynamicTextureCache.instance.reload();
 		ClientRouteAssetResourceFingerprint.reload();
+		DynamicTextureCache.instance.reload();
 		ClientRouteAssetManager.getInstance().onResourcesReloaded();
 		TEST_DURATION = 0;
 

@@ -31,12 +31,26 @@ public final class ClientRouteAssetRenderIntegrationTest {
 	}
 
 	@Test
-	public void localFallbackUsesTheLegacyOnDemandRendererBeyondTheServerAspectLimit() throws IOException {
+	public void routeSignFallbackUsesOnePreparedSharedRenderWhileGenericMapsStayLegacyAndContentSensitive() throws IOException {
+		final String cacheSource = readSource("client", "DynamicTextureCache.java");
+		final String preparedRendererSource = readSource("client", "ClientRouteAssetRenderer.java");
+		final String adapterSource = readSource("client", "RouteAssetClientSnapshotAdapter.java");
 		final String generatorSource = readSource("client", "RouteMapGenerator.java");
 		final String keySource = readSource("route", "RouteAssetCanonicalKeyFactory.java");
+		final String preparedFallback = method(cacheSource, "private DynamicResource getPreparedRouteSignResource", "private void schedulePreparedRouteSignEvaluation");
+		final String genericEntry = method(cacheSource, "public DynamicResource getRouteMap", "public byte[] getTextPixels");
 
 		Assertions.assertTrue(keySource.contains("MAX_ASPECT_RATIO = 8"), "the server must remain bounded to route textures covering at most three door blocks");
-		Assertions.assertFalse(generatorSource.contains("SHARED_ROUTE_ASSET_RENDERER"), "LOCAL fallback must not re-enter server key validation instead of the retained legacy rasterizer");
+		Assertions.assertTrue(preparedFallback.contains("ClientRouteAssetRenderer.render(resolution.getValue())"));
+		Assertions.assertFalse(preparedFallback.contains("RouteMapGenerator.generateRouteMap"), "prepared Route Sign rendering must not perform a second live-data read");
+		Assertions.assertTrue(preparedRendererSource.contains("SHARED_RENDERER.render("));
+		Assertions.assertTrue(preparedRendererSource.contains("captured.resolved.getSnapshot()"));
+		Assertions.assertTrue(preparedRendererSource.contains("captured.resources.getText()"));
+		Assertions.assertTrue(genericEntry.contains("RouteMapGenerator.generateRouteMap"), "GENERIC maps must retain the lazy full-topology renderer");
+		Assertions.assertTrue(genericEntry.contains("LOCAL_ROUTE_MAP|%s|%d|%s"));
+		Assertions.assertTrue(genericEntry.contains("resolveLocalGenericFingerprint"), "oversized GENERIC maps need a route-content dependency fingerprint");
+		Assertions.assertTrue(cacheSource.contains("ClientRouteAssetResources.getActive() != null"), "failed active resources must select the legacy compatibility fallback");
+		Assertions.assertFalse(adapterSource.contains("LOCAL_RESOURCE_FINGERPRINT"));
 		Assertions.assertTrue(generatorSource.contains("getRouteStream(platformId"), "the original client route-map generator must remain available on demand");
 	}
 
@@ -121,5 +135,12 @@ public final class ClientRouteAssetRenderIntegrationTest {
 			offset += value.length();
 		}
 		return count;
+	}
+
+	private static String method(String source, String start, String end) {
+		final int startIndex = source.indexOf(start);
+		final int endIndex = source.indexOf(end, startIndex + start.length());
+		Assertions.assertTrue(startIndex >= 0 && endIndex > startIndex, "method boundaries must be available");
+		return source.substring(startIndex, endIndex);
 	}
 }
