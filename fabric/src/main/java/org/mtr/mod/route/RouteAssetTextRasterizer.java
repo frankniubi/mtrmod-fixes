@@ -5,7 +5,6 @@ import org.mtr.mod.generated.lang.TranslationProvider;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.Graphics2D;
-import java.awt.GraphicsEnvironment;
 import java.awt.RenderingHints;
 import java.awt.font.FontRenderContext;
 import java.awt.font.TextAttribute;
@@ -34,7 +33,7 @@ public interface RouteAssetTextRasterizer {
 		}
 	}
 
-	static RouteAssetTextRasterizer fromFonts(byte[] latinFontBytes, byte[] cjkFontBytes) {
+	public static RouteAssetTextRasterizer fromFonts(byte[] latinFontBytes, byte[] cjkFontBytes) {
 		try {
 			return new AwtRasterizer(Font.createFont(Font.TRUETYPE_FONT, new ByteArrayInputStream(latinFontBytes)), Font.createFont(Font.TRUETYPE_FONT, new ByteArrayInputStream(cjkFontBytes)));
 		} catch (Exception exception) {
@@ -82,10 +81,12 @@ public interface RouteAssetTextRasterizer {
 	final class AwtRasterizer implements RouteAssetTextRasterizer {
 		private final Font latin;
 		private final Font cjk;
+		private final int replacementCodePoint;
 
 		private AwtRasterizer(Font latin, Font cjk) {
 			this.latin = Objects.requireNonNull(latin);
 			this.cjk = Objects.requireNonNull(cjk);
+			replacementCodePoint = latin.canDisplay(0xFFFD) || cjk.canDisplay(0xFFFD) ? 0xFFFD : '?';
 		}
 
 		@Override
@@ -97,7 +98,8 @@ public interface RouteAssetTextRasterizer {
 			final String languageMode = Objects.requireNonNull(language, "language").trim().toUpperCase(Locale.ROOT);
 			if (!languageMode.equals("NORMAL") && !languageMode.equals("CJK") && !languageMode.equals("LATIN")) throw new IllegalArgumentException("Unsupported route asset language");
 			final String[] filtered = Arrays.stream(defaultTextSplit).filter(part -> isCjk(part) == languageMode.equals("CJK")).toArray(String[]::new);
-			final String[] textSplit = languageMode.equals("NORMAL") || filtered.length == 0 ? defaultTextSplit : filtered;
+			final String[] selectedTextSplit = languageMode.equals("NORMAL") || filtered.length == 0 ? defaultTextSplit : filtered;
+			final String[] textSplit = Arrays.stream(selectedTextSplit).map(this::replaceUnsupportedCodePoints).toArray(String[]::new);
 			final AttributedString[] attributedStrings = new AttributedString[textSplit.length];
 			final int[] textWidths = new int[textSplit.length];
 			final int[] fontSizes = new int[textSplit.length];
@@ -111,15 +113,13 @@ public interface RouteAssetTextRasterizer {
 				fontSizes[index] = newFontSize;
 				final Font latinSized = latin.deriveFont(Font.PLAIN, newFontSize);
 				final Font cjkSized = cjk.deriveFont(Font.PLAIN, newFontSize);
-				for (int characterIndex = 0; characterIndex < textSplit[index].length(); characterIndex++) {
-					final char character = textSplit[index].charAt(characterIndex);
-					Font selected = latinSized.canDisplay(character) ? latinSized : cjkSized.canDisplay(character) ? cjkSized : null;
-					if (selected == null) {
-						for (final Font candidate : GraphicsEnvironment.getLocalGraphicsEnvironment().getAllFonts()) if (candidate.canDisplay(character)) { selected = candidate.deriveFont(Font.PLAIN, newFontSize); break; }
-						if (selected == null) selected = new Font(null).deriveFont(Font.PLAIN, newFontSize);
-					}
-					textWidths[index] += selected.getStringBounds(textSplit[index].substring(characterIndex, characterIndex + 1), context).getBounds().width;
-					attributedStrings[index].addAttribute(TextAttribute.FONT, selected, characterIndex, characterIndex + 1);
+				for (int characterIndex = 0; characterIndex < textSplit[index].length();) {
+					final int codePoint = textSplit[index].codePointAt(characterIndex);
+					final int characterCount = Character.charCount(codePoint);
+					final Font selected = latinSized.canDisplay(codePoint) ? latinSized : cjkSized.canDisplay(codePoint) ? cjkSized : latinSized;
+					textWidths[index] += selected.getStringBounds(new String(Character.toChars(codePoint)), context).getBounds().width;
+					attributedStrings[index].addAttribute(TextAttribute.FONT, selected, characterIndex, characterIndex + characterCount);
+					characterIndex += characterCount;
 				}
 				if (oneRow) {
 					if (index > 0) width += padding;
@@ -161,6 +161,12 @@ public interface RouteAssetTextRasterizer {
 				graphics.dispose();
 				image.flush();
 			}
+		}
+
+		private String replaceUnsupportedCodePoints(String value) {
+			final StringBuilder result = new StringBuilder(value.length());
+			value.codePoints().forEach(codePoint -> result.appendCodePoint(latin.canDisplay(codePoint) || cjk.canDisplay(codePoint) ? codePoint : replacementCodePoint));
+			return result.toString();
 		}
 	}
 
