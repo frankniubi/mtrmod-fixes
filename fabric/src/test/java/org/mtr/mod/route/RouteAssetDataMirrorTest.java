@@ -141,7 +141,7 @@ public final class RouteAssetDataMirrorTest {
 		Assertions.assertEquals(first, second);
 		Assertions.assertEquals(Set.of(RouteAssetType.ROUTE_MAP, RouteAssetType.DIRECTION_ARROW, RouteAssetType.ROUTE_COLOR_STRIP, RouteAssetType.ROUTE_SQUARE), first.keySet().stream().map(RouteAssetKey::getType).collect(Collectors.toSet()));
 		for (int resolution = 0; resolution <= 3; resolution++) {
-			Assertions.assertTrue(first.containsKey(RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, resolution, "NORMAL", true, false, 37F / 22, false)));
+			Assertions.assertTrue(first.containsKey(RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, resolution, "NORMAL", RouteMapPurpose.GENERIC, true, false, 37F / 22, false)));
 			for (int direction = 0; direction <= 3; direction++) {
 				Assertions.assertTrue(first.containsKey(RouteAssetCanonicalKeyFactory.directionArrow("minecraft/overworld", 7, resolution, "NORMAL", (direction & 1) != 0, (direction & 2) != 0, RouteAssetTextRasterizer.Alignment.CENTER, true, 0.2F, 22F / 5, 0xFF000000, 0xFFFFFFFF, 0)));
 			}
@@ -155,12 +155,12 @@ public final class RouteAssetDataMirrorTest {
 		final RouteAssetDataMirror.Snapshot snapshot = snapshot(dimension("minecraft/overworld", platform(7, "Central")));
 		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
 		final String fingerprint = "e".repeat(64);
-		final RouteAssetKey valid = RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|7|2|CJK|a=4:9,f=0,t=0,v=1");
+		final RouteAssetKey valid = RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|7|2|CJK|a=4:9,f=0,p=GENERIC,t=0,v=1");
 		Assertions.assertTrue(catalog.resolveObserved(valid, snapshot, fingerprint).isPresent());
-		Assertions.assertTrue(catalog.resolveObserved(RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|7|2|CJK|a=99:1,f=0,t=0,v=1"), snapshot, fingerprint).isEmpty());
+		Assertions.assertTrue(catalog.resolveObserved(RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|7|2|CJK|a=99:1,f=0,p=GENERIC,t=0,v=1"), snapshot, fingerprint).isEmpty());
 		Assertions.assertTrue(catalog.resolveObserved(RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|7|2|CJK|text=arbitrary"), snapshot, fingerprint).isEmpty());
-		Assertions.assertTrue(catalog.resolveObserved(RouteAssetKey.parse("minecraft/unknown|ROUTE_MAP|7|2|CJK|a=4:9,f=0,t=0,v=1"), snapshot, fingerprint).isEmpty());
-		Assertions.assertThrows(IllegalArgumentException.class, () -> RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|7|4|CJK|a=4:9,f=0,t=0,v=1"));
+		Assertions.assertTrue(catalog.resolveObserved(RouteAssetKey.parse("minecraft/unknown|ROUTE_MAP|7|2|CJK|a=4:9,f=0,p=GENERIC,t=0,v=1"), snapshot, fingerprint).isEmpty());
+		Assertions.assertThrows(IllegalArgumentException.class, () -> RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|7|4|CJK|a=4:9,f=0,p=GENERIC,t=0,v=1"));
 	}
 
 	@Test
@@ -168,7 +168,7 @@ public final class RouteAssetDataMirrorTest {
 		final RouteAssetDataMirror.Snapshot snapshot = snapshot(dimension("minecraft/overworld", platform(7, "Central")));
 		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
 		final String fingerprint = "d".repeat(64);
-		final RouteAssetKey map = RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, 2, "NORMAL", false, true, 3F / 2, true);
+		final RouteAssetKey map = RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, 2, "NORMAL", RouteMapPurpose.GENERIC, false, true, 3F / 2, true);
 		final RouteAssetRenderSnapshot mapSnapshot = catalog.resolveObserved(map, snapshot, fingerprint).orElseThrow().getSnapshot();
 		Assertions.assertFalse(mapSnapshot.isVertical());
 		Assertions.assertTrue(mapSnapshot.isFlip());
@@ -195,7 +195,7 @@ public final class RouteAssetDataMirrorTest {
 		Assertions.assertTrue(catalog.resolveObserved(RouteAssetKey.parse("minecraft/overworld|DIRECTION_ARROW|7|2|NORMAL|a=3:2,align=RIGHT,bg=FF010203,pad=1:4,right=1,show=0,text=FFFFFFFF,transparent=00000000"), snapshot, fingerprint).isEmpty());
 		Assertions.assertTrue(catalog.resolveObserved(RouteAssetKey.parse("minecraft/overworld|DIRECTION_ARROW|7|2|NORMAL|a=3:2,align=RIGHT,bg=ff010203,left=0,pad=1:4,right=1,show=0,text=FFFFFFFF,transparent=00000000"), snapshot, fingerprint).isEmpty());
 		Assertions.assertTrue(catalog.resolveObserved(RouteAssetKey.parse("minecraft/overworld|DIRECTION_ARROW|7|2|NORMAL|a=3:2,align=RIGHT,bg=FF010203,left=0,pad=1:2,right=1,show=0,text=FFFFFFFF,transparent=00000000"), snapshot, fingerprint).isEmpty());
-		Assertions.assertTrue(catalog.resolveObserved(RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=2:4,f=1,t=1,v=0"), snapshot, fingerprint).isEmpty());
+		Assertions.assertTrue(catalog.resolveObserved(RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=2:4,f=1,p=GENERIC,t=1,v=0"), snapshot, fingerprint).isEmpty());
 	}
 
 	@Test

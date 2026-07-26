@@ -18,6 +18,7 @@ import org.mtr.mod.render.MoreRenderLayers;
 import org.mtr.mod.route.RouteAssetCanonicalKeyFactory;
 import org.mtr.mod.route.RouteAssetKey;
 import org.mtr.mod.route.RouteAssetTextRasterizer;
+import org.mtr.mod.route.RouteMapPurpose;
 
 import javax.annotation.Nullable;
 import java.awt.*;
@@ -185,14 +186,14 @@ public class DynamicTextureCache implements IGui {
 		}
 	}
 
-	public DynamicResource getRouteMap(long platformId, boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite) {
-		final String localKey = String.format("route_map_%s_%s_%s_%s_%s", platformId, vertical, flip, aspectRatio, transparentWhite);
+	public DynamicResource getRouteMap(long platformId, RouteMapPurpose purpose, boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite) {
+		final String localKey = String.format("route_map_%s_%s_%s_%s_%s_%s", platformId, purpose, vertical, flip, aspectRatio, transparentWhite);
 		final Supplier<NativeImage> localSupplier = () -> RouteMapGenerator.generateRouteMap(platformId, vertical, flip, aspectRatio, transparentWhite);
 		final DefaultRenderingColor defaultRenderingColor = transparentWhite ? DefaultRenderingColor.TRANSPARENT : DefaultRenderingColor.WHITE;
 		final RouteAssetRequestContext context = getRouteAssetRequestContext();
 		if (context == null) return getResource(localKey, localSupplier, defaultRenderingColor);
 		try {
-			return getRouteAssetResource(RouteAssetCanonicalKeyFactory.routeMap(context.dimension, platformId, context.resolution, context.language, vertical, flip, aspectRatio, transparentWhite), localKey, localSupplier, defaultRenderingColor);
+			return getRouteAssetResource(RouteAssetCanonicalKeyFactory.routeMap(context.dimension, platformId, context.resolution, context.language, purpose, vertical, flip, aspectRatio, transparentWhite), localKey, localSupplier, defaultRenderingColor);
 		} catch (IllegalArgumentException exception) {
 			return getResource(localKey, localSupplier, defaultRenderingColor);
 		}

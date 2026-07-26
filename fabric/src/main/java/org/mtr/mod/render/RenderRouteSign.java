@@ -15,6 +15,7 @@ import org.mtr.mod.block.IBlock;
 import org.mtr.mod.client.DynamicTextureCache;
 import org.mtr.mod.client.IDrawing;
 import org.mtr.mod.data.IGui;
+import org.mtr.mod.route.RouteMapPurpose;
 
 public class RenderRouteSign<T extends BlockRouteSignBase.BlockEntityBase> extends BlockEntityRenderer<T> implements IBlock, IGui {
 
@@ -66,7 +67,7 @@ public class RenderRouteSign<T extends BlockRouteSignBase.BlockEntityBase> exten
 		graphicsHolder.createVertexConsumer(MoreRenderLayers.getExterior(DynamicTextureCache.instance.getDirectionArrow(platform.getId(), (arrowDirection & 0b01) > 0, (arrowDirection & 0b10) > 0, HorizontalAlignment.CENTER, true, 0.2F, WIDTH / HEIGHT_TOP, ARGB_BLACK, ARGB_WHITE, 0).identifier));
 		IDrawing.drawTexture(graphicsHolder, 1 - SIDE, TOP + (isTop ? 0 : 1), 0, SIDE, MIDDLE + (isTop ? 0 : 1), 0, 0, 0, 1, 1, facing.getOpposite(), -1, light);
 
-		graphicsHolder.createVertexConsumer(MoreRenderLayers.getExterior(DynamicTextureCache.instance.getRouteMap(platform.getId(), true, false, HEIGHT_BOTTOM / WIDTH, false).identifier));
+		graphicsHolder.createVertexConsumer(MoreRenderLayers.getExterior(DynamicTextureCache.instance.getRouteMap(platform.getId(), RouteMapPurpose.ROUTE_SIGN, true, false, HEIGHT_BOTTOM / WIDTH, false).identifier));
 		IDrawing.drawTexture(graphicsHolder, 1 - SIDE, MIDDLE + (isTop ? 0 : 1), 0, 1 - SIDE, isTop ? 0 : BOTTOM, 0, SIDE, isTop ? 0 : BOTTOM, 0, SIDE, MIDDLE + (isTop ? 0 : 1), 0, 0, 0, isTop ? TEXTURE_BREAK : 1, 1, facing.getOpposite(), -1, light);
 
 		graphicsHolder.pop();

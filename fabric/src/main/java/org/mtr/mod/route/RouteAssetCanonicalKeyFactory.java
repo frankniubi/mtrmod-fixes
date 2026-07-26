@@ -12,7 +12,7 @@ public final class RouteAssetCanonicalKeyFactory {
 	private static final float MAX_PADDING_SCALE = 0.5F;
 	private static final int MAX_READABLE_DENOMINATOR = 4096;
 	private static final int MAX_CONTINUED_FRACTION_STEPS = 32;
-	private static final Set<String> ROUTE_MAP_PARAMETERS = Set.of("a", "f", "t", "v");
+	private static final Set<String> ROUTE_MAP_PARAMETERS = Set.of("a", "f", "p", "t", "v");
 	private static final Set<String> DIRECTION_ARROW_PARAMETERS = Set.of("a", "align", "bg", "left", "pad", "right", "show", "text", "transparent");
 	private static final Set<String> ROUTE_SQUARE_PARAMETERS = Set.of("align");
 	private static final Set<String> ROUTE_COLOR_STRIP_PARAMETERS = Set.of("style");
@@ -20,10 +20,11 @@ public final class RouteAssetCanonicalKeyFactory {
 	private RouteAssetCanonicalKeyFactory() {
 	}
 
-	public static RouteAssetKey routeMap(String dimension, long platformId, int resolution, String language, boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite) {
+	public static RouteAssetKey routeMap(String dimension, long platformId, int resolution, String language, RouteMapPurpose purpose, boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite) {
 		return key(dimension, RouteAssetType.ROUTE_MAP, platformId, resolution, language, Map.of(
 				"a", encodeAspect(aspectRatio),
 				"f", encodeBoolean(flip),
+				"p", Objects.requireNonNull(purpose, "purpose").name(),
 				"t", encodeBoolean(transparentWhite),
 				"v", encodeBoolean(vertical)
 		));
@@ -56,9 +57,20 @@ public final class RouteAssetCanonicalKeyFactory {
 		final Map<String, String> parameters = key.getVariant().getParameters();
 		final Float aspectRatio = decodeAspect(parameters.get("a"));
 		final Boolean flip = decodeBoolean(parameters.get("f"));
+		final RouteMapPurpose purpose = decodeRouteMapPurpose(parameters.get("p"));
 		final Boolean transparentWhite = decodeBoolean(parameters.get("t"));
 		final Boolean vertical = decodeBoolean(parameters.get("v"));
-		return aspectRatio == null || flip == null || transparentWhite == null || vertical == null ? null : new RouteMapParameters(vertical, flip, aspectRatio, transparentWhite);
+		return aspectRatio == null || flip == null || purpose == null || transparentWhite == null || vertical == null ? null : new RouteMapParameters(purpose, vertical, flip, aspectRatio, transparentWhite);
+	}
+
+	private static RouteMapPurpose decodeRouteMapPurpose(String value) {
+		if (value == null) return null;
+		try {
+			final RouteMapPurpose purpose = RouteMapPurpose.valueOf(value);
+			return purpose.name().equals(value) ? purpose : null;
+		} catch (IllegalArgumentException exception) {
+			return null;
+		}
 	}
 
 	static DirectionArrowParameters decodeDirectionArrow(RouteAssetKey key) {
@@ -219,12 +231,14 @@ public final class RouteAssetCanonicalKeyFactory {
 	}
 
 	static final class RouteMapParameters {
+		final RouteMapPurpose purpose;
 		final boolean vertical;
 		final boolean flip;
 		final float aspectRatio;
 		final boolean transparentWhite;
 
-		private RouteMapParameters(boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite) {
+		private RouteMapParameters(RouteMapPurpose purpose, boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite) {
+			this.purpose = purpose;
 			this.vertical = vertical;
 			this.flip = flip;
 			this.aspectRatio = aspectRatio;

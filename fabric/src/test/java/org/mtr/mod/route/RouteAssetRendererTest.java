@@ -61,12 +61,12 @@ public final class RouteAssetRendererTest {
 		final Map<String, Fixture> fixtures = new LinkedHashMap<>();
 		fixtures.put("color-strip", fixture("minecraft/overworld|ROUTE_COLOR_STRIP|1|1|NORMAL|align=LEFT", base().routeColors(List.of(0x14755E, 0x25B407, 0x3E405E)).build()));
 		fixtures.put("route-square", fixture("minecraft/overworld|ROUTE_SQUARE|1|1|NORMAL|align=CENTER", base().routeColor(0x14755E).routeName("IG5").build()));
-		fixtures.put("vertical-map", fixture("minecraft/overworld|ROUTE_MAP|1|1|NORMAL|a=37:22,f=0,t=0,v=1", base().vertical(true).aspectRatio(37F / 22).stations(normalStations()).build()));
+		fixtures.put("vertical-map", fixture("minecraft/overworld|ROUTE_MAP|1|1|NORMAL|a=37:22,f=0,p=GENERIC,t=0,v=1", base().vertical(true).aspectRatio(37F / 22).stations(normalStations()).build()));
 		fixtures.put("direction-arrow", fixture("minecraft/overworld|DIRECTION_ARROW|1|1|NORMAL|a=22:5,align=CENTER,bg=FF000000,left=1,pad=1:5,right=0,show=1,text=FFFFFFFF,transparent=00000000", base().backgroundColor(0xFF000000).textColor(0xFFFFFFFF).paddingScale(0.2F).aspectRatio(22F / 5).hasLeft(true).destination("City Three|第三城").build()));
-		fixtures.put("horizontal-map", fixture("minecraft/overworld|ROUTE_MAP|2|1|NORMAL|a=16:5,f=0,t=0,v=0", base().aspectRatio(16F / 5).stations(normalStations()).build()));
-		fixtures.put("dense-map", fixture("minecraft/overworld|ROUTE_MAP|3|1|NORMAL|a=37:22,f=0,t=0,v=1", base().vertical(true).aspectRatio(37F / 22).routes(denseRoutes()).build()));
-		fixtures.put("railway-icon", fixture("minecraft/overworld|ROUTE_MAP|4|1|NORMAL|a=4:9,f=0,t=0,v=1", base().vertical(true).aspectRatio(4F / 9).stations(iconStations(true, false)).build()));
-		fixtures.put("airport-icon", fixture("minecraft/overworld|ROUTE_MAP|5|1|NORMAL|a=4:9,f=0,t=0,v=1", base().vertical(true).aspectRatio(4F / 9).stations(iconStations(false, true)).build()));
+		fixtures.put("horizontal-map", fixture("minecraft/overworld|ROUTE_MAP|2|1|NORMAL|a=16:5,f=0,p=GENERIC,t=0,v=0", base().aspectRatio(16F / 5).stations(normalStations()).build()));
+		fixtures.put("dense-map", fixture("minecraft/overworld|ROUTE_MAP|3|1|NORMAL|a=37:22,f=0,p=GENERIC,t=0,v=1", base().vertical(true).aspectRatio(37F / 22).routes(denseRoutes()).build()));
+		fixtures.put("railway-icon", fixture("minecraft/overworld|ROUTE_MAP|4|1|NORMAL|a=4:9,f=0,p=GENERIC,t=0,v=1", base().vertical(true).aspectRatio(4F / 9).stations(iconStations(true, false)).build()));
+		fixtures.put("airport-icon", fixture("minecraft/overworld|ROUTE_MAP|5|1|NORMAL|a=4:9,f=0,p=GENERIC,t=0,v=1", base().vertical(true).aspectRatio(4F / 9).stations(iconStations(false, true)).build()));
 		fixtures.put("bilingual-text", fixture("minecraft/overworld|ROUTE_SQUARE|6|1|NORMAL|align=CENTER", base().routeColor(0x21679F).routeName("Central|中央").build()));
 		fixtures.put("cjk-text", fixture("minecraft/overworld|ROUTE_SQUARE|7|1|NORMAL|align=CENTER", base().routeColor(0x25B407).routeName("第三城西").build()));
 		fixtures.put("latin-text", fixture("minecraft/overworld|ROUTE_SQUARE|8|1|NORMAL|align=CENTER", base().routeColor(0x3E405E).routeName("North Treetrunk").build()));

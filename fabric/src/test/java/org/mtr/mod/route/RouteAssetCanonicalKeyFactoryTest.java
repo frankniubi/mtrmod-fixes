@@ -7,8 +7,14 @@ public final class RouteAssetCanonicalKeyFactoryTest {
 
 	@Test
 	public void routeSignRatiosAndArrowColorsHaveReadableCanonicalKeys() {
-		final RouteAssetKey map = RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, 2, "normal", true, false, 37F / 22, false);
-		Assertions.assertEquals("minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=37:22,f=0,t=0,v=1", map.toString());
+		final RouteAssetKey generic = RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, 2, "normal", RouteMapPurpose.GENERIC, true, false, 37F / 22, false);
+		final RouteAssetKey routeSign = RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, 2, "normal", RouteMapPurpose.ROUTE_SIGN, true, false, 37F / 22, false);
+		Assertions.assertEquals("minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=37:22,f=0,p=GENERIC,t=0,v=1", generic.toString());
+		Assertions.assertEquals("minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=37:22,f=0,p=ROUTE_SIGN,t=0,v=1", routeSign.toString());
+		Assertions.assertNotEquals(generic, routeSign);
+		Assertions.assertEquals(RouteMapPurpose.ROUTE_SIGN, RouteAssetCanonicalKeyFactory.decodeRouteMap(routeSign).purpose);
+		Assertions.assertNull(RouteAssetCanonicalKeyFactory.decodeRouteMap(RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=37:22,f=0,t=0,v=1")));
+		Assertions.assertNull(RouteAssetCanonicalKeyFactory.decodeRouteMap(RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=37:22,f=0,p=route_sign,t=0,v=1")));
 
 		final RouteAssetKey arrow = RouteAssetCanonicalKeyFactory.directionArrow("minecraft/overworld", 7, 2, "normal", true, false, RouteAssetTextRasterizer.Alignment.CENTER, true, 0.2F, 22F / 5, 0xFF000000, 0xFFFFFFFF, 0);
 		Assertions.assertEquals("minecraft/overworld|DIRECTION_ARROW|7|2|NORMAL|a=22:5,align=CENTER,bg=FF000000,left=1,pad=1:5,right=0,show=1,text=FFFFFFFF,transparent=00000000", arrow.toString());
@@ -17,7 +23,7 @@ public final class RouteAssetCanonicalKeyFactoryTest {
 	@Test
 	public void signedCoreIdsRoundTripThroughCanonicalKeys() {
 		final long platformId = Long.MIN_VALUE + 17;
-		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", platformId, 2, "NORMAL", true, false, 37F / 22, false);
+		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", platformId, 2, "NORMAL", RouteMapPurpose.GENERIC, true, false, 37F / 22, false);
 
 		Assertions.assertEquals(platformId, key.getPrimaryId());
 		Assertions.assertEquals(key, RouteAssetKey.parse(key.toString()));
@@ -40,8 +46,8 @@ public final class RouteAssetCanonicalKeyFactoryTest {
 
 	@Test
 	public void numericInputsAreBoundedAndNonCanonicalAliasesAreRejected() {
-		Assertions.assertThrows(IllegalArgumentException.class, () -> RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, 2, "NORMAL", true, false, 0, false));
-		Assertions.assertThrows(IllegalArgumentException.class, () -> RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, 2, "NORMAL", true, false, 9, false));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, 2, "NORMAL", RouteMapPurpose.GENERIC, true, false, 0, false));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, 2, "NORMAL", RouteMapPurpose.GENERIC, true, false, 9, false));
 		Assertions.assertThrows(IllegalArgumentException.class, () -> arrow(false, false, RouteAssetTextRasterizer.Alignment.CENTER, true, 0.5F, 2, 0, 0, 0));
 		Assertions.assertThrows(IllegalArgumentException.class, () -> arrow(false, false, RouteAssetTextRasterizer.Alignment.CENTER, true, Float.NaN, 2, 0, 0, 0));
 	}

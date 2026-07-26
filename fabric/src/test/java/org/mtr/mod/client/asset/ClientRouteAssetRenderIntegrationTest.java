@@ -12,6 +12,9 @@ public final class ClientRouteAssetRenderIntegrationTest {
 	@Test
 	public void routeTextureEntrypointsUseCanonicalServerKeysAndPreserveLocalFallbacks() throws IOException {
 		final String source = readSource("client", "DynamicTextureCache.java");
+		final String routeSignSource = readSource("render", "RenderRouteSign.java");
+		final String routeBaseSource = readSource("render", "RenderRouteBase.java");
+		final String initClientSource = readSource("InitClient.java");
 
 		Assertions.assertAll(
 				() -> Assertions.assertTrue(source.contains("RouteAssetCanonicalKeyFactory.routeColorStrip(")),
@@ -20,7 +23,10 @@ public final class ClientRouteAssetRenderIntegrationTest {
 				() -> Assertions.assertTrue(source.contains("RouteAssetCanonicalKeyFactory.routeSquare(")),
 				() -> Assertions.assertTrue(source.contains("ClientRouteAssetManager.getInstance().lookupRouteTexture(")),
 				() -> Assertions.assertTrue(source.contains("case PENDING:"), "negotiation and decode must return the existing placeholder without scheduling local rasterization"),
-				() -> Assertions.assertTrue(source.contains("case LOCAL:"), "disabled, fallback, high-resolution, and unmapped keys must retain the old local supplier")
+				() -> Assertions.assertTrue(source.contains("case LOCAL:"), "disabled, fallback, high-resolution, and unmapped keys must retain the old local supplier"),
+				() -> Assertions.assertTrue(routeSignSource.contains("RouteMapPurpose.ROUTE_SIGN")),
+				() -> Assertions.assertTrue(routeBaseSource.contains("RouteMapPurpose.GENERIC")),
+				() -> Assertions.assertEquals(4, count(initClientSource, "RenderRouteSign::new"))
 		);
 	}
 
@@ -105,5 +111,15 @@ public final class ClientRouteAssetRenderIntegrationTest {
 		if (!Files.exists(path)) path = Path.of("fabric").resolve(path);
 		Assertions.assertTrue(Files.exists(path), "source must be available: " + path);
 		return Files.readString(path);
+	}
+
+	private static int count(String source, String value) {
+		int count = 0;
+		int offset = 0;
+		while ((offset = source.indexOf(value, offset)) >= 0) {
+			count++;
+			offset += value.length();
+		}
+		return count;
 	}
 }

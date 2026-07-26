@@ -24,7 +24,7 @@ public final class RouteAssetDependencyCatalog {
 		final TreeMap<RouteAssetKey, Entry> result = new TreeMap<>();
 		data.getDimensions().forEach((dimension, dimensionSnapshot) -> dimensionSnapshot.getPlatforms().values().forEach(platform -> {
 			for (int resolution = 0; resolution <= 3; resolution++) {
-				add(result, RouteAssetCanonicalKeyFactory.routeMap(dimension, platform.getId(), resolution, languageMode, true, false, 37F / 22, false), buildSnapshot(platform, null, true, 37F / 22), platform, fingerprint);
+				add(result, RouteAssetCanonicalKeyFactory.routeMap(dimension, platform.getId(), resolution, languageMode, RouteMapPurpose.GENERIC, true, false, 37F / 22, false), buildSnapshot(platform, null, true, 37F / 22), platform, fingerprint);
 				for (int direction = 0; direction <= 3; direction++) {
 					final boolean hasLeft = (direction & 1) != 0;
 					final boolean hasRight = (direction & 2) != 0;

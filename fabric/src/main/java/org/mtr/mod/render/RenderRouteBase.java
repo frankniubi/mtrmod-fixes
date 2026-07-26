@@ -10,6 +10,7 @@ import org.mtr.mod.block.IBlock;
 import org.mtr.mod.client.DynamicTextureCache;
 import org.mtr.mod.client.IDrawing;
 import org.mtr.mod.data.IGui;
+import org.mtr.mod.route.RouteMapPurpose;
 
 public abstract class RenderRouteBase<T extends BlockPSDTop.BlockEntityBase> extends BlockEntityRenderer<T> implements IGui, IBlock {
 
@@ -74,7 +75,7 @@ public abstract class RenderRouteBase<T extends BlockPSDTop.BlockEntityBase> ext
 				if (renderType == RenderType.ARROW) {
 					identifier = DynamicTextureCache.instance.getDirectionArrow(platformId, (arrowDirection & 0b01) > 0, (arrowDirection & 0b10) > 0, HorizontalAlignment.CENTER, true, 0.25F, width / height, ARGB_WHITE, ARGB_BLACK, transparentWhite ? ARGB_WHITE : 0).identifier;
 				} else {
-					identifier = DynamicTextureCache.instance.getRouteMap(platformId, false, arrowDirection == 2, width / height, transparentWhite).identifier;
+					identifier = DynamicTextureCache.instance.getRouteMap(platformId, RouteMapPurpose.GENERIC, false, arrowDirection == 2, width / height, transparentWhite).identifier;
 				}
 
 				MainRenderer.scheduleRender(identifier, false, QueuedRenderLayer.EXTERIOR, (graphicsHolderNew, offset) -> {

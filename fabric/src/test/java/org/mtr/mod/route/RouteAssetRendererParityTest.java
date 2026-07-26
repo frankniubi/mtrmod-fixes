@@ -59,7 +59,7 @@ public final class RouteAssetRendererParityTest {
 		final RouteAssetRenderSnapshot.Station interchange = new RouteAssetRenderSnapshot.Station(20, 2, "Interchange", "", new RouteAssetRenderSnapshot.Interchange(List.of(), List.of(), true, false));
 		final RouteAssetRenderSnapshot.Route route = new RouteAssetRenderSnapshot.Route(7, "R7", 0xCC0000, RouteAssetRenderSnapshot.CircularState.NONE, RouteAssetRenderSnapshot.RouteKind.METRO, 0, List.of(current, interchange));
 		final RouteAssetRenderSnapshot snapshot = RouteAssetRenderSnapshot.builder().vertical(true).aspectRatio(37F / 22).routes(List.of(route)).build();
-		final RouteAssetImage image = renderer.render(RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 10, 0, "NORMAL", true, false, 37F / 22, false), snapshot, emptyText, asymmetricSources);
+		final RouteAssetImage image = renderer.render(RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 10, 0, "NORMAL", RouteMapPurpose.GENERIC, true, false, 37F / 22, false), snapshot, emptyText, asymmetricSources);
 
 		final int iconColor = RouteAssetImage.argbToAbgr(0xFF21679F);
 		final List<int[]> iconPixels = new ArrayList<>();

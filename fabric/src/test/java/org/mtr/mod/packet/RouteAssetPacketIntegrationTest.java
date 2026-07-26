@@ -198,10 +198,10 @@ public final class RouteAssetPacketIntegrationTest {
 	public void observedKeysAreBoundedToSixtyFour() {
 		final List<RouteAssetKey> keys = new ArrayList<>();
 		for (int index = 0; index < RouteAssetProtocol.MAX_OBSERVED_KEYS_PER_PLAYER_PER_MINUTE; index++) {
-			keys.add(RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|" + index + "|2|NORMAL|a=4:9,f=0,t=0,v=1"));
+			keys.add(RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|" + index + "|2|NORMAL|a=4:9,f=0,p=GENERIC,t=0,v=1"));
 		}
 		Assertions.assertEquals(64, new PacketRouteAssetObservedKeys(keys).getKeys().size());
-		keys.add(RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|999|2|NORMAL|a=4:9,f=0,t=0,v=1"));
+		keys.add(RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|999|2|NORMAL|a=4:9,f=0,p=GENERIC,t=0,v=1"));
 		Assertions.assertThrows(IllegalArgumentException.class, () -> new PacketRouteAssetObservedKeys(keys));
 	}
 

@@ -15,6 +15,7 @@ import org.mtr.core.data.TransportMode;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import org.mtr.mod.route.RouteAssetCanonicalKeyFactory;
 import org.mtr.mod.route.RouteAssetRenderSnapshot;
+import org.mtr.mod.route.RouteMapPurpose;
 
 public final class RouteAssetClientSnapshotAdapterTest {
 
@@ -50,7 +51,7 @@ public final class RouteAssetClientSnapshotAdapterTest {
 		SimplifiedRoute.addToList(simplifiedRoutes, route);
 		localData.simplifiedRoutes.addAll(simplifiedRoutes);
 		final RouteAssetRenderSnapshot snapshot = RouteAssetClientSnapshotAdapter.resolve(
-				RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", firstPlatform.getId(), 1, "NORMAL", true, false, 37F / 22, false)
+				RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", firstPlatform.getId(), 1, "NORMAL", RouteMapPurpose.GENERIC, true, false, 37F / 22, false)
 		).orElseThrow().getSnapshot();
 
 		Assertions.assertEquals(1, snapshot.getRoutes().size());
