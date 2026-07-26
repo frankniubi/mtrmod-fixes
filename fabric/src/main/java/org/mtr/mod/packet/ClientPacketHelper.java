@@ -18,6 +18,7 @@ import java.util.function.Predicate;
 public final class ClientPacketHelper {
 	private static Consumer<PacketRouteAssetManifest.ManifestPayload> routeAssetManifestHandler = payload -> { };
 	private static Consumer<PacketRouteAssetChunk.ChunkPayload> routeAssetChunkHandler = payload -> { };
+	private static Consumer<PacketFetchDestinationSignArrivals.ResponsePayload> destinationSignArrivalsHandler = payload -> { };
 
 	public static void setRouteAssetManifestHandler(Consumer<PacketRouteAssetManifest.ManifestPayload> handler) {
 		routeAssetManifestHandler = handler;
@@ -33,6 +34,14 @@ public final class ClientPacketHelper {
 
 	public static void handleRouteAssetChunk(PacketRouteAssetChunk.ChunkPayload chunkPayload) {
 		routeAssetChunkHandler.accept(chunkPayload);
+	}
+
+	public static void setDestinationSignArrivalsHandler(Consumer<PacketFetchDestinationSignArrivals.ResponsePayload> handler) {
+		destinationSignArrivalsHandler = handler;
+	}
+
+	public static void handleDestinationSignArrivals(PacketFetchDestinationSignArrivals.ResponsePayload payload) {
+		destinationSignArrivalsHandler.accept(payload);
 	}
 
 	public static void openBlockEntityScreen(BlockPos blockPos) {

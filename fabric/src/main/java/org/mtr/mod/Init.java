@@ -29,6 +29,7 @@ import org.mtr.mapping.tool.DummyClass;
 import org.mtr.mixin.PlayerTeleportationStateAccessor;
 import org.mtr.mod.config.Config;
 import org.mtr.mod.data.ArrivalsCacheServer;
+import org.mtr.mod.data.DestinationSignArrivalsServerCache;
 import org.mtr.mod.data.RailActionModule;
 import org.mtr.mod.generated.lang.TranslationProvider;
 import org.mtr.mod.packet.*;
@@ -101,6 +102,7 @@ public final class Init implements Utilities {
 		REGISTRY.registerPacket(PacketDepotGenerate.class, PacketDepotGenerate::new);
 		REGISTRY.registerPacket(PacketDriveTrain.class, PacketDriveTrain::new);
 		REGISTRY.registerPacket(PacketFetchArrivals.class, PacketFetchArrivals::new);
+		REGISTRY.registerPacket(PacketFetchDestinationSignArrivals.class, PacketFetchDestinationSignArrivals::new);
 		REGISTRY.registerPacket(PacketForwardClientRequest.class, PacketForwardClientRequest::new);
 		REGISTRY.registerPacket(PacketUpdateKeyDispenserConfig.class, PacketUpdateKeyDispenserConfig::new);
 		REGISTRY.registerPacket(PacketOpenBlockEntityScreen.class, PacketOpenBlockEntityScreen::new);
@@ -258,6 +260,8 @@ public final class Init implements Utilities {
 				main = null;
 			}
 			serverPort = 0;
+			DestinationSignArrivalsServerCache.clearAll();
+			PacketFetchDestinationSignArrivals.clearServerState();
 			RIDING_PLAYERS.clear();
 		});
 
@@ -268,6 +272,7 @@ public final class Init implements Utilities {
 			}
 
 			ArrivalsCacheServer.tickAll();
+			DestinationSignArrivalsServerCache.tickAll();
 			serverTick++;
 
 			if (main != null) {
@@ -300,6 +305,7 @@ public final class Init implements Utilities {
 		REGISTRY.eventRegistry.registerPlayerJoin((minecraftServer, serverPlayerEntity) -> updatePlayer(serverPlayerEntity, false));
 		REGISTRY.eventRegistry.registerPlayerDisconnect((minecraftServer, serverPlayerEntity) -> {
 			RIDING_PLAYERS.remove(serverPlayerEntity.getUuid());
+			PacketFetchDestinationSignArrivals.onPlayerDisconnect(serverPlayerEntity.getUuid());
 			if (routeAssetServerManager != null) {
 				routeAssetServerManager.onPlayerDisconnect(serverPlayerEntity.getUuid());
 			}

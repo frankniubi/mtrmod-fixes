@@ -42,7 +42,7 @@ public final class DestinationSignServerTopology {
 				}, NearbyAreasResponse.class);
 	}
 
-	private static void resolveTopology(World world, java.util.function.Consumer<DestinationSignTopology> callback) {
+	public static void resolveTopology(World world, java.util.function.Consumer<DestinationSignTopology> callback) {
 		final String dimension = Init.getWorldId(world);
 		final RouteAssetServerManager manager = Init.getRouteAssetServerManager();
 		if (manager != null) {

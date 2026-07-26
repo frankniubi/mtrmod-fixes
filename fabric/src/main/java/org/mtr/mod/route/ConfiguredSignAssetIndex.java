@@ -16,10 +16,11 @@ public final class ConfiguredSignAssetIndex {
 	private static final String KEY_COUNT = "configured_sign_asset_count";
 	private static final String KEY_PREFIX = "configured_sign_asset_";
 	private final TreeMap<Long, StoredEntry> entries = new TreeMap<>();
+	private long revision;
 
 	public synchronized boolean configureRouteSign(long anchorPosition, long platformId, RouteSignStyleMode styleMode) {
 		final RouteSignStyleMode checkedMode = Objects.requireNonNull(styleMode, "styleMode");
-		if (!checkedMode.isExplicit()) return entries.remove(anchorPosition) != null;
+		if (!checkedMode.isExplicit()) return remove(anchorPosition);
 		if (platformId == 0) throw new IllegalArgumentException("Configured Route Sign platform is not set");
 		return put(anchorPosition, StoredEntry.routeSign(anchorPosition, platformId, checkedMode));
 	}
@@ -34,11 +35,18 @@ public final class ConfiguredSignAssetIndex {
 			entries.remove(anchorPosition);
 			throw new IllegalStateException("Too many configured sign assets");
 		}
-		return !replacement.equals(previous);
+		final boolean changed = !replacement.equals(previous);
+		if (changed) revision++;
+		return changed;
 	}
 
-	public synchronized boolean remove(long anchorPosition) { return entries.remove(anchorPosition) != null; }
+	public synchronized boolean remove(long anchorPosition) {
+		final boolean changed = entries.remove(anchorPosition) != null;
+		if (changed) revision++;
+		return changed;
+	}
 	public synchronized int size() { return entries.size(); }
+	public synchronized long getRevision() { return revision; }
 
 	public synchronized List<Entry> snapshot(String dimension) {
 		final String checkedDimension = Objects.requireNonNull(dimension, "dimension").trim();
@@ -50,6 +58,7 @@ public final class ConfiguredSignAssetIndex {
 
 	public synchronized void read(CompoundTag compoundTag) {
 		entries.clear();
+		revision++;
 		final int count = (int) Math.min(Math.max(0, compoundTag.getLong(KEY_COUNT)), MAX_ENTRIES);
 		for (int index = 0; index < count; index++) {
 			final String prefix = KEY_PREFIX + index + "_";
