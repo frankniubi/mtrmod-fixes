@@ -21,6 +21,7 @@ public final class ClientRouteAssetRenderIntegrationTest {
 				() -> Assertions.assertTrue(source.contains("RouteAssetCanonicalKeyFactory.directionArrow(")),
 				() -> Assertions.assertTrue(source.contains("RouteAssetCanonicalKeyFactory.routeMap(")),
 				() -> Assertions.assertTrue(source.contains("RouteAssetCanonicalKeyFactory.routeSquare(")),
+				() -> Assertions.assertTrue(source.contains("getDestinationSignAtlas(RouteAssetKey key)")),
 				() -> Assertions.assertTrue(source.contains("ClientRouteAssetManager.getInstance().lookupRouteTexture(")),
 				() -> Assertions.assertTrue(source.contains("case PENDING:"), "negotiation and decode must return the existing placeholder without scheduling local rasterization"),
 				() -> Assertions.assertTrue(source.contains("case LOCAL:"), "disabled, fallback, high-resolution, and unmapped keys must retain the old local supplier"),
@@ -40,7 +41,7 @@ public final class ClientRouteAssetRenderIntegrationTest {
 		final String adapterSource = readSource("client", "RouteAssetClientSnapshotAdapter.java");
 		final String generatorSource = readSource("client", "RouteMapGenerator.java");
 		final String keySource = readSource("route", "RouteAssetCanonicalKeyFactory.java");
-		final String preparedFallback = method(cacheSource, "private DynamicResource getPreparedRouteSignResource", "private void schedulePreparedRouteSignEvaluation");
+		final String preparedFallback = method(cacheSource, "private DynamicResource getPreparedRouteAssetResource", "private void schedulePreparedRouteAssetEvaluation");
 		final String genericEntry = method(cacheSource, "public DynamicResource getRouteMap", "public byte[] getTextPixels");
 
 		Assertions.assertTrue(keySource.contains("MAX_ASPECT_RATIO = 8"), "the server must remain bounded to route textures covering at most three door blocks");

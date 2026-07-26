@@ -14,6 +14,7 @@ import org.mtr.mod.route.RouteAssetManifestCodec;
 import org.mtr.mod.route.RouteAssetManifestDiff;
 import org.mtr.mod.route.RouteAssetNegotiation;
 import org.mtr.mod.route.RouteAssetProtocol;
+import org.mtr.mod.route.RouteAssetVariantPolicy;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
@@ -371,7 +372,7 @@ public final class ClientRouteAssetDownloader {
 	private static Set<String> activeHashes(RouteAssetManifest manifest, int resolution, String language) {
 		final Set<String> hashes = new LinkedHashSet<>();
 		for (final Map.Entry<RouteAssetKey, RouteAssetManifest.Entry> entry : manifest.getEntries().entrySet()) {
-			if (entry.getKey().getVariant().getResolution() == resolution && entry.getKey().getVariant().getLanguage().equals(language)) hashes.add(entry.getValue().getHash());
+			if (RouteAssetVariantPolicy.isActive(entry.getKey(), resolution, language)) hashes.add(entry.getValue().getHash());
 		}
 		return Collections.unmodifiableSet(hashes);
 	}

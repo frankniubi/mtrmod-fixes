@@ -23,6 +23,7 @@ import org.mtr.mod.route.RouteAssetManifest;
 import org.mtr.mod.route.RouteAssetNegotiation;
 import org.mtr.mod.route.RouteAssetProtocol;
 import org.mtr.mod.route.RouteAssetType;
+import org.mtr.mod.route.RouteAssetVariantPolicy;
 import org.mtr.mod.screen.RouteAssetLoadingScreen;
 
 import java.io.IOException;
@@ -515,10 +516,10 @@ public final class ClientRouteAssetManager {
 		Objects.requireNonNull(key, "key");
 		final ClientRouteAssetSession.State state = session.getState();
 		if ((state == ClientRouteAssetSession.State.NEGOTIATING || state == ClientRouteAssetSession.State.SYNCING) && activeManifest == null) return RouteTextureLookup.PENDING;
-		if (state != ClientRouteAssetSession.State.READY && state != ClientRouteAssetSession.State.NEGOTIATING && state != ClientRouteAssetSession.State.SYNCING || settings == null || activeManifest == null || key.getVariant().getResolution() != settings.getResolution() || !key.getVariant().getLanguage().equals(settings.getLanguage())) return RouteTextureLookup.LOCAL;
+		if (state != ClientRouteAssetSession.State.READY && state != ClientRouteAssetSession.State.NEGOTIATING && state != ClientRouteAssetSession.State.SYNCING || settings == null || activeManifest == null || !RouteAssetVariantPolicy.isActive(key, settings.getResolution(), settings.getLanguage())) return RouteTextureLookup.LOCAL;
 		final RouteAssetManifest.Entry entry = activeManifest.getEntries().get(key);
 		if (entry == null) {
-			if (state == ClientRouteAssetSession.State.READY) queueObservedKey(key);
+			if (state == ClientRouteAssetSession.State.READY && key.getType() != RouteAssetType.DESTINATION_SIGN_ATLAS) queueObservedKey(key);
 			return RouteTextureLookup.LOCAL;
 		}
 		final String contentHash = entry.getHash();
@@ -724,8 +725,8 @@ public final class ClientRouteAssetManager {
 	}
 
 	private void queueObservedKey(RouteAssetKey key) {
-		if (observedKeySender == null || settings == null || settings.getResolution() > 3 || awaitingObservedKeys.size() >= RouteAssetProtocol.MAX_QUEUED_OBSERVED_KEYS) return;
-		if (key.getVariant().getResolution() != settings.getResolution() || !key.getVariant().getLanguage().equals(settings.getLanguage())) return;
+		if (key.getType() == RouteAssetType.DESTINATION_SIGN_ATLAS || observedKeySender == null || settings == null || settings.getResolution() > 3 || awaitingObservedKeys.size() >= RouteAssetProtocol.MAX_QUEUED_OBSERVED_KEYS) return;
+		if (!RouteAssetVariantPolicy.isActive(key, settings.getResolution(), settings.getLanguage())) return;
 		final String currentDimension;
 		try {
 			currentDimension = observedDimensionSupplier.get();
@@ -800,7 +801,7 @@ public final class ClientRouteAssetManager {
 		final Map<String, Map<Long, List<RouteAssetKey>>> mutable = new HashMap<>();
 		int indexedPlatforms = 0;
 		for (final RouteAssetKey key : manifest.getEntries().keySet()) {
-			if (key.getVariant().getResolution() != resolution || !key.getVariant().getLanguage().equals(language) || key.getType() == RouteAssetType.ROUTE_SQUARE) continue;
+			if (!RouteAssetVariantPolicy.isActive(key, resolution, language) || key.getType() == RouteAssetType.ROUTE_SQUARE) continue;
 			if (key.getType() != RouteAssetType.ROUTE_MAP && key.getType() != RouteAssetType.DIRECTION_ARROW && key.getType() != RouteAssetType.ROUTE_COLOR_STRIP) continue;
 			Map<Long, List<RouteAssetKey>> dimension = mutable.get(key.getDimension());
 			List<RouteAssetKey> keys = dimension == null ? null : dimension.get(key.getPrimaryId());
@@ -911,7 +912,7 @@ public final class ClientRouteAssetManager {
 	private static Set<String> hashes(RouteAssetManifest manifest, int resolution, String language) {
 		final Set<String> hashes = new HashSet<>();
 		manifest.getEntries().forEach((key, entry) -> {
-			if (key.getVariant().getResolution() == resolution && key.getVariant().getLanguage().equals(language)) hashes.add(entry.getHash());
+			if (RouteAssetVariantPolicy.isActive(key, resolution, language)) hashes.add(entry.getHash());
 		});
 		return Collections.unmodifiableSet(hashes);
 	}

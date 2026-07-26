@@ -84,6 +84,7 @@ public final class PacketUpdateData extends PacketRequestResponseBase {
 		new UpdateDataResponse(jsonReader, minecraftClientData).write();
 		new UpdateDataResponse(jsonReader, MinecraftClientData.getDashboardInstance()).write();
 		new UpdateDataResponse(jsonReader, MinecraftClientData.getInterchangeData()).write();
+		MinecraftClientData.refreshDestinationSignDimensionSnapshot();
 		minecraftClientData.vehicles.forEach(vehicle -> PathData.writePathCache(vehicle.vehicleExtraData.immutablePath, new MinecraftClientData(), vehicle.getTransportMode()));
 		DynamicTextureCache.instance.onRouteDataChanged();
 	}

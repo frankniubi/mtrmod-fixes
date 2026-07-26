@@ -21,6 +21,9 @@ import org.mtr.mod.route.RouteAssetSourceImages;
 import org.mtr.mod.route.RouteAssetTextRasterizer;
 import org.mtr.mod.route.RouteMapPurpose;
 import org.mtr.mod.route.RouteSignStyleMode;
+import org.mtr.mod.route.DestinationSignStyle;
+import org.mtr.mod.route.DestinationSignTopology;
+import org.mtr.mod.route.RouteAssetDataMirror;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -108,6 +111,20 @@ public final class RouteAssetClientSnapshotAdapterTest {
 		Assertions.assertEquals(topologySignature(railway.getSnapshot()), topologySignature(normal.getSnapshot()));
 		Assertions.assertNotEquals(auto.getDependencyFingerprint(), railway.getDependencyFingerprint());
 		Assertions.assertNotEquals(railway.getDependencyFingerprint(), normal.getDependencyFingerprint());
+	}
+
+	@Test
+	public void destinationFallbackUsesOnlyThePublishedFullDimensionSnapshot() {
+		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.destinationSign("minecraft/overworld", 10, 20, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		Assertions.assertTrue(RouteAssetClientSnapshotAdapter.resolve(key, "f".repeat(64)).isEmpty());
+		final DestinationSignTopology topology = new DestinationSignTopology(java.util.List.of(
+				new DestinationSignTopology.ServiceRoute(100, 0, "R1", 0x14755E, java.util.List.of(
+						new DestinationSignTopology.StopOccurrence(1000, 10, "U1", "Source", "Target"),
+						new DestinationSignTopology.StopOccurrence(2000, 20, "D1", "Target", "")))
+		), java.util.List.of(new DestinationSignTopology.StationZone(10, "Source"), new DestinationSignTopology.StationZone(20, "Target")));
+		MinecraftClientData.publishDestinationSignDimensionSnapshot(new RouteAssetDataMirror.DimensionSnapshot("minecraft/overworld", 1, java.util.Map.of(), topology));
+		final RouteAssetClientSnapshotAdapter.ResolvedSnapshot resolved = RouteAssetClientSnapshotAdapter.resolve(key, "f".repeat(64)).orElseThrow();
+		Assertions.assertEquals(1, resolved.getSnapshot().getDestinationSignAssetSnapshot().orElseThrow().getModel().getOptions().size());
 	}
 
 	private static RouteAssetKey routeSign(long platformId, RouteSignStyleMode styleMode) {

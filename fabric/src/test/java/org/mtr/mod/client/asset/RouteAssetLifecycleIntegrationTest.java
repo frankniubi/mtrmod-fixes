@@ -15,6 +15,8 @@ import org.mtr.mod.route.RouteAssetNegotiation;
 import org.mtr.mod.route.RouteAssetProtocol;
 import org.mtr.mod.route.RouteAssetType;
 import org.mtr.mod.route.RouteAssetVariant;
+import org.mtr.mod.route.RouteAssetCanonicalKeyFactory;
+import org.mtr.mod.route.DestinationSignStyle;
 import org.mtr.mod.screen.RouteAssetLoadingScreen;
 
 import java.net.InetSocketAddress;
@@ -24,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -54,18 +57,19 @@ public final class RouteAssetLifecycleIntegrationTest {
 	@Test
 	public void snapshotDownloadsOnlyNewActiveVariantThenPublishesManifest() throws Exception {
 		final String activeHash = RouteAssetHash.sha256(PNG);
-		final String inactiveHash = RouteAssetHash.sha256(PNG_2);
+		final String multiHash = RouteAssetHash.sha256(PNG_2);
 		final RouteAssetManifest manifest = RouteAssetManifest.builder()
 				.put(key(10, 2, "NORMAL"), activeHash, "active")
-				.put(key(11, 1, "NORMAL"), inactiveHash, "inactive-resolution")
-				.put(key(12, 2, "CJK"), inactiveHash, "inactive-language")
+				.put(destinationKey(2), multiHash, "active-multi")
+				.put(key(11, 1, "NORMAL"), activeHash, "inactive-resolution")
+				.put(key(12, 2, "CJK"), activeHash, "inactive-language")
 				.build();
 		final byte[] document = RouteAssetManifestCodec.encode(manifest);
 		final List<String> requestedPaths = new java.util.concurrent.CopyOnWriteArrayList<>();
 		startServer(requestedPaths, Map.of(
 				documentPath(document), document,
 				pngPath(activeHash), PNG,
-				pngPath(inactiveHash), PNG_2
+				pngPath(multiHash), PNG_2
 		));
 		final ClientRouteAssetDiskCache cache = cache();
 		final AtomicLong clock = new AtomicLong(1_000);
@@ -76,18 +80,19 @@ public final class RouteAssetLifecycleIntegrationTest {
 		manager.handleManifest(payload(RouteAssetNegotiation.Mode.SNAPSHOT, UUID.randomUUID().toString(), manifest.getRevision(), document, hellos.get(0).getRequestNonce()));
 		awaitState(manager, ClientRouteAssetSession.State.READY);
 
-		Assertions.assertEquals(List.of(routePath(documentPath(document)), routePath(pngPath(activeHash))), requestedPaths);
+		Assertions.assertEquals(routePath(documentPath(document)), requestedPaths.get(0));
+		Assertions.assertEquals(Set.of(routePath(pngPath(activeHash)), routePath(pngPath(multiHash))), new java.util.HashSet<>(requestedPaths.subList(1, requestedPaths.size())));
 		Assertions.assertTrue(cache.findPng(activeHash).isPresent());
-		Assertions.assertTrue(cache.findPng(inactiveHash).isEmpty());
+		Assertions.assertTrue(cache.findPng(multiHash).isPresent());
 		Assertions.assertEquals(manifest, cache.loadManifest(manager.getCurrentServerId()).orElseThrow());
-		Assertions.assertEquals(1, manager.getProgress().getCompletedObjects());
-		Assertions.assertEquals(1, manager.getProgress().getTotalObjects());
+		Assertions.assertEquals(2, manager.getProgress().getCompletedObjects());
+		Assertions.assertEquals(2, manager.getProgress().getTotalObjects());
 	}
 
 	@Test
 	public void snapshotPromotesPriorRendererPngWithoutRequestingIt() throws Exception {
 		final String hash = RouteAssetHash.sha256(PNG);
-		final RouteAssetManifest manifest = RouteAssetManifest.builder().put(key(13, 2, "NORMAL"), hash, "prior-renderer").build();
+		final RouteAssetManifest manifest = RouteAssetManifest.builder().put(destinationKey(2), hash, "prior-renderer-multi").build();
 		final byte[] document = RouteAssetManifestCodec.encode(manifest);
 		final Path prior = temporaryDirectory.resolve("cas").resolve(Integer.toString(RouteAssetProtocol.RENDERER_VERSION - 1)).resolve("sha256").resolve(hash.substring(0, 2)).resolve(hash + ".png");
 		Files.createDirectories(prior.getParent());
@@ -479,6 +484,10 @@ public final class RouteAssetLifecycleIntegrationTest {
 
 	private static RouteAssetKey key(long id, int resolution, String language) {
 		return new RouteAssetKey("minecraft:overworld", RouteAssetType.ROUTE_MAP, id, new RouteAssetVariant(resolution, language, Map.of("style", "normal")));
+	}
+
+	private static RouteAssetKey destinationKey(int resolution) {
+		return RouteAssetCanonicalKeyFactory.destinationSign("minecraft:overworld", 100, 200, resolution, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
 	}
 
 	private static String documentPath(byte[] document) {

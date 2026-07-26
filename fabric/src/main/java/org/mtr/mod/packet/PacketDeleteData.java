@@ -47,6 +47,7 @@ public final class PacketDeleteData extends PacketRequestResponseBase {
 		deleteDataResponse.write(MinecraftClientData.getInstance());
 		deleteDataResponse.write(MinecraftClientData.getDashboardInstance());
 		deleteDataResponse.write(MinecraftClientData.getInterchangeData());
+		MinecraftClientData.refreshDestinationSignDimensionSnapshot();
 		DynamicTextureCache.instance.onRouteDataChanged();
 	}
 

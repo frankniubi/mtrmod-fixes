@@ -297,7 +297,7 @@ public final class RouteAssetServerManager implements AutoCloseable {
 		final RouteAssetManifest manifest = repository.loadManifest(negotiation.getAuthoritativeRevision());
 		final Set<String> activeHashes = new HashSet<>();
 		for (final Map.Entry<RouteAssetKey, RouteAssetManifest.Entry> entry : manifest.getEntries().entrySet()) {
-			if (entry.getKey().getVariant().getResolution() == hello.getResolution() && entry.getKey().getVariant().getLanguage().equals(hello.getLanguage())) activeHashes.add(entry.getValue().getHash());
+			if (RouteAssetVariantPolicy.isActive(entry.getKey(), hello.getResolution(), hello.getLanguage())) activeHashes.add(entry.getValue().getHash());
 		}
 		final PacketFallbackAuthorization authorization = new PacketFallbackAuthorization(hello.getRequestNonce(), negotiation.getDocumentHash(), activeHashes);
 		synchronized (stateLock) {

@@ -10,6 +10,8 @@ import org.mtr.mod.route.RouteAssetKey;
 import org.mtr.mod.route.RouteAssetManifest;
 import org.mtr.mod.route.RouteAssetNegotiation;
 import org.mtr.mod.route.RouteAssetProtocol;
+import org.mtr.mod.route.RouteAssetCanonicalKeyFactory;
+import org.mtr.mod.route.DestinationSignStyle;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -85,6 +87,17 @@ public final class ClientRouteAssetObservedKeyTest {
 		ready.manager.lookupRouteTexture(observed);
 		ready.manager.tick(clock.get());
 		Assertions.assertEquals(List.of(observed), packets.get(2), "disconnect must clear observed-key deduplication and rate state");
+	}
+
+	@Test
+	public void missingDestinationAtlasUsesLocalFallbackWithoutObservedKeyTraffic() throws Exception {
+		final AtomicLong clock = new AtomicLong(5_000);
+		final List<List<RouteAssetKey>> packets = new ArrayList<>();
+		final ReadyManager ready = readyManager(clock, packets);
+		final RouteAssetKey destination = RouteAssetCanonicalKeyFactory.destinationSign("minecraft/overworld", 10, 20, 2, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.LOCAL, ready.manager.lookupRouteTexture(destination).getState());
+		ready.manager.tick(clock.get());
+		Assertions.assertTrue(packets.isEmpty());
 	}
 
 	@Test

@@ -15,10 +15,12 @@ import org.mtr.mod.block.BlockNode;
 import org.mtr.mod.data.PersistentVehicleData;
 import org.mtr.mod.data.VehicleExtension;
 import org.mtr.mod.render.DefaultRailMeshCache;
+import org.mtr.mod.route.RouteAssetDataMirror;
 import org.mtr.mod.screen.DashboardListItem;
 
 import javax.annotation.Nullable;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -39,6 +41,7 @@ public final class MinecraftClientData extends ClientData {
 	private static MinecraftClientData instance = new MinecraftClientData();
 	private static MinecraftClientData dashboardInstance = new MinecraftClientData();
 	private static ClientData interchangeData = new ClientData();
+	private static volatile RouteAssetDataMirror.DimensionSnapshot destinationSignDimensionSnapshot;
 
 	public static String DASHBOARD_SEARCH = "";
 	public static String ROUTES_PLATFORMS_SEARCH = "";
@@ -152,6 +155,31 @@ public final class MinecraftClientData extends ClientData {
 		return interchangeData;
 	}
 
+	public static void refreshDestinationSignDimensionSnapshot() {
+		final ClientWorld world = MinecraftClient.getInstance().getWorldMapped();
+		if (world == null) {
+			destinationSignDimensionSnapshot = null;
+			return;
+		}
+		try {
+			interchangeData.sync();
+			final String dimension = Init.getWorldId(new World(world.data));
+			destinationSignDimensionSnapshot = RouteAssetDataMirror.materializeDimension(
+					dimension, interchangeData, 0, interchangeData.stationIdMap::get, interchangeData.platformIdMap::get);
+		} catch (RuntimeException exception) {
+			destinationSignDimensionSnapshot = null;
+		}
+	}
+
+	public static Optional<RouteAssetDataMirror.DimensionSnapshot> getDestinationSignDimensionSnapshot(String dimension) {
+		final RouteAssetDataMirror.DimensionSnapshot snapshot = destinationSignDimensionSnapshot;
+		return snapshot != null && snapshot.getDimension().equals(dimension) ? Optional.of(snapshot) : Optional.empty();
+	}
+
+	static void publishDestinationSignDimensionSnapshot(RouteAssetDataMirror.DimensionSnapshot snapshot) {
+		destinationSignDimensionSnapshot = snapshot;
+	}
+
 	@Nullable
 	public static Station getInterchangeStation(long stationId) {
 		final Station localStation = instance.stationIdMap.get(stationId);
@@ -175,6 +203,7 @@ public final class MinecraftClientData extends ClientData {
 		MinecraftClientData.instance = new MinecraftClientData();
 		MinecraftClientData.dashboardInstance = new MinecraftClientData();
 		MinecraftClientData.interchangeData = new ClientData();
+		MinecraftClientData.destinationSignDimensionSnapshot = null;
 	}
 
 	public static boolean hasPermission() {

@@ -24,6 +24,13 @@ public final class RouteAssetClientSnapshotAdapter {
 	public static Optional<ResolvedSnapshot> resolve(RouteAssetKey key, String resourceFingerprint) {
 		Objects.requireNonNull(key, "key");
 		Objects.requireNonNull(resourceFingerprint, "resourceFingerprint");
+		if (key.getType() == org.mtr.mod.route.RouteAssetType.DESTINATION_SIGN_ATLAS) {
+			return MinecraftClientData.getDestinationSignDimensionSnapshot(key.getDimension()).flatMap(dimension -> {
+				final RouteAssetDataMirror.Snapshot snapshot = new RouteAssetDataMirror.Snapshot(0, Map.of(key.getDimension(), dimension));
+				return CATALOG.resolveDestinationSign(key, snapshot, resourceFingerprint)
+						.map(entry -> new ResolvedSnapshot(entry.getSnapshot(), entry.getDependencyFingerprint()));
+			});
+		}
 		final MinecraftClientData data = MinecraftClientData.getInstance();
 		final long platformId;
 		if (key.getType() == org.mtr.mod.route.RouteAssetType.ROUTE_SQUARE) {

@@ -8,6 +8,7 @@ import org.mtr.mod.route.RouteAssetKey;
 import org.mtr.mod.route.RouteAssetManifest;
 import org.mtr.mod.route.RouteAssetManifestCodec;
 import org.mtr.mod.route.RouteAssetProtocol;
+import org.mtr.mod.route.RouteAssetVariantPolicy;
 
 import javax.imageio.ImageIO;
 import java.io.ByteArrayInputStream;
@@ -193,7 +194,7 @@ public final class ClientRouteAssetDiskCache {
 		if (manifest.getRendererVersion() != rendererVersion) return false;
 		int matchingEntries = 0;
 		for (final Map.Entry<RouteAssetKey, RouteAssetManifest.Entry> entry : manifest.getEntries().entrySet()) {
-			if (resolution < 0 || entry.getKey().getVariant().getResolution() == resolution && entry.getKey().getVariant().getLanguage().equals(language)) {
+			if (resolution < 0 || RouteAssetVariantPolicy.isActive(entry.getKey(), resolution, language)) {
 				matchingEntries++;
 				if (findPng(entry.getValue().getHash()).isEmpty()) return false;
 			}

@@ -200,6 +200,11 @@ public class DynamicTextureCache implements IGui {
 		return getRouteMap(platformId, RouteMapPurpose.ROUTE_SIGN, styleMode, true, false, aspectRatio, false, localKey);
 	}
 
+	public DynamicResource getDestinationSignAtlas(RouteAssetKey key) {
+		if (key.getType() != org.mtr.mod.route.RouteAssetType.DESTINATION_SIGN_ATLAS) throw new IllegalArgumentException("Not a destination sign atlas");
+		return getRouteAssetResource(key, "destination_sign_" + key, () -> ClientRouteAssetRenderer.prepare(key).map(ClientRouteAssetRenderer::render).orElse(null), DefaultRenderingColor.TRANSPARENT, true);
+	}
+
 	private DynamicResource getRouteMap(long platformId, RouteMapPurpose purpose, RouteSignStyleMode styleMode,
 			boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite, String localKey) {
 		final Supplier<NativeImage> localSupplier = () -> RouteMapGenerator.generateRouteMap(platformId, vertical, flip, aspectRatio, transparentWhite);
@@ -326,7 +331,7 @@ public class DynamicTextureCache implements IGui {
 	}
 
 	private DynamicResource getRouteAssetResource(RouteAssetKey key, String localKey, Supplier<NativeImage> localSupplier,
-			DefaultRenderingColor defaultRenderingColor, boolean preparedRouteSignFallback) {
+			DefaultRenderingColor defaultRenderingColor, boolean preparedSharedFallback) {
 		final ClientRouteAssetManager.RouteTextureLookup lookup = ClientRouteAssetManager.getInstance().lookupRouteTexture(key);
 		switch (lookup.getState()) {
 			case READY:
@@ -336,8 +341,8 @@ public class DynamicTextureCache implements IGui {
 			case LOCAL:
 			default:
 				final String dependencyKey = key.getDimension() + '|' + localKey;
-				if (preparedRouteSignFallback && ClientRouteAssetResources.getActive() != null) {
-					return getPreparedRouteSignResource(dependencyKey, key, defaultRenderingColor);
+				if (preparedSharedFallback && ClientRouteAssetResources.getActive() != null) {
+					return getPreparedRouteAssetResource(dependencyKey, key, defaultRenderingColor);
 				}
 				return getResource(dependencyKey, localSupplier, defaultRenderingColor, () -> RouteMapGenerator.getRouteAssetFingerprint(key));
 		}
@@ -372,14 +377,14 @@ public class DynamicTextureCache implements IGui {
 		return RouteAssetTextRasterizer.Alignment.valueOf(Objects.requireNonNull(horizontalAlignment, "horizontalAlignment").name());
 	}
 
-	private DynamicResource getPreparedRouteSignResource(String key, RouteAssetKey routeAssetKey, DefaultRenderingColor defaultRenderingColor) {
+	private DynamicResource getPreparedRouteAssetResource(String key, RouteAssetKey routeAssetKey, DefaultRenderingColor defaultRenderingColor) {
 		resourceRegistryQueue.process(Runnable::run);
 		final long currentTimeMillis = System.currentTimeMillis();
 		final DynamicResource dynamicResource = dynamicResources.get(key);
 		final DynamicTextureDependencyTracker.Resolution<ClientRouteAssetRenderer.Prepared> resolution =
 				dependencyTracker.currentResolved(key, ClientRouteAssetRenderer.Prepared.class);
 		if (resolution == null) {
-			schedulePreparedRouteSignEvaluation(key, routeAssetKey, currentTimeMillis);
+			schedulePreparedRouteAssetEvaluation(key, routeAssetKey, currentTimeMillis);
 			return getExistingOrDefault(dynamicResource, defaultRenderingColor, currentTimeMillis);
 		}
 
@@ -407,7 +412,7 @@ public class DynamicTextureCache implements IGui {
 		return getExistingOrDefault(dynamicResource, defaultRenderingColor, currentTimeMillis);
 	}
 
-	private void schedulePreparedRouteSignEvaluation(String key, RouteAssetKey routeAssetKey, long currentTimeMillis) {
+	private void schedulePreparedRouteAssetEvaluation(String key, RouteAssetKey routeAssetKey, long currentTimeMillis) {
 		final Long retryTime = dependencyEvaluationRetryTimes.get(key);
 		if (retryTime != null && currentTimeMillis < retryTime || !dependencyEvaluations.add(key)) return;
 		boolean scheduled = false;
@@ -417,7 +422,7 @@ public class DynamicTextureCache implements IGui {
 				try {
 					dependencyTracker.evaluateResolved(
 							key,
-							() -> ClientRouteAssetRenderer.prepare(routeAssetKey).orElseThrow(() -> new IllegalStateException("Route sign resources are unavailable")),
+							() -> ClientRouteAssetRenderer.prepare(routeAssetKey).orElseThrow(() -> new IllegalStateException("Route asset resources are unavailable")),
 							ClientRouteAssetRenderer.Prepared::getDependencyFingerprint
 					);
 					successful = true;
