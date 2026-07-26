@@ -20,6 +20,7 @@ import org.mtr.mod.route.RouteAssetRenderSnapshot;
 import org.mtr.mod.route.RouteAssetSourceImages;
 import org.mtr.mod.route.RouteAssetTextRasterizer;
 import org.mtr.mod.route.RouteMapPurpose;
+import org.mtr.mod.route.RouteSignStyleMode;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -96,6 +97,28 @@ public final class RouteAssetClientSnapshotAdapterTest {
 		final RouteAssetRenderSnapshot.Station next = snapshot.getRoutes().get(0).getStations().get(1);
 		Assertions.assertEquals("R1", next.getPlatformDisplayName());
 		Assertions.assertEquals(secondStation.getId(), next.getOwningStationId());
+
+		final RouteAssetClientSnapshotAdapter.ResolvedSnapshot auto = RouteAssetClientSnapshotAdapter.resolve(
+				routeSign(firstPlatform.getId(), RouteSignStyleMode.AUTO), "a".repeat(64)).orElseThrow();
+		final RouteAssetClientSnapshotAdapter.ResolvedSnapshot railway = RouteAssetClientSnapshotAdapter.resolve(
+				routeSign(firstPlatform.getId(), RouteSignStyleMode.RAILWAY), "a".repeat(64)).orElseThrow();
+		final RouteAssetClientSnapshotAdapter.ResolvedSnapshot normal = RouteAssetClientSnapshotAdapter.resolve(
+				routeSign(firstPlatform.getId(), RouteSignStyleMode.NORMAL), "a".repeat(64)).orElseThrow();
+		Assertions.assertEquals(topologySignature(auto.getSnapshot()), topologySignature(railway.getSnapshot()));
+		Assertions.assertEquals(topologySignature(railway.getSnapshot()), topologySignature(normal.getSnapshot()));
+		Assertions.assertNotEquals(auto.getDependencyFingerprint(), railway.getDependencyFingerprint());
+		Assertions.assertNotEquals(railway.getDependencyFingerprint(), normal.getDependencyFingerprint());
+	}
+
+	private static RouteAssetKey routeSign(long platformId, RouteSignStyleMode styleMode) {
+		return RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", platformId, 1, "NORMAL",
+				RouteMapPurpose.ROUTE_SIGN, styleMode, true, false, 37F / 22, false);
+	}
+
+	private static String topologySignature(RouteAssetRenderSnapshot snapshot) {
+		return snapshot.getRoutes().stream().map(route -> route.getId() + ":" +
+				route.getStations().stream().map(station -> Long.toString(station.getPlatformId())).collect(java.util.stream.Collectors.joining(",")))
+				.collect(java.util.stream.Collectors.joining(";"));
 	}
 
 	private static ClientRouteAssetResources.ActiveResources activeResources(String fingerprint) throws Exception {

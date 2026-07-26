@@ -21,6 +21,7 @@ import org.mtr.mod.route.RouteAssetCanonicalKeyFactory;
 import org.mtr.mod.route.RouteAssetKey;
 import org.mtr.mod.route.RouteAssetTextRasterizer;
 import org.mtr.mod.route.RouteMapPurpose;
+import org.mtr.mod.route.RouteSignStyleMode;
 
 import javax.annotation.Nullable;
 import java.awt.*;
@@ -191,13 +192,24 @@ public class DynamicTextureCache implements IGui {
 
 	public DynamicResource getRouteMap(long platformId, RouteMapPurpose purpose, boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite) {
 		final String localKey = String.format("route_map_%s_%s_%s_%s_%s_%s", platformId, purpose, vertical, flip, aspectRatio, transparentWhite);
+		return getRouteMap(platformId, purpose, RouteSignStyleMode.AUTO, vertical, flip, aspectRatio, transparentWhite, localKey);
+	}
+
+	public DynamicResource getRouteSignMap(long platformId, RouteSignStyleMode styleMode, float aspectRatio) {
+		final String localKey = String.format("route_sign_map_%s_%s_%s", platformId, styleMode, aspectRatio);
+		return getRouteMap(platformId, RouteMapPurpose.ROUTE_SIGN, styleMode, true, false, aspectRatio, false, localKey);
+	}
+
+	private DynamicResource getRouteMap(long platformId, RouteMapPurpose purpose, RouteSignStyleMode styleMode,
+			boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite, String localKey) {
 		final Supplier<NativeImage> localSupplier = () -> RouteMapGenerator.generateRouteMap(platformId, vertical, flip, aspectRatio, transparentWhite);
 		final DefaultRenderingColor defaultRenderingColor = transparentWhite ? DefaultRenderingColor.TRANSPARENT : DefaultRenderingColor.WHITE;
 		final RouteAssetRequestContext context = getRouteAssetRequestContext();
 		if (context == null) return getResource(localKey, localSupplier, defaultRenderingColor);
 		try {
 			return getRouteAssetResource(
-					RouteAssetCanonicalKeyFactory.routeMap(context.dimension, platformId, context.resolution, context.language, purpose, vertical, flip, aspectRatio, transparentWhite),
+					RouteAssetCanonicalKeyFactory.routeMap(context.dimension, platformId, context.resolution, context.language,
+							purpose, styleMode, vertical, flip, aspectRatio, transparentWhite),
 					localKey, localSupplier, defaultRenderingColor, purpose == RouteMapPurpose.ROUTE_SIGN
 			);
 		} catch (IllegalArgumentException exception) {

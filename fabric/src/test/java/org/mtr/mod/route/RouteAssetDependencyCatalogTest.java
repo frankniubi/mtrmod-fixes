@@ -58,6 +58,23 @@ public final class RouteAssetDependencyCatalogTest {
 		Assertions.assertNotEquals(servedOriginal, servedRenamed);
 	}
 
+	@Test
+	public void fixedCatalogUsesAutoAndObservedForcedStylesResolve() {
+		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
+		final RouteAssetDataMirror.Snapshot snapshot = snapshot("U1", "R1");
+		final Map<RouteAssetKey, RouteAssetDependencyCatalog.Entry> fixed = catalog.enumerateFixed(snapshot, RESOURCE_FINGERPRINT, "NORMAL");
+		final RouteAssetKey auto = routeSign(RouteSignStyleMode.AUTO);
+		final RouteAssetKey railway = routeSign(RouteSignStyleMode.RAILWAY);
+		final RouteAssetKey normal = routeSign(RouteSignStyleMode.NORMAL);
+
+		Assertions.assertTrue(fixed.containsKey(auto));
+		Assertions.assertFalse(fixed.containsKey(railway));
+		final RouteAssetDependencyCatalog.Entry railwayEntry = catalog.resolveObserved(railway, snapshot, RESOURCE_FINGERPRINT).orElseThrow();
+		final RouteAssetDependencyCatalog.Entry normalEntry = catalog.resolveObserved(normal, snapshot, RESOURCE_FINGERPRINT).orElseThrow();
+		Assertions.assertNotEquals(fixed.get(auto).getDependencyFingerprint(), railwayEntry.getDependencyFingerprint());
+		Assertions.assertNotEquals(railwayEntry.getDependencyFingerprint(), normalEntry.getDependencyFingerprint());
+	}
+
 	private static void assertChanged(Map<RouteAssetKey, RouteAssetDependencyCatalog.Entry> first, Map<RouteAssetKey, RouteAssetDependencyCatalog.Entry> second, RouteAssetKey... keys) {
 		for (final RouteAssetKey key : keys) Assertions.assertNotEquals(first.get(key).getDependencyFingerprint(), second.get(key).getDependencyFingerprint(), key.toString());
 	}
@@ -85,5 +102,10 @@ public final class RouteAssetDependencyCatalogTest {
 
 	private static RouteAssetDataMirror.PlatformSnapshot platform(RouteAssetDataMirror.Snapshot snapshot) {
 		return snapshot.getDimensions().get(DIMENSION).getPlatforms().get(PLATFORM_ID);
+	}
+
+	private static RouteAssetKey routeSign(RouteSignStyleMode styleMode) {
+		return RouteAssetCanonicalKeyFactory.routeMap(DIMENSION, PLATFORM_ID, 0, "NORMAL",
+				RouteMapPurpose.ROUTE_SIGN, styleMode, true, false, 37F / 22, false);
 	}
 }

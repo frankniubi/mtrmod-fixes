@@ -24,7 +24,10 @@ public final class ClientRouteAssetRenderIntegrationTest {
 				() -> Assertions.assertTrue(source.contains("ClientRouteAssetManager.getInstance().lookupRouteTexture(")),
 				() -> Assertions.assertTrue(source.contains("case PENDING:"), "negotiation and decode must return the existing placeholder without scheduling local rasterization"),
 				() -> Assertions.assertTrue(source.contains("case LOCAL:"), "disabled, fallback, high-resolution, and unmapped keys must retain the old local supplier"),
-				() -> Assertions.assertTrue(routeSignSource.contains("RouteMapPurpose.ROUTE_SIGN")),
+				() -> Assertions.assertTrue(routeSignSource.contains("entity.getStyleMode()")),
+				() -> Assertions.assertTrue(routeSignSource.contains("getRouteSignMap(")),
+				() -> Assertions.assertTrue(source.contains("route_sign_map_%s_%s_%s")),
+				() -> Assertions.assertTrue(source.contains("RouteSignStyleMode styleMode")),
 				() -> Assertions.assertTrue(routeBaseSource.contains("RouteMapPurpose.GENERIC")),
 				() -> Assertions.assertEquals(4, count(initClientSource, "RenderRouteSign::new"))
 		);
