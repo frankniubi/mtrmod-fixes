@@ -21,20 +21,18 @@ public final class DestinationSignDirectServiceModel {
 		requireConfiguredStation(destinationStationId);
 		final List<Option> options = new ArrayList<>();
 		int scanned = 0;
-		if (sourceStationId != destinationStationId) {
-			for (final DestinationSignTopology.ServiceRoute route : checkedTopology.getRoutes()) {
-				final List<DestinationSignTopology.StopOccurrence> stops = route.getStops();
-				for (int sourceIndex = 0; sourceIndex < stops.size(); sourceIndex++) {
-					final DestinationSignTopology.StopOccurrence source = stops.get(sourceIndex);
-					if (source.getStationZoneId() != sourceStationId) continue;
-					for (int destinationIndex = sourceIndex + 1; destinationIndex < stops.size(); destinationIndex++) {
-						if (++scanned > MAX_SCANNED_FUTURE_OCCURRENCES) throw new ProjectionLimitException("Too many future stop occurrences");
-						final DestinationSignTopology.StopOccurrence destination = stops.get(destinationIndex);
-						if (destination.getStationZoneId() == destinationStationId) {
-							options.add(new Option(new OptionKey(route.getRouteId(), source.getPlatformId(), sourceIndex, destinationIndex), route, source, destination));
-							if (options.size() > MAX_OPTIONS) throw new ProjectionLimitException("Too many direct service options");
-							break;
-						}
+		for (final DestinationSignTopology.ServiceRoute route : checkedTopology.getRoutes()) {
+			final List<DestinationSignTopology.StopOccurrence> stops = route.getStops();
+			for (int sourceIndex = 0; sourceIndex < stops.size(); sourceIndex++) {
+				final DestinationSignTopology.StopOccurrence source = stops.get(sourceIndex);
+				if (source.getStationZoneId() != sourceStationId) continue;
+				for (int destinationIndex = sourceIndex + 1; destinationIndex < stops.size(); destinationIndex++) {
+					if (++scanned > MAX_SCANNED_FUTURE_OCCURRENCES) throw new ProjectionLimitException("Too many future stop occurrences");
+					final DestinationSignTopology.StopOccurrence destination = stops.get(destinationIndex);
+					if (destination.getStationZoneId() == destinationStationId) {
+						options.add(new Option(new OptionKey(route.getRouteId(), source.getPlatformId(), sourceIndex, destinationIndex), route, source, destination));
+						if (options.size() > MAX_OPTIONS) throw new ProjectionLimitException("Too many direct service options");
+						break;
 					}
 				}
 			}
@@ -54,7 +52,7 @@ public final class DestinationSignDirectServiceModel {
 				for (int index = sourceIndex + 1; index < stops.size(); index++) {
 					if (++scanned > MAX_SCANNED_FUTURE_OCCURRENCES) throw new ProjectionLimitException("Too many future stop occurrences");
 					final long stationId = stops.get(index).getStationZoneId();
-					if (stationId != 0 && stationId != sourceStationId) {
+					if (stationId != 0) {
 						checkedTopology.getStation(stationId).ifPresent(station -> result.putIfAbsent(stationId, station));
 						if (result.size() > MAX_OPTIONS) throw new ProjectionLimitException("Too many reachable destinations");
 					}

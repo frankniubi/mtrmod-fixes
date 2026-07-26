@@ -88,7 +88,7 @@ public final class DestinationSignTopology {
 			final List<StopOccurrence> copiedStops = new ArrayList<>(Objects.requireNonNull(stops, "stops"));
 			copiedStops.forEach(stop -> Objects.requireNonNull(stop, "stop"));
 			this.stops = Collections.unmodifiableList(copiedStops);
-			this.color = color;
+			this.color = color & 0xFFFFFF;
 		}
 
 		public long getRouteId() { return routeId; }

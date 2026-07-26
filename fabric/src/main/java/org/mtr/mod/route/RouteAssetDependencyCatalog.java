@@ -126,6 +126,28 @@ public final class RouteAssetDependencyCatalog {
 		return resolveObserved(key, data, resourceFingerprint);
 	}
 
+	public Optional<Entry> resolveDestinationSign(RouteAssetKey key, RouteAssetDataMirror.Snapshot data, String resourceFingerprint) {
+		Objects.requireNonNull(key, "key");
+		Objects.requireNonNull(data, "data");
+		final String fingerprint = RouteAssetHash.requireValid(resourceFingerprint);
+		final RouteAssetCanonicalKeyFactory.DestinationSignParameters parameters = RouteAssetCanonicalKeyFactory.decodeDestinationSign(key);
+		if (parameters == null) return Optional.empty();
+		final RouteAssetDataMirror.DimensionSnapshot dimension = data.getDimensions().get(key.getDimension());
+		if (dimension == null) return Optional.empty();
+		try {
+			final DestinationSignAssetSnapshot destination = DestinationSignAssetSnapshot.create(
+					dimension.getDestinationSignTopology(), key.getPrimaryId(), parameters.destinationStationId,
+					parameters.style, parameters.widthBlocks, parameters.heightBlocks, parameters.showEta);
+			final RouteAssetRenderSnapshot snapshot = RouteAssetRenderSnapshot.builder()
+					.aspectRatio((float) parameters.widthBlocks / parameters.heightBlocks)
+					.destinationSignAssetSnapshot(destination)
+					.build();
+			return Optional.of(entry(key, snapshot, null, fingerprint));
+		} catch (IllegalArgumentException exception) {
+			return Optional.empty();
+		}
+	}
+
 	public String resolveLocalGenericFingerprint(String descriptor, RouteAssetDataMirror.PlatformSnapshot platform, String resourceFingerprint) {
 		final String checkedDescriptor = Objects.requireNonNull(descriptor, "descriptor");
 		if (checkedDescriptor.isEmpty()) throw new IllegalArgumentException("Local route map descriptor is empty");
@@ -161,6 +183,7 @@ public final class RouteAssetDependencyCatalog {
 			final DataOutputStream canonical = new DataOutputStream(bytes);
 			canonical.writeInt(RouteAssetProtocol.RENDERER_VERSION);
 			if (key.getType() == RouteAssetType.ROUTE_MAP) canonical.writeInt(RouteAssetProtocol.ROUTE_MAP_RENDERER_VERSION);
+			if (key.getType() == RouteAssetType.DESTINATION_SIGN_ATLAS) canonical.writeInt(RouteAssetProtocol.DESTINATION_SIGN_RENDERER_VERSION);
 			writeString(canonical, resourceFingerprint);
 			writeString(canonical, key.toString());
 			switch (key.getType()) {
@@ -176,6 +199,9 @@ public final class RouteAssetDependencyCatalog {
 					break;
 				case ROUTE_SQUARE:
 					writeRouteSquareDependencies(canonical, snapshot);
+					break;
+				case DESTINATION_SIGN_ATLAS:
+					writeDestinationSignDependencies(canonical, snapshot.getDestinationSignAssetSnapshot().orElseThrow(() -> new IllegalArgumentException("Missing destination sign snapshot")));
 					break;
 				default:
 					throw new IllegalArgumentException("Unsupported route asset dependency family");
@@ -225,6 +251,33 @@ public final class RouteAssetDependencyCatalog {
 	private static void writeRouteSquareDependencies(DataOutputStream canonical, RouteAssetRenderSnapshot snapshot) throws IOException {
 		canonical.writeInt(snapshot.getRouteColor());
 		writeString(canonical, snapshot.getRouteName());
+	}
+
+	private static void writeDestinationSignDependencies(DataOutputStream canonical, DestinationSignAssetSnapshot snapshot) throws IOException {
+		canonical.writeLong(snapshot.getSourceStationId());
+		writeString(canonical, snapshot.getSourceStationName());
+		canonical.writeLong(snapshot.getDestinationStationId());
+		writeString(canonical, snapshot.getDestinationStationName());
+		canonical.writeInt(snapshot.getStyle().ordinal());
+		canonical.writeInt(snapshot.getWidthBlocks());
+		canonical.writeInt(snapshot.getHeightBlocks());
+		canonical.writeBoolean(snapshot.isShowEta());
+		writeString(canonical, DestinationSignAssetSnapshot.LEAVING_TEXT);
+		writeString(canonical, DestinationSignAssetSnapshot.NO_DIRECT_SERVICE_TEXT);
+		writeString(canonical, DestinationSignAssetSnapshot.NO_SERVICE_TEXT);
+		canonical.writeInt(snapshot.getModel().getOptions().size());
+		for (final DestinationSignDirectServiceModel.Option option : snapshot.getModel().getOptions()) {
+			final DestinationSignDirectServiceModel.OptionKey key = option.getKey();
+			canonical.writeLong(key.getRouteId());
+			canonical.writeLong(key.getSourcePlatformId());
+			canonical.writeInt(key.getSourceOccurrenceIndex());
+			canonical.writeInt(key.getDestinationOccurrenceIndex());
+			canonical.writeInt(option.getRoute().getRouteOrder());
+			writeString(canonical, option.getRoute().getDisplayName());
+			canonical.writeInt(option.getRoute().getColor());
+			writeString(canonical, option.getSource().getPlatformDisplayName());
+			writeString(canonical, option.getDestination().getStationDisplayName());
+		}
 	}
 
 	private static void writeRoutes(DataOutputStream canonical, List<RouteAssetRenderSnapshot.Route> routes, boolean includePlatformMetadata) throws IOException {

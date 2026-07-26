@@ -36,11 +36,12 @@ public final class RouteAssetRenderer {
 	public RouteAssetImage render(RouteAssetKey key, RouteAssetRenderSnapshot snapshot, RouteAssetTextRasterizer text, RouteAssetSourceImages sources, int resolution) {
 		if (resolution < 0 || resolution > 8) throw new IllegalArgumentException("Invalid local route texture resolution");
 		final Context context = new Context(Objects.requireNonNull(key, "key"), Objects.requireNonNull(snapshot, "snapshot"), Objects.requireNonNull(text, "text"), Objects.requireNonNull(sources, "sources"), resolution);
-		switch (key.getType()) {
+			switch (key.getType()) {
 			case ROUTE_COLOR_STRIP: return generateColorStrip(context);
 			case ROUTE_SQUARE: return generateRouteSquare(context);
 			case DIRECTION_ARROW: return generateDirectionArrow(context);
 			case ROUTE_MAP: return generateRouteMap(context);
+			case DESTINATION_SIGN_ATLAS: return DestinationSignAtlasRenderer.render(snapshot.getDestinationSignAssetSnapshot().orElseThrow(() -> new IllegalArgumentException("Missing destination sign atlas snapshot")), text, resolution);
 			default: throw new IllegalArgumentException("Unsupported route asset type: " + key.getType());
 		}
 	}

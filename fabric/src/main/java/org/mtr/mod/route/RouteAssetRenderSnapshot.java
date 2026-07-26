@@ -31,6 +31,7 @@ public final class RouteAssetRenderSnapshot {
 	private final List<Integer> routeColors;
 	private final List<Station> stations;
 	private final List<Route> routes;
+	private final DestinationSignAssetSnapshot destinationSignAssetSnapshot;
 
 	private RouteAssetRenderSnapshot(Builder builder) {
 		platformDisplayName = builder.platformDisplayName;
@@ -54,6 +55,7 @@ public final class RouteAssetRenderSnapshot {
 		routeColors = Collections.unmodifiableList(new ArrayList<>(builder.routeColors));
 		stations = Collections.unmodifiableList(new ArrayList<>(builder.stations));
 		routes = Collections.unmodifiableList(new ArrayList<>(builder.routes));
+		destinationSignAssetSnapshot = builder.destinationSignAssetSnapshot;
 		if (aspectRatio <= 0 || !Float.isFinite(aspectRatio) || paddingScale < 0 || paddingScale >= 0.5F || routeColors.size() > 256 || stations.size() > 4096 || routes.size() > 512) {
 			throw new IllegalArgumentException("Invalid route asset render snapshot bounds");
 		}
@@ -82,6 +84,7 @@ public final class RouteAssetRenderSnapshot {
 	public List<Integer> getRouteColors() { return routeColors; }
 	public List<Station> getStations() { return stations; }
 	public List<Route> getRoutes() { return routes; }
+	public Optional<DestinationSignAssetSnapshot> getDestinationSignAssetSnapshot() { return Optional.ofNullable(destinationSignAssetSnapshot); }
 
 	public List<Route> getNonTerminatingRoutes() {
 		final List<Route> result = new ArrayList<>();
@@ -125,6 +128,7 @@ public final class RouteAssetRenderSnapshot {
 		private List<Integer> routeColors = Collections.emptyList();
 		private List<Station> stations = Collections.emptyList();
 		private List<Route> routes = Collections.emptyList();
+		private DestinationSignAssetSnapshot destinationSignAssetSnapshot;
 
 		public Builder platformDisplayName(String value) { platformDisplayName = Objects.requireNonNull(value); return this; }
 		public Builder selectedPlatformId(long value) { selectedPlatformId = value; return this; }
@@ -147,6 +151,7 @@ public final class RouteAssetRenderSnapshot {
 		public Builder routeColors(List<Integer> value) { routeColors = Objects.requireNonNull(value); return this; }
 		public Builder stations(List<Station> value) { stations = Objects.requireNonNull(value); return this; }
 		public Builder routes(List<Route> value) { routes = Objects.requireNonNull(value); return this; }
+		public Builder destinationSignAssetSnapshot(DestinationSignAssetSnapshot value) { destinationSignAssetSnapshot = Objects.requireNonNull(value); return this; }
 		public RouteAssetRenderSnapshot build() { return new RouteAssetRenderSnapshot(this); }
 	}
 

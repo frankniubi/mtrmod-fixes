@@ -15,7 +15,7 @@ final class NorthTreetrunkRouteSignFixtures {
 	private static final long CITY_THREE_ARMY = 4038994434184587153L;
 	private static final long WEST_CITY_THREE = -3515016180146934529L;
 	private static final long FUYUAN_MOUNTAIN = -5329382989333773432L;
-	private static final long YUYUAN_GARDEN = -2667875551136717821L;
+	static final long YUYUAN_GARDEN = -2667875551136717821L;
 	private static final long ZURSAT_WAE = -8331724461047244333L;
 	private static final long GITYUE_WEST = 6226184362226493077L;
 	private static final long NORTH_CITY_TWO = 9003101761471682128L;

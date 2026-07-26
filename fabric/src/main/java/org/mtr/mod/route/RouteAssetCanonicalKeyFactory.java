@@ -18,6 +18,7 @@ public final class RouteAssetCanonicalKeyFactory {
 	private static final Set<String> DIRECTION_ARROW_PARAMETERS = Set.of("a", "align", "bg", "left", "pad", "right", "show", "text", "transparent");
 	private static final Set<String> ROUTE_SQUARE_PARAMETERS = Set.of("align");
 	private static final Set<String> ROUTE_COLOR_STRIP_PARAMETERS = Set.of("style");
+	private static final Set<String> DESTINATION_SIGN_PARAMETERS = Set.of("d", "eta", "h", "s", "v", "w");
 
 	private RouteAssetCanonicalKeyFactory() {
 	}
@@ -66,6 +67,44 @@ public final class RouteAssetCanonicalKeyFactory {
 
 	public static RouteAssetKey routeColorStrip(String dimension, long platformId, int resolution, String language) {
 		return key(dimension, RouteAssetType.ROUTE_COLOR_STRIP, platformId, resolution, language, Map.of("style", "DEFAULT"));
+	}
+
+	public static RouteAssetKey destinationSign(String dimension, long sourceStationId, long destinationStationId, int resolution,
+			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
+		final DestinationSignStyle checkedStyle = Objects.requireNonNull(style, "style");
+		if (sourceStationId == 0 || destinationStationId == 0
+				|| widthBlocks < Math.max(DestinationSignAtlasLayout.MIN_WIDTH_BLOCKS, checkedStyle.getMinimumWidthBlocks())
+				|| widthBlocks > DestinationSignAtlasLayout.MAX_WIDTH_BLOCKS
+				|| heightBlocks < DestinationSignAtlasLayout.MIN_HEIGHT_BLOCKS || heightBlocks > DestinationSignAtlasLayout.MAX_HEIGHT_BLOCKS) {
+			throw new IllegalArgumentException("Invalid destination sign key");
+		}
+		return key(dimension, RouteAssetType.DESTINATION_SIGN_ATLAS, sourceStationId, resolution, "MULTI", Map.of(
+				"d", Long.toString(destinationStationId),
+				"eta", encodeBoolean(showEta),
+				"h", Integer.toString(heightBlocks),
+				"s", checkedStyle.name(),
+				"v", "1",
+				"w", Integer.toString(widthBlocks)
+		));
+	}
+
+	static DestinationSignParameters decodeDestinationSign(RouteAssetKey key) {
+		if (key.getType() != RouteAssetType.DESTINATION_SIGN_ATLAS || !"MULTI".equals(key.getVariant().getLanguage())
+				|| !key.getVariant().getParameters().keySet().equals(DESTINATION_SIGN_PARAMETERS)) return null;
+		final Map<String, String> parameters = key.getVariant().getParameters();
+		try {
+			final long destinationStationId = Long.parseLong(parameters.get("d"));
+			final Boolean showEta = decodeBoolean(parameters.get("eta"));
+			final int widthBlocks = Integer.parseInt(parameters.get("w"));
+			final int heightBlocks = Integer.parseInt(parameters.get("h"));
+			final DestinationSignStyle style = DestinationSignStyle.valueOf(parameters.get("s"));
+			if (!"1".equals(parameters.get("v")) || showEta == null) return null;
+			final RouteAssetKey canonical = destinationSign(key.getDimension(), key.getPrimaryId(), destinationStationId,
+					key.getVariant().getResolution(), style, widthBlocks, heightBlocks, showEta);
+			return canonical.equals(key) ? new DestinationSignParameters(destinationStationId, style, widthBlocks, heightBlocks, showEta) : null;
+		} catch (IllegalArgumentException exception) {
+			return null;
+		}
 	}
 
 	static RouteMapParameters decodeRouteMap(RouteAssetKey key) {
@@ -276,6 +315,22 @@ public final class RouteAssetCanonicalKeyFactory {
 			this.flip = flip;
 			this.aspectRatio = aspectRatio;
 			this.transparentWhite = transparentWhite;
+		}
+	}
+
+	static final class DestinationSignParameters {
+		final long destinationStationId;
+		final DestinationSignStyle style;
+		final int widthBlocks;
+		final int heightBlocks;
+		final boolean showEta;
+
+		private DestinationSignParameters(long destinationStationId, DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
+			this.destinationStationId = destinationStationId;
+			this.style = style;
+			this.widthBlocks = widthBlocks;
+			this.heightBlocks = heightBlocks;
+			this.showEta = showEta;
 		}
 	}
 

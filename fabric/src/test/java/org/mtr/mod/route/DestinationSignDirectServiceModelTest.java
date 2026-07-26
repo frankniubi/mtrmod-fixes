@@ -51,7 +51,7 @@ public final class DestinationSignDirectServiceModelTest {
 	}
 
 	@Test
-	public void reachableDestinationsAreStableAndExcludeTheSource() {
+	public void reachableDestinationsAreStableInRouteOccurrenceOrder() {
 		final DestinationSignTopology topology = new DestinationSignTopology(List.of(
 				route(2, 1, "B", stop(20, 10), stop(21, 30), stop(22, 40)),
 				route(1, 0, "A", stop(10, 10), stop(11, 20), stop(12, 30))
@@ -62,6 +62,16 @@ public final class DestinationSignDirectServiceModelTest {
 				new DestinationSignTopology.StationZone(40, "Forty")
 		));
 		Assertions.assertEquals(List.of(20L, 30L, 40L), DestinationSignDirectServiceModel.reachableDestinations(topology, 10).stream().map(DestinationSignTopology.StationZone::getId).toList());
+	}
+
+	@Test
+	public void aLaterReturnToTheSourceZoneIsAValidLoopDestination() {
+		final DestinationSignTopology topology = new DestinationSignTopology(
+				List.of(route(7, 0, "OW5", stop(701, 10), stop(702, 20), stop(703, 30), stop(704, 10))),
+				List.of(new DestinationSignTopology.StationZone(10, "Loop Hub"), new DestinationSignTopology.StationZone(20, "Twenty"), new DestinationSignTopology.StationZone(30, "Thirty")));
+		final DestinationSignDirectServiceModel.Model model = DestinationSignDirectServiceModel.project(topology, 10, 10);
+		Assertions.assertEquals(List.of(new DestinationSignDirectServiceModel.OptionKey(7, 701, 0, 3)), model.getOptions().stream().map(DestinationSignDirectServiceModel.Option::getKey).toList());
+		Assertions.assertEquals(List.of(20L, 30L, 10L), DestinationSignDirectServiceModel.reachableDestinations(topology, 10).stream().map(DestinationSignTopology.StationZone::getId).toList());
 	}
 
 	private static DestinationSignTopology.ServiceRoute route(long id, int order, String name, DestinationSignTopology.StopOccurrence... stops) {
