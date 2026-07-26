@@ -36,8 +36,18 @@ public final class DestinationSignConfigTest {
 	public void rejectsHalfConfiguredAndOutOfBoundsValues() {
 		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.configured(0, 5, 3, 2, DestinationSignStyle.ARRIVAL_ORDER, true));
 		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.configured(5, 0, 3, 2, DestinationSignStyle.ARRIVAL_ORDER, true));
-		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.configured(5, 6, 2, 2, DestinationSignStyle.DESTINATION_FLAG, true));
+		Assertions.assertDoesNotThrow(() -> DestinationSignConfig.configured(5, 6, 2, 2, DestinationSignStyle.DESTINATION_FLAG, true));
 		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.unconfigured(17, 2));
+	}
+
+	@Test
+	public void everyStyleSupportsOneByTwoAndTwoByOne() {
+		for (final DestinationSignStyle style : DestinationSignStyle.values()) {
+			Assertions.assertEquals(1, DestinationSignConfig.configured(5, 6, 1, 2, style, true).getWidth());
+			Assertions.assertEquals(1, DestinationSignConfig.configured(5, 6, 2, 1, style, true).getHeight());
+		}
+		Assertions.assertThrows(IllegalArgumentException.class,
+				() -> DestinationSignConfig.configured(5, 6, 1, 1, DestinationSignStyle.ARRIVAL_ORDER, true));
 	}
 
 	@Test

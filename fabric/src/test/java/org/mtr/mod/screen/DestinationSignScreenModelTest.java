@@ -30,8 +30,20 @@ public final class DestinationSignScreenModelTest {
 		final DestinationSignScreenModel draft = new DestinationSignScreenModel(-10, "Source", topology(1), DestinationSignConfig.unconfigured(3, 2));
 		for (int index = 0; index < 30; index++) draft.adjustWidth(-1);
 		for (int index = 0; index < 30; index++) draft.adjustHeight(-1);
-		Assertions.assertEquals(2, draft.getWidth());
+		Assertions.assertEquals(1, draft.getWidth());
 		Assertions.assertEquals(2, draft.getHeight());
+		Assertions.assertFalse(draft.canAdjustHeight(-1), "the stepper must not create a 1x1 sign");
+
+		final DestinationSignScreenModel landscape = new DestinationSignScreenModel(-10, "Source", topology(1), DestinationSignConfig.unconfigured(3, 2));
+		for (int index = 0; index < 30; index++) landscape.adjustHeight(-1);
+		for (int index = 0; index < 30; index++) landscape.adjustWidth(-1);
+		Assertions.assertEquals(2, landscape.getWidth());
+		Assertions.assertEquals(1, landscape.getHeight());
+		Assertions.assertFalse(landscape.canAdjustWidth(-1), "the stepper must not create a 1x1 sign");
+		draft.selectDestination(-20);
+		landscape.selectDestination(-20);
+		Assertions.assertTrue(draft.canSave());
+		Assertions.assertTrue(landscape.canSave());
 		for (int index = 0; index < 30; index++) draft.adjustWidth(1);
 		for (int index = 0; index < 30; index++) draft.adjustHeight(1);
 		Assertions.assertEquals(16, draft.getWidth());
@@ -43,9 +55,17 @@ public final class DestinationSignScreenModelTest {
 	public void exactMinimumFootprintAccountsForStyleAndEveryDirectRow() {
 		final DestinationSignScreenModel draft = new DestinationSignScreenModel(-10, "Source", topology(5), DestinationSignConfig.unconfigured(3, 2));
 		draft.selectDestination(-20);
-		Assertions.assertEquals(new DestinationSignScreenModel.Footprint(2, 3), draft.minimumFootprint(DestinationSignStyle.ARRIVAL_ORDER));
-		Assertions.assertEquals(new DestinationSignScreenModel.Footprint(2, 3), draft.minimumFootprint(DestinationSignStyle.PLATFORM_GROUPS));
-		Assertions.assertEquals(new DestinationSignScreenModel.Footprint(3, 3), draft.minimumFootprint(DestinationSignStyle.DESTINATION_FLAG));
+		Assertions.assertEquals(new DestinationSignScreenModel.Footprint(2, 1), draft.minimumFootprint(DestinationSignStyle.ARRIVAL_ORDER));
+		Assertions.assertEquals(new DestinationSignScreenModel.Footprint(2, 1), draft.minimumFootprint(DestinationSignStyle.PLATFORM_GROUPS));
+		Assertions.assertEquals(new DestinationSignScreenModel.Footprint(2, 1), draft.minimumFootprint(DestinationSignStyle.DESTINATION_FLAG));
+	}
+
+	@Test
+	public void saveRejectsAStaticAtlasThatCannotRenderAtAllServerResolutions() {
+		final DestinationSignScreenModel draft = new DestinationSignScreenModel(-10, "Source", topology(128), DestinationSignConfig.unconfigured(2, 1));
+		draft.selectDestination(-20);
+		Assertions.assertFalse(draft.canSave());
+		Assertions.assertTrue(draft.findMinimumFootprint(DestinationSignStyle.ARRIVAL_ORDER).isEmpty());
 	}
 
 	private static DestinationSignTopology topology(int routeCount) {

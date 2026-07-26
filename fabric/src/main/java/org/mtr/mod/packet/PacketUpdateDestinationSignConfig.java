@@ -10,8 +10,7 @@ import org.mtr.mapping.tool.PacketBufferSender;
 import org.mtr.mod.Init;
 import org.mtr.mod.block.BlockDestinationSign;
 import org.mtr.mod.block.DestinationSignConfig;
-import org.mtr.mod.route.DestinationSignAtlasLayout;
-import org.mtr.mod.route.DestinationSignDirectServiceModel;
+import org.mtr.mod.route.DestinationSignAssetSnapshot;
 import org.mtr.mod.route.DestinationSignServerTopology;
 import org.mtr.mod.route.DestinationSignStyle;
 import org.mtr.mod.route.DestinationSignTopology;
@@ -100,8 +99,9 @@ public final class PacketUpdateDestinationSignConfig extends PacketHandler {
 			final Optional<DestinationSignConfig> config = toConfig();
 			if (config.isEmpty()) return Optional.empty();
 			try {
-				final DestinationSignDirectServiceModel.Model model = DestinationSignDirectServiceModel.project(topology, sourceStationId, destinationStationId);
-				return !model.getOptions().isEmpty() && DestinationSignAtlasLayout.fitsOnePage(model, config.get().getStyle(), width, height, showEta) ? config : Optional.empty();
+				final DestinationSignAssetSnapshot snapshot = DestinationSignAssetSnapshot.create(topology, sourceStationId, destinationStationId,
+						config.get().getStyle(), width, height, showEta);
+				return snapshot.getModel().getOptions().isEmpty() ? Optional.empty() : config;
 			} catch (IllegalArgumentException exception) {
 				return Optional.empty();
 			}

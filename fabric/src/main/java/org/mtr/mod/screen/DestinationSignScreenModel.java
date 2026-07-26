@@ -3,12 +3,14 @@ package org.mtr.mod.screen;
 import org.mtr.mod.block.DestinationSignConfig;
 import org.mtr.mod.block.DestinationSignFootprint;
 import org.mtr.mod.route.DestinationSignAtlasLayout;
+import org.mtr.mod.route.DestinationSignAssetSnapshot;
 import org.mtr.mod.route.DestinationSignDirectServiceModel;
 import org.mtr.mod.route.DestinationSignStyle;
 import org.mtr.mod.route.DestinationSignTopology;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /** Shared mutable draft used by the content and style pages. */
 public final class DestinationSignScreenModel {
@@ -42,11 +44,23 @@ public final class DestinationSignScreenModel {
 	}
 
 	public void adjustWidth(int delta) {
-		width = clamp(width + Integer.signum(delta), Math.max(DestinationSignFootprint.MIN_WIDTH, style.getMinimumWidthBlocks()), DestinationSignFootprint.MAX_WIDTH);
+		if (canAdjustWidth(delta)) width += Integer.signum(delta);
 	}
 
 	public void adjustHeight(int delta) {
-		height = clamp(height + Integer.signum(delta), DestinationSignFootprint.MIN_HEIGHT, DestinationSignFootprint.MAX_HEIGHT);
+		if (canAdjustHeight(delta)) height += Integer.signum(delta);
+	}
+
+	public boolean canAdjustWidth(int delta) {
+		final int candidate = width + Integer.signum(delta);
+		return delta != 0 && candidate >= Math.max(DestinationSignFootprint.MIN_WIDTH, style.getMinimumWidthBlocks())
+				&& candidate <= DestinationSignFootprint.MAX_WIDTH && DestinationSignFootprint.isValidDimensions(candidate, height);
+	}
+
+	public boolean canAdjustHeight(int delta) {
+		final int candidate = height + Integer.signum(delta);
+		return delta != 0 && candidate >= DestinationSignFootprint.MIN_HEIGHT && candidate <= DestinationSignFootprint.MAX_HEIGHT
+				&& DestinationSignFootprint.isValidDimensions(width, candidate);
 	}
 
 	public void setStyle(DestinationSignStyle style) {
@@ -57,20 +71,26 @@ public final class DestinationSignScreenModel {
 	public void setShowEta(boolean showEta) { this.showEta = showEta; }
 
 	public Footprint minimumFootprint(DestinationSignStyle candidateStyle) {
-		final DestinationSignDirectServiceModel.Model model = projectedModel();
+		return findMinimumFootprint(candidateStyle).orElseThrow(() -> new IllegalStateException("Direct services exceed destination sign render limits"));
+	}
+
+	public Optional<Footprint> findMinimumFootprint(DestinationSignStyle candidateStyle) {
 		final int minimumWidth = Math.max(DestinationSignFootprint.MIN_WIDTH, candidateStyle.getMinimumWidthBlocks());
-		if (model == null) return new Footprint(minimumWidth, DestinationSignFootprint.MIN_HEIGHT);
 		for (int candidateHeight = DestinationSignFootprint.MIN_HEIGHT; candidateHeight <= DestinationSignFootprint.MAX_HEIGHT; candidateHeight++) {
 			for (int candidateWidth = minimumWidth; candidateWidth <= DestinationSignFootprint.MAX_WIDTH; candidateWidth++) {
-				if (DestinationSignAtlasLayout.fitsOnePage(model, candidateStyle, candidateWidth, candidateHeight, showEta)) return new Footprint(candidateWidth, candidateHeight);
+				if (destinationStationId == 0) {
+					if (DestinationSignAtlasLayout.isValidFootprint(candidateStyle, candidateWidth, candidateHeight)) return Optional.of(new Footprint(candidateWidth, candidateHeight));
+				} else if (projectedSnapshot(candidateStyle, candidateWidth, candidateHeight) != null) {
+					return Optional.of(new Footprint(candidateWidth, candidateHeight));
+				}
 			}
 		}
-		throw new IllegalStateException("Direct services exceed maximum destination sign footprint");
+		return Optional.empty();
 	}
 
 	public boolean canSave() {
-		final DestinationSignDirectServiceModel.Model model = projectedModel();
-		return model != null && !model.getOptions().isEmpty() && DestinationSignAtlasLayout.fitsOnePage(model, style, width, height, showEta);
+		final DestinationSignAssetSnapshot snapshot = projectedSnapshot(style, width, height);
+		return snapshot != null && !snapshot.getModel().getOptions().isEmpty();
 	}
 
 	public DestinationSignConfig toConfig() {
@@ -78,10 +98,10 @@ public final class DestinationSignScreenModel {
 		return DestinationSignConfig.configured(sourceStationId, destinationStationId, width, height, style, showEta);
 	}
 
-	private DestinationSignDirectServiceModel.Model projectedModel() {
+	private DestinationSignAssetSnapshot projectedSnapshot(DestinationSignStyle candidateStyle, int candidateWidth, int candidateHeight) {
 		if (destinationStationId == 0) return null;
 		try {
-			return DestinationSignDirectServiceModel.project(topology, sourceStationId, destinationStationId);
+			return DestinationSignAssetSnapshot.create(topology, sourceStationId, destinationStationId, candidateStyle, candidateWidth, candidateHeight, showEta);
 		} catch (IllegalArgumentException exception) {
 			return null;
 		}
@@ -90,8 +110,6 @@ public final class DestinationSignScreenModel {
 	private boolean containsDestination(long stationId) {
 		return stationId != 0 && destinations.stream().anyMatch(destination -> destination.getId() == stationId);
 	}
-
-	private static int clamp(int value, int minimum, int maximum) { return Math.max(minimum, Math.min(maximum, value)); }
 
 	public long getSourceStationId() { return sourceStationId; }
 	public String getSourceStationName() { return sourceStationName; }

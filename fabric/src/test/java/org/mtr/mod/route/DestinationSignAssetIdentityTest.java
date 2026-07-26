@@ -19,6 +19,14 @@ public final class DestinationSignAssetIdentityTest {
 		Assertions.assertEquals(-10, signed.getPrimaryId());
 		Assertions.assertEquals("-30", signed.getVariant().getParameters().get("d"));
 		Assertions.assertThrows(IllegalArgumentException.class, () -> RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 0, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true));
+		for (final DestinationSignStyle style : DestinationSignStyle.values()) {
+			final RouteAssetKey portrait = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, 30, 1, style, 1, 2, true);
+			final RouteAssetKey landscape = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, 30, 1, style, 2, 1, true);
+			Assertions.assertEquals("1", portrait.getVariant().getParameters().get("w"));
+			Assertions.assertEquals("1", landscape.getVariant().getParameters().get("h"));
+		}
+		Assertions.assertThrows(IllegalArgumentException.class,
+				() -> RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 1, 1, true));
 	}
 
 	@Test

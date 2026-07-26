@@ -20,6 +20,7 @@ public final class DestinationSignFootprintTest {
 		for (final Direction facing : List.of(Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST)) {
 			for (int width = DestinationSignFootprint.MIN_WIDTH; width <= DestinationSignFootprint.MAX_WIDTH; width++) {
 				for (int height = DestinationSignFootprint.MIN_HEIGHT; height <= DestinationSignFootprint.MAX_HEIGHT; height++) {
+					if (width == 1 && height == 1) continue;
 					combinations++;
 					final List<DestinationSignFootprint.Cell> cells = DestinationSignFootprint.cells(anchor, facing, width, height);
 					Assertions.assertEquals(width * height, cells.size());
@@ -30,7 +31,15 @@ public final class DestinationSignFootprintTest {
 				}
 			}
 		}
-		Assertions.assertEquals(420, combinations);
+		Assertions.assertEquals(508, combinations);
+	}
+
+	@Test
+	public void acceptsTwoCellPortraitAndLandscapeButRejectsOneCell() {
+		Assertions.assertEquals(2, DestinationSignFootprint.cells(new BlockPos(0, 0, 0), Direction.NORTH, 1, 2).size());
+		Assertions.assertEquals(2, DestinationSignFootprint.cells(new BlockPos(0, 0, 0), Direction.NORTH, 2, 1).size());
+		Assertions.assertThrows(IllegalArgumentException.class,
+				() -> DestinationSignFootprint.cells(new BlockPos(0, 0, 0), Direction.NORTH, 1, 1));
 	}
 
 	@Test

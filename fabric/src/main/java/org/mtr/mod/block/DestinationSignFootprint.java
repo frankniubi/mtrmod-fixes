@@ -13,10 +13,11 @@ import java.util.Objects;
 /** Canonical geometry for a sign whose anchor is the readable face's lower-left cell. */
 public final class DestinationSignFootprint {
 
-	public static final int MIN_WIDTH = 2;
+	public static final int MIN_WIDTH = 1;
 	public static final int MAX_WIDTH = 16;
-	public static final int MIN_HEIGHT = 2;
+	public static final int MIN_HEIGHT = 1;
 	public static final int MAX_HEIGHT = 8;
+	public static final int MIN_AREA = 2;
 
 	private DestinationSignFootprint() { }
 
@@ -76,9 +77,14 @@ public final class DestinationSignFootprint {
 	}
 
 	public static void validateDimensions(int width, int height) {
-		if (width < MIN_WIDTH || width > MAX_WIDTH || height < MIN_HEIGHT || height > MAX_HEIGHT) {
+		if (!isValidDimensions(width, height)) {
 			throw new IllegalArgumentException("Invalid destination sign footprint");
 		}
+	}
+
+	public static boolean isValidDimensions(int width, int height) {
+		return width >= MIN_WIDTH && width <= MAX_WIDTH && height >= MIN_HEIGHT && height <= MAX_HEIGHT
+				&& (long) width * height >= MIN_AREA;
 	}
 
 	private static Map<BlockPos, Cell> index(List<Cell> cells) {

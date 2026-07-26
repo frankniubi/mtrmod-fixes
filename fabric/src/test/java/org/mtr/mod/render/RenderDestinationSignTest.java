@@ -71,7 +71,13 @@ public final class RenderDestinationSignTest {
 
 		final RenderDestinationSign.Composition leaving = RenderDestinationSign.compose(fixture.prepared,
 				DestinationSignRows.resolve(fixture.snapshot.getModel(), approaching, true, 59_000, true, DestinationSignStyle.ARRIVAL_ORDER), 59_000, 0);
-		Assertions.assertTrue(leaving.getAtlasQuads().stream().anyMatch(quad -> quad.getSprite().getKind() == DestinationSignAssetSnapshot.SpriteKind.LEAVING));
+		final RenderDestinationSign.AtlasQuad leavingLabel = leaving.getAtlasQuads().stream()
+				.filter(quad -> quad.getSprite().getKind() == DestinationSignAssetSnapshot.SpriteKind.LEAVING).findFirst().orElseThrow();
+		final DestinationSignAtlasLayout.RowGeometry geometry = DestinationSignAtlasLayout.rowGeometry(DestinationSignStyle.ARRIVAL_ORDER,
+				fixture.snapshot.getLayout().getSurfaceWidth(), DestinationSignStyle.ARRIVAL_ORDER.getRowHeight(), true);
+		final int sourceX = DestinationSignAtlasLayout.readableSourceX(fixture.snapshot.getLayout().getSurfaceWidth(), geometry.getEtaX(), geometry.getEtaWidth());
+		final int scaledWidth = DestinationSignAtlasLayout.scaledSize(fixture.snapshot.getAtlasWidth(), fixture.key.getVariant().getResolution());
+		Assertions.assertEquals((float) DestinationSignAtlasLayout.scaledEdge(sourceX, fixture.key.getVariant().getResolution()) / scaledWidth, leavingLabel.getU1());
 		Assertions.assertTrue(leaving.getDynamicQuads().stream().noneMatch(quad -> quad.getText().contains("Leaving") || quad.getText().contains("\u5c06\u79bb")));
 	}
 
@@ -95,6 +101,8 @@ public final class RenderDestinationSignTest {
 		Assertions.assertEquals(-Direction.EAST.asRotation(), RenderDestinationSign.rotationDegrees(Direction.EAST));
 		Assertions.assertEquals(-Direction.SOUTH.asRotation(), RenderDestinationSign.rotationDegrees(Direction.SOUTH));
 		Assertions.assertEquals(-Direction.WEST.asRotation(), RenderDestinationSign.rotationDegrees(Direction.WEST));
+		Assertions.assertEquals(0.9F, RenderDestinationSign.readableUvStart(0.1F, 0.9F));
+		Assertions.assertEquals(0.1F, RenderDestinationSign.readableUvEnd(0.1F, 0.9F));
 
 		final Fixture fixture = fixture(DestinationSignStyle.ARRIVAL_ORDER, 16, 8, true);
 		final RenderDestinationSign.Composition composition = RenderDestinationSign.compose(fixture.prepared,
@@ -106,6 +114,24 @@ public final class RenderDestinationSignTest {
 			Assertions.assertTrue(quad.getX() + quad.getWidth() <= 16 * DestinationSignAtlasLayout.LOGICAL_PIXELS_PER_BLOCK);
 			Assertions.assertTrue(quad.getY() + quad.getHeight() <= 8 * DestinationSignAtlasLayout.LOGICAL_PIXELS_PER_BLOCK);
 		});
+	}
+
+	@Test
+	public void compactPortraitAndLandscapeCompositionsStayWithinTheirSurface() {
+		for (final int[] dimensions : List.of(new int[] {1, 2}, new int[] {2, 1})) {
+			for (final DestinationSignStyle style : DestinationSignStyle.values()) {
+				final Fixture fixture = fixture(style, dimensions[0], dimensions[1], true);
+				final RenderDestinationSign.Composition composition = RenderDestinationSign.compose(fixture.prepared,
+						DestinationSignRows.resolve(fixture.snapshot.getModel(), Map.of(), false, 0, true, style), 0, 0);
+				Assertions.assertEquals(dimensions[0], composition.getWidthBlocks());
+				Assertions.assertEquals(dimensions[1], composition.getHeightBlocks());
+				composition.getAtlasQuads().forEach(quad -> {
+					Assertions.assertTrue(quad.getX() >= 0 && quad.getY() >= 0);
+					Assertions.assertTrue(quad.getX() + quad.getWidth() <= dimensions[0] * DestinationSignAtlasLayout.LOGICAL_PIXELS_PER_BLOCK);
+					Assertions.assertTrue(quad.getY() + quad.getHeight() <= dimensions[1] * DestinationSignAtlasLayout.LOGICAL_PIXELS_PER_BLOCK);
+				});
+			}
+		}
 	}
 
 	private static Map<DestinationSignArrivalKey, DestinationSignArrivalResult> arrivals(DestinationSignDirectServiceModel.Model model, long arrival, String destination) {

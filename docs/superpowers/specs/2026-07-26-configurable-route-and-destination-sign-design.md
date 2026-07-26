@@ -143,8 +143,10 @@ The mode participates in the complete lookup chain. `RenderRouteSign` resolves t
 
 The new sign is wall-mounted and faces one horizontal direction. Its default footprint is three blocks wide by two blocks high. Brush controls allow:
 
-- width `2..16`; and
-- height `2..8`.
+- width `1..16`; and
+- height `1..8`.
+
+The footprint must contain at least two cells, so `1x2` and `2x1` are valid while `1x1` is rejected. Compact signs use the same dynamic page cadence as larger signs when all direct services do not fit at once.
 
 Width and height use numeric steppers in the configuration screen. They do not scale with viewport size.
 
@@ -251,9 +253,9 @@ A high-contrast destination panel occupies the leading side of the sign; the rem
 
 Each style defines deterministic minimum header, row, column, and font metrics. The configuration screen computes the number of rows that fit at the requested footprint without dropping below those metrics.
 
-At initial save or manual resize, the selected size must fit all current direct options on one page. An undersized configuration is rejected and the screen reports the minimum width and height.
+At initial save, manual resize, or later topology expansion, the sign preserves every direct option and automatically paginates when the selected footprint cannot show them at once. The configuration is rejected only when its physical bounds are invalid or its static atlas cannot be generated within protocol limits at every server-produced resolution `0..3`.
 
-If railway topology later adds options beyond the saved capacity, the sign preserves all options and automatically paginates. For a visible page, the language cycle length is the greatest pipe-segment count among its visible fields; modulo selection guarantees that every segment of every field appears during that cycle. The page advances only after that complete cycle. Pagination uses the existing MTR display cadence constants rather than a new per-frame timer. No route row is silently omitted.
+For a visible page, the language cycle length is the greatest pipe-segment count among its visible fields; modulo selection guarantees that every segment of every field appears during that cycle. The page advances only after that complete cycle. Pagination uses the existing MTR display cadence constants rather than a new per-frame timer. No route row is silently omitted.
 
 ## Pipe-Delimited Language Rotation
 
@@ -443,8 +445,8 @@ No existing Route Sign requires world migration. Existing signs have no override
 
 - golden images cover Arrival Order, Platform Groups, and Destination Flag at default `3 x 2`;
 - minimum, representative, and maximum footprint geometry has no clipping or overlap;
-- configuration rejects a footprint that cannot fit current rows at minimum metrics;
-- topology expansion produces deterministic pagination without dropping rows;
+- compact footprints and topology expansion produce deterministic pagination without dropping rows;
+- configuration rejects static atlases that exceed any server-generated resolution limit;
 - every static `|` segment is packed and selected at the expected language phase;
 - changing an arrival timestamp, displayed ETA value, next-train destination, sort order, page, or language phase leaves canonical key, fingerprint, PNG hash, and manifest unchanged;
 - toggling the configured `showEta` flag changes the key because it changes static column geometry;

@@ -73,9 +73,7 @@ public final class RouteAssetCanonicalKeyFactory {
 			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
 		final DestinationSignStyle checkedStyle = Objects.requireNonNull(style, "style");
 		if (sourceStationId == 0 || destinationStationId == 0
-				|| widthBlocks < Math.max(DestinationSignAtlasLayout.MIN_WIDTH_BLOCKS, checkedStyle.getMinimumWidthBlocks())
-				|| widthBlocks > DestinationSignAtlasLayout.MAX_WIDTH_BLOCKS
-				|| heightBlocks < DestinationSignAtlasLayout.MIN_HEIGHT_BLOCKS || heightBlocks > DestinationSignAtlasLayout.MAX_HEIGHT_BLOCKS) {
+				|| !DestinationSignAtlasLayout.isValidFootprint(checkedStyle, widthBlocks, heightBlocks)) {
 			throw new IllegalArgumentException("Invalid destination sign key");
 		}
 		return key(dimension, RouteAssetType.DESTINATION_SIGN_ATLAS, sourceStationId, resolution, "MULTI", Map.of(

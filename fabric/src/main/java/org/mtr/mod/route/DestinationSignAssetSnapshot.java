@@ -66,6 +66,7 @@ public final class DestinationSignAssetSnapshot {
 		if (mutableSprites.size() > RouteAssetProtocol.MAX_DESTINATION_SIGN_ATLAS_SPRITES) throw new IllegalArgumentException("Destination sign atlas has too many sprites");
 		sprites = Collections.unmodifiableList(mutableSprites);
 		atlasHeight = y;
+		validateRenderBounds();
 	}
 
 	public static DestinationSignAssetSnapshot create(DestinationSignTopology topology, long sourceStationId, long destinationStationId,
@@ -87,6 +88,17 @@ public final class DestinationSignAssetSnapshot {
 
 	private static int segmentCount(String value) {
 		return Math.max(1, value.split("\\|", -1).length);
+	}
+
+	private void validateRenderBounds() {
+		for (int resolution = 0; resolution <= 3; resolution++) {
+			final int width = DestinationSignAtlasLayout.scaledSize(atlasWidth, resolution);
+			final int height = DestinationSignAtlasLayout.scaledSize(atlasHeight, resolution);
+			if (width > RouteAssetProtocol.MAX_PNG_AXIS || height > RouteAssetProtocol.MAX_PNG_AXIS
+					|| (long) width * height > RouteAssetProtocol.MAX_DESTINATION_SIGN_ATLAS_PIXELS) {
+				throw new IllegalArgumentException("Destination sign atlas exceeds the render limits");
+			}
+		}
 	}
 
 	public long getSourceStationId() { return sourceStationId; }

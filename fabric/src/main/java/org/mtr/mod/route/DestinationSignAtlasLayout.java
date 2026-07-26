@@ -9,10 +9,11 @@ import java.util.Objects;
 public final class DestinationSignAtlasLayout {
 
 	public static final int LOGICAL_PIXELS_PER_BLOCK = 120;
-	public static final int MIN_WIDTH_BLOCKS = 2;
+	public static final int MIN_WIDTH_BLOCKS = 1;
 	public static final int MAX_WIDTH_BLOCKS = 16;
-	public static final int MIN_HEIGHT_BLOCKS = 2;
+	public static final int MIN_HEIGHT_BLOCKS = 1;
 	public static final int MAX_HEIGHT_BLOCKS = 8;
+	public static final int MIN_AREA_BLOCKS = 2;
 	public static final int HEADER_HEIGHT = 52;
 	public static final int CONTENT_INSET = 12;
 
@@ -62,10 +63,23 @@ public final class DestinationSignAtlasLayout {
 	}
 
 	private static void validateFootprint(DestinationSignStyle style, int widthBlocks, int heightBlocks) {
-		if (widthBlocks < Math.max(MIN_WIDTH_BLOCKS, style.getMinimumWidthBlocks()) || widthBlocks > MAX_WIDTH_BLOCKS
-				|| heightBlocks < MIN_HEIGHT_BLOCKS || heightBlocks > MAX_HEIGHT_BLOCKS) {
+		if (!isValidFootprint(style, widthBlocks, heightBlocks)) {
 			throw new IllegalArgumentException("Invalid destination sign footprint");
 		}
+	}
+
+	public static boolean isValidFootprint(DestinationSignStyle style, int widthBlocks, int heightBlocks) {
+		return style != null
+				&& widthBlocks >= Math.max(MIN_WIDTH_BLOCKS, style.getMinimumWidthBlocks()) && widthBlocks <= MAX_WIDTH_BLOCKS
+				&& heightBlocks >= MIN_HEIGHT_BLOCKS && heightBlocks <= MAX_HEIGHT_BLOCKS
+				&& (long) widthBlocks * heightBlocks >= MIN_AREA_BLOCKS;
+	}
+
+	public static int readableSourceX(int surfaceWidth, int displayX, int width) {
+		if (surfaceWidth <= 0 || displayX < 0 || width <= 0 || displayX + width > surfaceWidth) {
+			throw new IllegalArgumentException("Invalid destination sign source region");
+		}
+		return surfaceWidth - displayX - width;
 	}
 
 	public static String languageSegment(String value, int languagePhase) {
@@ -96,6 +110,7 @@ public final class DestinationSignAtlasLayout {
 	public static RowGeometry rowGeometry(DestinationSignStyle style, int surfaceWidth, int rowHeight, boolean showEta) {
 		final DestinationSignStyle checkedStyle = Objects.requireNonNull(style, "style");
 		if (surfaceWidth <= 0 || rowHeight <= 0) throw new IllegalArgumentException("Invalid destination sign row geometry");
+		if (surfaceWidth < LOGICAL_PIXELS_PER_BLOCK * 2) return compactRowGeometry(checkedStyle, surfaceWidth, rowHeight, showEta);
 		final int inset = Math.max(4, rowHeight / 8);
 		final int etaWidth = showEta ? Math.max(44, surfaceWidth / 5) : 0;
 		final int etaX = surfaceWidth - etaWidth;
@@ -136,6 +151,41 @@ public final class DestinationSignAtlasLayout {
 		return new RowGeometry(inset, routeX, Math.max(1, routeWidth), platformX, Math.max(1, platformWidth),
 				dynamicX, Math.max(1, dynamicRight - dynamicX), showEta ? etaX + inset : surfaceWidth,
 				showEta ? Math.max(1, etaWidth - inset * 2) : 0, etaX);
+	}
+
+	private static RowGeometry compactRowGeometry(DestinationSignStyle style, int surfaceWidth, int rowHeight, boolean showEta) {
+		final int inset = Math.max(4, rowHeight / 8);
+		final int etaBandWidth = showEta ? Math.max(24, surfaceWidth / 4) : 0;
+		final int etaDividerX = showEta ? surfaceWidth - etaBandWidth : surfaceWidth;
+		final int contentRight = etaDividerX - inset;
+		final int contentLeft = style == DestinationSignStyle.ARRIVAL_ORDER ? inset : inset * 2;
+		final int columnWidth = Math.max(3, contentRight - contentLeft - inset * 2);
+		final int routeWidth = Math.max(1, columnWidth * 32 / 100);
+		final int platformWidth = Math.max(1, columnWidth * 28 / 100);
+		final int destinationWidth = Math.max(1, columnWidth - routeWidth - platformWidth);
+		final int routeX;
+		final int platformX;
+		final int destinationX;
+		switch (style) {
+			case ARRIVAL_ORDER:
+				routeX = contentLeft;
+				destinationX = routeX + routeWidth + inset;
+				platformX = destinationX + destinationWidth + inset;
+				break;
+			case PLATFORM_GROUPS:
+				platformX = contentLeft;
+				routeX = platformX + platformWidth + inset;
+				destinationX = routeX + routeWidth + inset;
+				break;
+			case DESTINATION_FLAG:
+			default:
+				routeX = contentLeft;
+				platformX = routeX + routeWidth + inset;
+				destinationX = platformX + platformWidth + inset;
+				break;
+		}
+		return new RowGeometry(inset, routeX, routeWidth, platformX, platformWidth, destinationX, destinationWidth,
+				showEta ? etaDividerX + inset : surfaceWidth, showEta ? Math.max(1, etaBandWidth - inset * 2) : 0, etaDividerX);
 	}
 
 	private static int pipeSegmentCount(String value) {

@@ -1,9 +1,9 @@
 package org.mtr.mod.route;
 
 public enum DestinationSignStyle {
-	ARRIVAL_ORDER(2, 42),
-	PLATFORM_GROUPS(2, 48),
-	DESTINATION_FLAG(3, 56);
+	ARRIVAL_ORDER(1, 42),
+	PLATFORM_GROUPS(1, 48),
+	DESTINATION_FLAG(1, 56);
 
 	private final int minimumWidthBlocks;
 	private final int rowHeight;

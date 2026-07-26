@@ -103,8 +103,8 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 			graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_width", model.getWidth()), width / 2, SQUARE_SIZE * 5 + TEXT_PADDING, ARGB_WHITE);
 			graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_height", model.getHeight()), width / 2, SQUARE_SIZE * 6 + TEXT_PADDING, ARGB_WHITE);
 			if (model.getDestinationStationId() != 0 && !model.canSave()) {
-				final DestinationSignScreenModel.Footprint minimum = model.minimumFootprint(model.getStyle());
-				graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_minimum", minimum), width / 2, SQUARE_SIZE * 12, ARGB_WHITE);
+				model.findMinimumFootprint(model.getStyle()).ifPresent(minimum ->
+						graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_minimum", minimum), width / 2, SQUARE_SIZE * 12, ARGB_WHITE));
 			}
 		}
 		super.render(graphicsHolder, mouseX, mouseY, delta);
@@ -134,10 +134,10 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 		checkboxEta.active = available;
 		if (available) {
 			checkboxEta.setChecked(model.isShowEta());
-			buttonWidthMinus.active = model.getWidth() > Math.max(2, model.getStyle().getMinimumWidthBlocks());
-			buttonWidthPlus.active = model.getWidth() < 16;
-			buttonHeightMinus.active = model.getHeight() > 2;
-			buttonHeightPlus.active = model.getHeight() < 8;
+			buttonWidthMinus.active = model.canAdjustWidth(-1);
+			buttonWidthPlus.active = model.canAdjustWidth(1);
+			buttonHeightMinus.active = model.canAdjustHeight(-1);
+			buttonHeightPlus.active = model.canAdjustHeight(1);
 			buttonDone.active = model.canSave();
 		} else {
 			buttonWidthMinus.active = buttonWidthPlus.active = buttonHeightMinus.active = buttonHeightPlus.active = buttonDone.active = false;

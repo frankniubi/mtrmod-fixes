@@ -94,6 +94,10 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 		return -Objects.requireNonNull(facing, "facing").asRotation();
 	}
 
+	// Vertical sign faces use the same 180-degree UV convention as RenderRouteSign.
+	static float readableUvStart(float start, float end) { return end; }
+	static float readableUvEnd(float start, float end) { return start; }
+
 	public static Composition placeholder(RouteAssetKey key, int widthBlocks, int heightBlocks) {
 		return new Composition(key, widthBlocks, heightBlocks, true, 1, Collections.emptyList(), Collections.emptyList());
 	}
@@ -142,9 +146,10 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 					if (row.getState() == DestinationSignArrivalState.LEAVING || row.getState() == DestinationSignArrivalState.NO_SERVICE) {
 						final DestinationSignAssetSnapshot.SpriteKind kind = row.getState() == DestinationSignArrivalState.LEAVING
 								? DestinationSignAssetSnapshot.SpriteKind.LEAVING : DestinationSignAssetSnapshot.SpriteKind.NO_SERVICE;
+						final int sourceX = DestinationSignAtlasLayout.readableSourceX(layout.getSurfaceWidth(), geometry.getEtaX(), geometry.getEtaWidth());
 						atlasQuads.add(atlasRegionQuad(checkedPrepared.label(kind, phase), geometry.getEtaX(), rowY,
 								geometry.getEtaWidth(), snapshot.getStyle().getRowHeight(),
-								geometry.getEtaX(), geometry.getEtaWidth(), layout.getSurfaceWidth(), snapshot.getAtlasHeight(), checkedPrepared.getStaticKey().getVariant().getResolution()));
+								sourceX, geometry.getEtaWidth(), layout.getSurfaceWidth(), snapshot.getAtlasHeight(), checkedPrepared.getStaticKey().getVariant().getResolution()));
 					} else {
 						addEtaPieces(dynamicQuads, eta(row, serverNowMillis, phase), geometry, rowY, snapshot.getStyle().getRowHeight());
 					}
@@ -180,7 +185,9 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 		final float scale = 1F / DestinationSignAtlasLayout.LOGICAL_PIXELS_PER_BLOCK;
 		final float bottom = composition.heightBlocks - (quad.y + quad.height) * scale;
 		IDrawing.drawTexture(graphicsHolder, quad.x * scale, bottom, -SMALL_OFFSET, (quad.x + quad.width) * scale,
-				bottom + quad.height * scale, -SMALL_OFFSET, quad.u1, quad.v1, quad.u2, quad.v2, facing.getOpposite(), -1, light);
+				bottom + quad.height * scale, -SMALL_OFFSET,
+				readableUvStart(quad.u1, quad.u2), readableUvStart(quad.v1, quad.v2),
+				readableUvEnd(quad.u1, quad.u2), readableUvEnd(quad.v1, quad.v2), facing.getOpposite(), -1, light);
 	}
 
 	private static void drawDynamicQuad(GraphicsHolder graphicsHolder, Composition composition, DynamicQuad quad, Direction facing, int light) {
@@ -201,7 +208,7 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 		}
 		final float bottom = composition.heightBlocks - (quad.y + quad.height) * scale + (regionHeight - drawHeight) / 2;
 		IDrawing.drawTexture(graphicsHolder, x, bottom, -SMALL_OFFSET * 2, x + drawWidth, bottom + drawHeight, -SMALL_OFFSET * 2,
-				0, 0, 1, 1, facing.getOpposite(), -1, light);
+				readableUvStart(0, 1), readableUvStart(0, 1), readableUvEnd(0, 1), readableUvEnd(0, 1), facing.getOpposite(), -1, light);
 	}
 
 	private static AtlasQuad atlasQuad(DestinationSignAssetSnapshot.Sprite sprite, int x, int y, int width, int height, int atlasHeight, int resolution) {
@@ -312,7 +319,8 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 				List<AtlasQuad> atlasQuads, List<DynamicQuad> dynamicQuads) {
 			this.staticKey = Objects.requireNonNull(staticKey, "staticKey");
 			if (widthBlocks < DestinationSignAtlasLayout.MIN_WIDTH_BLOCKS || widthBlocks > DestinationSignAtlasLayout.MAX_WIDTH_BLOCKS
-					|| heightBlocks < DestinationSignAtlasLayout.MIN_HEIGHT_BLOCKS || heightBlocks > DestinationSignAtlasLayout.MAX_HEIGHT_BLOCKS) throw new IllegalArgumentException("Invalid destination sign composition bounds");
+					|| heightBlocks < DestinationSignAtlasLayout.MIN_HEIGHT_BLOCKS || heightBlocks > DestinationSignAtlasLayout.MAX_HEIGHT_BLOCKS
+					|| (long) widthBlocks * heightBlocks < DestinationSignAtlasLayout.MIN_AREA_BLOCKS) throw new IllegalArgumentException("Invalid destination sign composition bounds");
 			this.widthBlocks = widthBlocks;
 			this.heightBlocks = heightBlocks;
 			this.neutralPlaceholder = neutralPlaceholder;
