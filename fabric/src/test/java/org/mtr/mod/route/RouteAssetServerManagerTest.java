@@ -7,7 +7,10 @@ import org.mtr.core.data.ClientData;
 import org.mtr.core.operation.ListDataResponse;
 import org.mtr.core.tool.Utilities;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,25 +35,54 @@ public final class RouteAssetServerManagerTest {
 		})) {
 			manager.submitSnapshot(snapshot("A"), "initial");
 			Assertions.assertTrue(manager.awaitIdle(10_000));
-			Assertions.assertEquals(32, renderCalls.get());
-			Assertions.assertEquals(32, manager.getMetrics().getLastSummary().getAdd());
+			Assertions.assertEquals(36, renderCalls.get());
+			Assertions.assertEquals(36, manager.getMetrics().getLastSummary().getAdd());
 			Assertions.assertEquals(0, manager.getMetrics().getLastSummary().getModify());
-			final String firstRevision = manager.getRepository().loadHead().getRevision();
+			final RouteAssetRepository.RouteAssetHead firstHead = manager.getRepository().loadHead();
+			final String firstRevision = firstHead.getRevision();
+			final long firstDiffCount = diffCount(manager);
+			final RouteAssetManifest firstManifest = manager.getRepository().loadManifest(firstRevision);
+			final Set<Integer> genericResolutions = new HashSet<>();
+			final Set<Integer> routeSignResolutions = new HashSet<>();
+			for (final RouteAssetKey key : firstManifest.getEntries().keySet()) {
+				if (key.getType() != RouteAssetType.ROUTE_MAP) continue;
+				final String purpose = key.getVariant().getParameters().get("p");
+				if (RouteMapPurpose.GENERIC.name().equals(purpose)) genericResolutions.add(key.getVariant().getResolution());
+				if (RouteMapPurpose.ROUTE_SIGN.name().equals(purpose)) routeSignResolutions.add(key.getVariant().getResolution());
+			}
+			Assertions.assertEquals(Set.of(0, 1, 2, 3), genericResolutions);
+			Assertions.assertEquals(Set.of(0, 1, 2, 3), routeSignResolutions);
 
 			manager.submitSnapshot(snapshot("A"), "unchanged");
 			Assertions.assertTrue(manager.awaitIdle(10_000));
-			Assertions.assertEquals(32, renderCalls.get());
-			Assertions.assertEquals(firstRevision, manager.getRepository().loadHead().getRevision());
+			Assertions.assertEquals(36, renderCalls.get());
+			final RouteAssetRepository.RouteAssetHead unchangedHead = manager.getRepository().loadHead();
+			Assertions.assertEquals(firstRevision, unchangedHead.getRevision());
+			Assertions.assertEquals(firstHead.getDiffDocumentHash(), unchangedHead.getDiffDocumentHash());
+			Assertions.assertEquals(firstDiffCount, diffCount(manager));
 
 			constantPixels.set(true);
 			manager.submitSnapshot(snapshot("B"), "first-constant");
 			Assertions.assertTrue(manager.awaitIdle(10_000));
 			Assertions.assertEquals(0, manager.getMetrics().getLastSummary().getAdd());
-			Assertions.assertEquals(32, manager.getMetrics().getLastSummary().getModify());
+			Assertions.assertEquals(16, manager.getMetrics().getLastSummary().getModify());
 			final String constantRevision = manager.getRepository().loadHead().getRevision();
 			manager.submitSnapshot(snapshot("C"), "same-pixels");
 			Assertions.assertTrue(manager.awaitIdle(10_000));
 			Assertions.assertEquals(constantRevision, manager.getRepository().loadHead().getRevision());
+		}
+	}
+
+	@Test
+	public void oldClientRendererFallsBackAgainstTheCurrentServer() throws Exception {
+		try (final RouteAssetServerManager manager = manager(1, (key, snapshot) -> image(1))) {
+			manager.submitSnapshot(snapshot("Compatibility"), "compatibility");
+			Assertions.assertTrue(manager.awaitIdle(10_000));
+			final RouteAssetHello current = hello(RouteAssetProtocol.RENDERER_VERSION);
+			final RouteAssetHello old = hello(RouteAssetProtocol.RENDERER_VERSION - 1);
+
+			Assertions.assertNotEquals(RouteAssetNegotiation.Mode.FALLBACK, manager.negotiate(current).getMode());
+			Assertions.assertEquals(RouteAssetNegotiation.Mode.FALLBACK, manager.negotiate(old).getMode());
 		}
 	}
 
@@ -122,7 +154,18 @@ public final class RouteAssetServerManagerTest {
 	}
 
 	private RouteAssetServerManager manager(int threads, RouteAssetServerManager.RenderFunction renderer) throws Exception {
-		return new RouteAssetServerManager(new RouteAssetRepository(root.resolve("manager-" + System.nanoTime()), 1, 32), new RouteAssetDataMirror(), new RouteAssetDependencyCatalog(), renderer, threads, "f".repeat(64), new RouteAssetMetrics());
+		return new RouteAssetServerManager(new RouteAssetRepository(root.resolve("manager-" + System.nanoTime()), RouteAssetProtocol.RENDERER_VERSION, 32), new RouteAssetDataMirror(), new RouteAssetDependencyCatalog(), renderer, threads, "f".repeat(64), new RouteAssetMetrics());
+	}
+
+	private static RouteAssetHello hello(int rendererVersion) {
+		return new RouteAssetHello(RouteAssetProtocol.PROTOCOL_VERSION, rendererVersion, 2, "NORMAL", "f".repeat(64), "", true, false, RouteAssetProtocol.MAX_REVISION_DOWNLOAD_BYTES, 1);
+	}
+
+	private static long diffCount(RouteAssetServerManager manager) throws IOException {
+		final Path diffs = manager.getRepository().getCas().getOutputRoot().resolve("v" + RouteAssetProtocol.RENDERER_VERSION).resolve("repository").resolve("diffs");
+		try (final java.util.stream.Stream<Path> paths = Files.list(diffs)) {
+			return paths.count();
+		}
 	}
 
 	private static RouteAssetDataMirror.Snapshot snapshot(String routeName) {

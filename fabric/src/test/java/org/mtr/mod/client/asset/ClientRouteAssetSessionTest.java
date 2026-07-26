@@ -356,6 +356,34 @@ public final class ClientRouteAssetSessionTest {
 	}
 
 	@Test
+	public void currentClientRejectsAnOldServerRendererBeforeRequestingItsDocument() throws Exception {
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		final List<org.mtr.mod.route.RouteAssetHello> hellos = new ArrayList<>();
+		final List<ClientRouteAssetManager.DocumentRequest> requests = new ArrayList<>();
+		final ClientRouteAssetManager manager = manager(cache, new AtomicLong(), 2, FINGERPRINT, hellos, requests);
+		manager.onJoin("old-renderer.example.com");
+		final int oldServerVersion = RouteAssetProtocol.RENDERER_VERSION - 1;
+		final String documentHash = "c".repeat(64);
+		manager.handleManifest(new PacketRouteAssetManifest.ManifestPayload(
+				RouteAssetNegotiation.Mode.SNAPSHOT,
+				"835e344d-8a4a-4d60-8bfe-438d559286b6",
+				8888,
+				"",
+				"b".repeat(64),
+				documentHash,
+				128,
+				"v" + oldServerVersion + "/" + documentHash.substring(0, 2) + "/" + documentHash + ".json",
+				oldServerVersion,
+				FINGERPRINT,
+				"",
+				hellos.get(0).getRequestNonce()
+		));
+
+		Assertions.assertEquals(ClientRouteAssetSession.State.LOCAL_FALLBACK, manager.getState());
+		Assertions.assertEquals(0, requests.size());
+	}
+
+	@Test
 	public void onlyNewlyIntroducedDocumentHashAuthorizesWork() throws Exception {
 		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
 		final AtomicLong clock = new AtomicLong();
@@ -461,7 +489,7 @@ public final class ClientRouteAssetSessionTest {
 				"b".repeat(64),
 				documentHash,
 				128,
-				"v1/ff/" + documentHash + ".json",
+				"v" + RouteAssetProtocol.RENDERER_VERSION + "/ff/" + documentHash + ".json",
 				RouteAssetProtocol.RENDERER_VERSION,
 				FINGERPRINT,
 				"",
@@ -895,7 +923,7 @@ public final class ClientRouteAssetSessionTest {
 				revision,
 				documentHash,
 				documentHash.isEmpty() ? 0 : 128,
-				documentHash.isEmpty() ? "" : "v1/" + documentHash.substring(0, 2) + "/" + documentHash + ".json",
+				documentHash.isEmpty() ? "" : "v" + RouteAssetProtocol.RENDERER_VERSION + "/" + documentHash.substring(0, 2) + "/" + documentHash + ".json",
 				RouteAssetProtocol.RENDERER_VERSION,
 				fingerprint,
 				"",

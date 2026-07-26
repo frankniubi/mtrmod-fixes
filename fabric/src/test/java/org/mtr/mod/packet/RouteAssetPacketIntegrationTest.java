@@ -158,7 +158,7 @@ public final class RouteAssetPacketIntegrationTest {
 				return CompletableFuture.completedFuture(png);
 			}, 1);
 			final ClientRouteAssetUrlPolicy policy = new ClientRouteAssetUrlPolicy("127.0.0.1:25565", 8888, "");
-			final ClientRouteAssetDownloader.DownloadRequest request = new ClientRouteAssetDownloader.DownloadRequest(5, policy, policy.resolve("v1/" + hash.substring(0, 2) + '/' + hash + ".png"), hash, png.length, RouteAssetProtocol.MAX_PNG_BYTES, () -> true);
+			final ClientRouteAssetDownloader.DownloadRequest request = new ClientRouteAssetDownloader.DownloadRequest(5, policy, policy.resolve("v" + RouteAssetProtocol.RENDERER_VERSION + "/" + hash.substring(0, 2) + '/' + hash + ".png"), hash, png.length, RouteAssetProtocol.MAX_PNG_BYTES, () -> true);
 			Assertions.assertEquals(cache.pathForPng(hash), downloader.downloadPng(request).get(5, TimeUnit.SECONDS));
 			Assertions.assertTrue(cache.findPng(hash).isPresent());
 			Assertions.assertEquals(RouteAssetProtocol.MAX_HTTP_RETRIES + 1, httpAttempts.get());

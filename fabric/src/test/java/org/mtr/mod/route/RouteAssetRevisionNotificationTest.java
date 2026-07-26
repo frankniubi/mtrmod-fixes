@@ -93,7 +93,7 @@ public final class RouteAssetRevisionNotificationTest {
 	}
 
 	private RouteAssetServerManager manager(RouteAssetDataMirror mirror, RouteAssetServerManager.RefreshNotificationSender notificationSender, RouteAssetServerManager.RenderFunction renderer) throws Exception {
-		return new RouteAssetServerManager(new RouteAssetRepository(root.resolve("manager-" + System.nanoTime()), 1, 32), mirror, new RouteAssetDependencyCatalog(), renderer, 1, "f".repeat(64), new RouteAssetMetrics(), notificationSender);
+		return new RouteAssetServerManager(new RouteAssetRepository(root.resolve("manager-" + System.nanoTime()), RouteAssetProtocol.RENDERER_VERSION, 32), mirror, new RouteAssetDependencyCatalog(), renderer, 1, "f".repeat(64), new RouteAssetMetrics(), notificationSender);
 	}
 
 	private static RouteAssetHello hello(String language, String cachedRevision, long nonce) {
