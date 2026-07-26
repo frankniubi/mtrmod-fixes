@@ -164,6 +164,12 @@ public final class MinecraftClientData extends ClientData {
 		return localRoute == null ? interchangeData.routeIdMap.get(routeId) : localRoute;
 	}
 
+	@Nullable
+	public static Platform getInterchangePlatform(long platformId) {
+		final Platform localPlatform = instance.platformIdMap.get(platformId);
+		return localPlatform == null ? interchangeData.platformIdMap.get(platformId) : localPlatform;
+	}
+
 	public static void reset() {
 		DefaultRailMeshCache.clear();
 		MinecraftClientData.instance = new MinecraftClientData();

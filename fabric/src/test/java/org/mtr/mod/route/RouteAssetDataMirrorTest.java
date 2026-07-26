@@ -64,8 +64,10 @@ public final class RouteAssetDataMirrorTest {
 		secondStation.setCorners(new Position(10, 0, 0), new Position(15, 5, 5));
 		Platform first;
 		do first = new Platform(new Position(0, 0, 0), new Position(1, 0, 0), TransportMode.TRAIN, initialData); while (first.getId() < 0);
+		first.setName("U1");
 		Platform second;
 		do second = new Platform(new Position(10, 0, 0), new Position(11, 0, 0), TransportMode.TRAIN, initialData); while (second.getId() < 0);
+		second.setName("R1");
 		firstStation.savedRails.add(first);
 		secondStation.savedRails.add(second);
 		initialData.stations.add(firstStation);
@@ -93,6 +95,11 @@ public final class RouteAssetDataMirrorTest {
 		Assertions.assertEquals(1, dimension.getPlatforms().get(first.getId()).getRoutes().size());
 		Assertions.assertEquals(route.getId(), dimension.getPlatforms().get(first.getId()).getRoutes().get(0).getId());
 		Assertions.assertEquals(RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED, dimension.getPlatforms().get(first.getId()).getRoutes().get(0).getRouteKind());
+		Assertions.assertEquals(firstStation.getId(), dimension.getPlatforms().get(first.getId()).getOwningStationId());
+		final RouteAssetRenderSnapshot.Station next = dimension.getPlatforms().get(first.getId()).getRoutes().get(0).getStations().get(1);
+		Assertions.assertEquals("R1", next.getPlatformDisplayName());
+		Assertions.assertEquals(secondStation.getId(), next.getOwningStationId());
+		Assertions.assertEquals(next.getStationId(), next.getOwningStationId());
 	}
 
 	@Test

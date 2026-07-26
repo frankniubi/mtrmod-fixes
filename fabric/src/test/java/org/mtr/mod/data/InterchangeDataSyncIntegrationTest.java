@@ -25,8 +25,18 @@ public final class InterchangeDataSyncIntegrationTest {
 		Assertions.assertTrue(initSource.contains("new PacketRequestInterchangeData()"));
 		Assertions.assertTrue(requestSource.contains("OperationProcessor.LIST_DATA"));
 		Assertions.assertTrue(requestSource.contains("MinecraftClientData.getInterchangeData()"));
+		Assertions.assertTrue(readMainSource("client", "MinecraftClientData.java").contains("getInterchangePlatform(long platformId)"));
 		Assertions.assertTrue(updateSource.contains("MinecraftClientData.getInterchangeData()"));
 		Assertions.assertTrue(deleteSource.contains("MinecraftClientData.getInterchangeData()"));
+		assertWriteBeforeInvalidation(requestSource, "new ListDataResponse(jsonReader, MinecraftClientData.getInterchangeData()).write();");
+		assertWriteBeforeInvalidation(updateSource, "new UpdateDataResponse(jsonReader, MinecraftClientData.getInterchangeData()).write();");
+		assertWriteBeforeInvalidation(deleteSource, "deleteDataResponse.write(MinecraftClientData.getInterchangeData());");
+	}
+
+	private static void assertWriteBeforeInvalidation(String source, String writeStatement) {
+		final int write = source.indexOf(writeStatement);
+		final int invalidate = source.indexOf("DynamicTextureCache.instance.onRouteDataChanged();", write);
+		Assertions.assertTrue(write >= 0 && invalidate > write);
 	}
 
 	private static String readMainSource(String... pathParts) throws Exception {

@@ -11,6 +11,9 @@ import java.util.Optional;
 public final class RouteAssetRenderSnapshot {
 
 	private final String platformDisplayName;
+	private final long selectedPlatformId;
+	private final long selectedStationId;
+	private final RouteMapPurpose routeMapPurpose;
 	private final int routeColor;
 	private final String routeName;
 	private final String destination;
@@ -31,6 +34,9 @@ public final class RouteAssetRenderSnapshot {
 
 	private RouteAssetRenderSnapshot(Builder builder) {
 		platformDisplayName = builder.platformDisplayName;
+		selectedPlatformId = builder.selectedPlatformId;
+		selectedStationId = builder.selectedStationId;
+		routeMapPurpose = builder.routeMapPurpose;
 		routeColor = builder.routeColor & 0xFFFFFF;
 		routeName = builder.routeName;
 		destination = builder.destination;
@@ -56,6 +62,9 @@ public final class RouteAssetRenderSnapshot {
 	public static Builder builder() { return new Builder(); }
 
 	public String getPlatformDisplayName() { return platformDisplayName; }
+	public long getSelectedPlatformId() { return selectedPlatformId; }
+	public long getSelectedStationId() { return selectedStationId; }
+	public RouteMapPurpose getRouteMapPurpose() { return routeMapPurpose; }
 	public int getRouteColor() { return routeColor; }
 	public String getRouteName() { return routeName; }
 	public String getDestination() { return destination; }
@@ -96,6 +105,9 @@ public final class RouteAssetRenderSnapshot {
 
 	public static final class Builder {
 		private String platformDisplayName = "";
+		private long selectedPlatformId;
+		private long selectedStationId;
+		private RouteMapPurpose routeMapPurpose = RouteMapPurpose.GENERIC;
 		private int routeColor;
 		private String routeName = "";
 		private String destination = "";
@@ -115,6 +127,9 @@ public final class RouteAssetRenderSnapshot {
 		private List<Route> routes = Collections.emptyList();
 
 		public Builder platformDisplayName(String value) { platformDisplayName = Objects.requireNonNull(value); return this; }
+		public Builder selectedPlatformId(long value) { selectedPlatformId = value; return this; }
+		public Builder selectedStationId(long value) { selectedStationId = value; return this; }
+		public Builder routeMapPurpose(RouteMapPurpose value) { routeMapPurpose = Objects.requireNonNull(value); return this; }
 		public Builder routeColor(int value) { routeColor = value; return this; }
 		public Builder routeName(String value) { routeName = Objects.requireNonNull(value); return this; }
 		public Builder destination(String value) { destination = Objects.requireNonNull(value); return this; }
@@ -162,7 +177,9 @@ public final class RouteAssetRenderSnapshot {
 
 	public static final class Station {
 		private final long platformId;
+		private final String platformDisplayName;
 		private final long stationId;
+		private final long owningStationId;
 		private final String name;
 		private final String destination;
 		private final Interchange interchange;
@@ -170,17 +187,23 @@ public final class RouteAssetRenderSnapshot {
 		private final boolean current;
 
 		public Station(long platformId, long stationId, String name, String destination, Interchange interchange) {
-			this(platformId, stationId, name, destination, interchange, false, false);
+			this(platformId, "", stationId, 0, name, destination, interchange, false, false);
+		}
+
+		public Station(long platformId, String platformDisplayName, long stationId, long owningStationId, String name, String destination, Interchange interchange) {
+			this(platformId, platformDisplayName, stationId, owningStationId, name, destination, interchange, false, false);
 		}
 
 		/** Compatibility constructor for persisted tests and pre-offload callers. */
 		public Station(long id, String name, boolean passed, boolean current, boolean railwayInterchange, boolean airportInterchange) {
-			this(id, id, name, "", new Interchange(Collections.emptyList(), Collections.emptyList(), railwayInterchange, airportInterchange), passed, current);
+			this(id, "", id, 0, name, "", new Interchange(Collections.emptyList(), Collections.emptyList(), railwayInterchange, airportInterchange), passed, current);
 		}
 
-		private Station(long platformId, long stationId, String name, String destination, Interchange interchange, boolean passed, boolean current) {
+		private Station(long platformId, String platformDisplayName, long stationId, long owningStationId, String name, String destination, Interchange interchange, boolean passed, boolean current) {
 			this.platformId = platformId;
+			this.platformDisplayName = Objects.requireNonNull(platformDisplayName, "platformDisplayName");
 			this.stationId = stationId;
+			this.owningStationId = owningStationId;
 			this.name = Objects.requireNonNull(name, "name");
 			this.destination = Objects.requireNonNull(destination, "destination");
 			this.interchange = Objects.requireNonNull(interchange, "interchange");
@@ -189,8 +212,10 @@ public final class RouteAssetRenderSnapshot {
 		}
 
 		public long getPlatformId() { return platformId; }
+		public String getPlatformDisplayName() { return platformDisplayName; }
 		public long getId() { return stationId; }
 		public long getStationId() { return stationId; }
+		public long getOwningStationId() { return owningStationId; }
 		public String getName() { return name; }
 		public String getDestination() { return destination; }
 		public Interchange getInterchange() { return interchange; }

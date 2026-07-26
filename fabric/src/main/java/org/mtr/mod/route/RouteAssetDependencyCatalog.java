@@ -66,6 +66,7 @@ public final class RouteAssetDependencyCatalog {
 				final RouteAssetCanonicalKeyFactory.RouteMapParameters mapParameters = RouteAssetCanonicalKeyFactory.decodeRouteMap(key);
 				if (platform == null || mapParameters == null) return Optional.empty();
 				snapshot = buildSnapshotBuilder(platform, null, mapParameters.vertical, mapParameters.aspectRatio)
+						.routeMapPurpose(mapParameters.purpose)
 						.flip(mapParameters.flip)
 						.transparentColor(mapParameters.transparentWhite ? 0xFFFFFFFF : 0)
 						.build();
@@ -193,6 +194,8 @@ public final class RouteAssetDependencyCatalog {
 		final String destination = primaryRoute == null ? platform.getDisplayName() : primaryRoute.getCurrentStation().getDestination();
 		return RouteAssetRenderSnapshot.builder()
 				.platformDisplayName(platform.getDisplayName())
+				.selectedPlatformId(platform.getId())
+				.selectedStationId(platform.getOwningStationId())
 				.routeColor(routeColor)
 				.routeName(routeName)
 				.destination(destination)

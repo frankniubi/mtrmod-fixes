@@ -32,6 +32,8 @@ public final class RouteAssetClientSnapshotAdapterTest {
 		final Station secondStation = station(interchangeData, "Second", 10);
 		final Platform firstPlatform = platform(interchangeData, firstStation, 0);
 		final Platform secondPlatform = platform(interchangeData, secondStation, 10);
+		firstPlatform.setName("U1");
+		secondPlatform.setName("R1");
 		interchangeData.stations.add(firstStation);
 		interchangeData.stations.add(secondStation);
 		interchangeData.platforms.add(firstPlatform);
@@ -56,6 +58,11 @@ public final class RouteAssetClientSnapshotAdapterTest {
 
 		Assertions.assertEquals(1, snapshot.getRoutes().size());
 		Assertions.assertEquals(RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED, snapshot.getRoutes().get(0).getRouteKind());
+		Assertions.assertEquals(firstPlatform.getId(), snapshot.getSelectedPlatformId());
+		Assertions.assertEquals(firstStation.getId(), snapshot.getSelectedStationId());
+		final RouteAssetRenderSnapshot.Station next = snapshot.getRoutes().get(0).getStations().get(1);
+		Assertions.assertEquals("R1", next.getPlatformDisplayName());
+		Assertions.assertEquals(secondStation.getId(), next.getOwningStationId());
 	}
 
 	private static Station station(ClientData data, String name, int x) {
