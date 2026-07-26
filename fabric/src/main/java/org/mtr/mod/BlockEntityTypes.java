@@ -15,6 +15,7 @@ public final class BlockEntityTypes {
 		ARRIVAL_PROJECTOR_1_SMALL = Init.REGISTRY.registerBlockEntityType(new Identifier(Init.MOD_ID, "arrival_projector_1_small"), BlockArrivalProjector1Small.BlockEntity::new, Blocks.ARRIVAL_PROJECTOR_1_SMALL::get);
 		CLOCK = Init.REGISTRY.registerBlockEntityType(new Identifier(Init.MOD_ID, "clock"), BlockClock.BlockEntity::new, Blocks.CLOCK::get);
 		DRIVER_KEY_DISPENSER = Init.REGISTRY.registerBlockEntityType(new Identifier(Init.MOD_ID, "driver_key_dispenser"), BlockDriverKeyDispenser.BlockEntity::new, Blocks.DRIVER_KEY_DISPENSER::get);
+		DESTINATION_STATION_SIGN = Init.REGISTRY.registerBlockEntityType(new Identifier(Init.MOD_ID, "destination_station_sign"), BlockDestinationSign.BlockEntity::new, Blocks.DESTINATION_STATION_SIGN::get);
 		LIFT_BUTTONS_1 = Init.REGISTRY.registerBlockEntityType(new Identifier(Init.MOD_ID, "lift_buttons_1"), BlockLiftButtons.BlockEntity::new, Blocks.LIFT_BUTTONS_1::get);
 		LIFT_DOOR_EVEN_1 = Init.REGISTRY.registerBlockEntityType(new Identifier(Init.MOD_ID, "lift_door_1"), BlockLiftDoor.BlockEntity::new, Blocks.LIFT_DOOR_EVEN_1::get);
 		LIFT_DOOR_ODD_1 = Init.REGISTRY.registerBlockEntityType(new Identifier(Init.MOD_ID, "lift_door_odd_1"), BlockLiftDoorOdd.BlockEntity::new, Blocks.LIFT_DOOR_ODD_1::get);
@@ -81,6 +82,7 @@ public final class BlockEntityTypes {
 	public static final BlockEntityTypeRegistryObject<BlockArrivalProjector1Small.BlockEntity> ARRIVAL_PROJECTOR_1_SMALL;
 	public static final BlockEntityTypeRegistryObject<BlockClock.BlockEntity> CLOCK;
 	public static final BlockEntityTypeRegistryObject<BlockDriverKeyDispenser.BlockEntity> DRIVER_KEY_DISPENSER;
+	public static final BlockEntityTypeRegistryObject<BlockDestinationSign.BlockEntity> DESTINATION_STATION_SIGN;
 	public static final BlockEntityTypeRegistryObject<BlockLiftButtons.BlockEntity> LIFT_BUTTONS_1;
 	public static final BlockEntityTypeRegistryObject<BlockLiftDoor.BlockEntity> LIFT_DOOR_EVEN_1;
 	public static final BlockEntityTypeRegistryObject<BlockLiftDoorOdd.BlockEntity> LIFT_DOOR_ODD_1;
