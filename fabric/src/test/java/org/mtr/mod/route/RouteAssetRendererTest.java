@@ -92,6 +92,32 @@ public final class RouteAssetRendererTest {
 	}
 
 	@Test
+	public void modesSelectRailwayOrNormalWithoutChangingGenericTopology() throws Exception {
+		final RouteAssetRenderSnapshot metro = shortCorridorSnapshot(RouteAssetRenderSnapshot.RouteKind.METRO, true, false, 37F / 22, false);
+		final RouteAssetImage generic = renderMap(metro, RouteMapPurpose.GENERIC, true, false, 37F / 22, false, 0, "NORMAL");
+		Assertions.assertArrayEquals(generic.toPng(), renderRouteSign(metro, RouteSignStyleMode.AUTO, text).toPng());
+		Assertions.assertArrayEquals(generic.toPng(), renderRouteSign(metro, RouteSignStyleMode.NORMAL, text).toPng());
+		Assertions.assertFalse(java.util.Arrays.equals(generic.toPng(), renderRouteSign(metro, RouteSignStyleMode.RAILWAY, text).toPng()));
+	}
+
+	@Test
+	public void mastheadRasterizesPlatformButNotCurrentStationOrHiddenPlatforms() {
+		final List<String> rasterized = new ArrayList<>();
+		final RouteAssetTextRasterizer recording = (value, maxWidth, maxHeight, cjkSize, latinSize, padding, alignment, language) -> {
+			rasterized.add(value + ':' + cjkSize + ':' + latinSize);
+			return new RouteAssetTextRasterizer.RasterizedText(new byte[]{(byte) 0xFF}, 1, 1);
+		};
+		renderRouteSign(NorthTreetrunkRouteSignFixtures.u1Snapshot(), RouteSignStyleMode.RAILWAY, recording, 1);
+		Assertions.assertTrue(rasterized.contains("U1:32:32"));
+		Assertions.assertTrue(rasterized.contains("IG5:11:8"));
+		Assertions.assertTrue(rasterized.contains("\u6843\u6E90\u5C71\u56ED|Doyue Sai Plain:18:10"));
+		Assertions.assertTrue(rasterized.contains("\u98DE\u884C\u6E38\u573A|Fee'in Ground:14:10"));
+		Assertions.assertTrue(rasterized.stream().noneMatch(value -> value.startsWith("\u6811\u56ED\u5317|North Treetrunk:")));
+		Assertions.assertTrue(rasterized.stream().noneMatch(value -> value.startsWith("R1:")));
+		Assertions.assertTrue(rasterized.stream().noneMatch(value -> value.startsWith("XR1:")));
+	}
+
+	@Test
 	public void genericDoorAndBrushMapsStillRasterizeEveryStation() {
 		final List<String> rasterized = new ArrayList<>();
 		final RouteAssetTextRasterizer recordingText = (value, maxWidth, maxHeight, cjkSize, latinSize, padding, alignment, language) -> {
@@ -185,6 +211,19 @@ public final class RouteAssetRendererTest {
 
 	private static RouteAssetImage renderRouteSign(RouteAssetRenderSnapshot snapshot, int resolution, String language) {
 		return renderMap(snapshot, RouteMapPurpose.ROUTE_SIGN, true, false, 37F / 22, false, resolution, language);
+	}
+
+	private static RouteAssetImage renderRouteSign(RouteAssetRenderSnapshot snapshot, RouteSignStyleMode mode,
+			RouteAssetTextRasterizer rasterizer) {
+		return renderRouteSign(snapshot, mode, rasterizer, 0);
+	}
+
+	private static RouteAssetImage renderRouteSign(RouteAssetRenderSnapshot snapshot, RouteSignStyleMode mode,
+			RouteAssetTextRasterizer rasterizer, int resolution) {
+		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld",
+				snapshot.getSelectedPlatformId(), resolution, "NORMAL", RouteMapPurpose.ROUTE_SIGN, mode,
+				true, false, 37F / 22, false);
+		return renderer.render(key, snapshot, rasterizer, sources);
 	}
 
 	private static RouteAssetImage renderMap(RouteAssetRenderSnapshot snapshot, RouteMapPurpose purpose, boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite, int resolution, String language) {

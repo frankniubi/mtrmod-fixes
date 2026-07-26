@@ -309,10 +309,13 @@ public final class RouteSignCorridorLayout {
 						? finalBaseY + (ROUTE_ROW_BASE_HEIGHT - measured.size.height) / 2
 						: y + measured.line * preset.lineHeight + (preset.lineHeight - measured.size.height) / 2;
 				final int iconX = measured.x + measured.size.textWidth + (measured.size.iconCount == 0 ? 0 : ICON_GAP);
+				final int iconY = finalLine
+						? finalBaseY + (ROUTE_ROW_BASE_HEIGHT - TOKEN_ICON_SIZE) / 2
+						: y + measured.line * preset.lineHeight + (preset.lineHeight - TOKEN_ICON_SIZE) / 2;
 				tokens.add(new DisplayToken(measured.seed.kind, measured.seed.displayText, measured.seed.semanticLabel,
 						List.of(measured.seed.stop), measured.seed.platformLabel, measured.x, lineY,
 						measured.size.textWidth, measured.size.height, measured.size.width,
-						measured.size.iconCount, iconX, measured.size.iconsWidth, measured.line));
+						measured.size.iconCount, iconX, iconY, measured.size.iconsWidth, measured.line));
 			}
 			return new RouteRowBox(row, 0, y, LOGICAL_WIDTH, height, ruleX, ROUTE_RULE_WIDTH,
 					routeBadgeX, routeBadgeWidth, 0, 0, badgeY, textX, textWidth, wrapped.lineCount, tokens);
@@ -564,11 +567,11 @@ public final class RouteSignCorridorLayout {
 		private final Kind kind;
 		private final String displayText, semanticLabel, platformLabel;
 		private final List<RouteSignCorridorModel.StopOccurrence> sourceStops;
-		private final int x, y, width, height, unitWidth, iconCount, iconX, iconsWidth, line;
+		private final int x, y, width, height, unitWidth, iconCount, iconX, iconY, iconsWidth, line;
 
 		private DisplayToken(Kind kind, String displayText, String semanticLabel,
 				List<RouteSignCorridorModel.StopOccurrence> sourceStops, String platformLabel,
-				int x, int y, int width, int height, int unitWidth, int iconCount, int iconX, int iconsWidth, int line) {
+				int x, int y, int width, int height, int unitWidth, int iconCount, int iconX, int iconY, int iconsWidth, int line) {
 			this.kind = kind;
 			this.displayText = displayText;
 			this.semanticLabel = semanticLabel;
@@ -581,6 +584,7 @@ public final class RouteSignCorridorLayout {
 			this.unitWidth = unitWidth;
 			this.iconCount = iconCount;
 			this.iconX = iconX;
+			this.iconY = iconY;
 			this.iconsWidth = iconsWidth;
 			this.line = line;
 		}
@@ -601,6 +605,7 @@ public final class RouteSignCorridorLayout {
 		public int getUnitWidth() { return unitWidth; }
 		public int getIconCount() { return iconCount; }
 		public int getIconX() { return iconX; }
+		public int getIconY() { return iconY; }
 		public int getIconsWidth() { return iconsWidth; }
 		public int getLine() { return line; }
 	}

@@ -115,6 +115,11 @@ public final class RouteAssetRendererParityTest {
 		final int tokenLeft = terminalToken.getX();
 		Assertions.assertEquals(1, countPhysicalColor(image, tokenLeft, tokenTop, terminalToken.getWidth(), 1, primary));
 		Assertions.assertEquals(3, countPhysicalColor(image, tokenLeft, tokenTop + 2, terminalToken.getWidth(), 1, primary));
+		final int[] tokenIconBounds = physicalColorBounds(image, terminalToken.getIconX(), terminalToken.getIconY(),
+				terminalToken.getIconsWidth(), RouteSignCorridorLayout.TOKEN_ICON_SIZE, 0xFF9F6721);
+		Assertions.assertArrayEquals(new int[]{terminalToken.getIconX(), terminalToken.getIconY(),
+				terminalToken.getIconX() + terminalToken.getIconsWidth() - 1,
+				terminalToken.getIconY() + RouteSignCorridorLayout.TOKEN_ICON_SIZE - 1}, tokenIconBounds);
 
 		final RouteSignCorridorLayout.CorridorBox corridor = layout.getCorridors().get(0);
 		final int iconColor = 0xFF9F6721;
@@ -174,5 +179,23 @@ public final class RouteAssetRendererParityTest {
 			}
 		}
 		return count;
+	}
+
+	private static int[] physicalColorBounds(RouteAssetImage image, int x, int y, int width, int height, int color) {
+		int minX = Integer.MAX_VALUE;
+		int minY = Integer.MAX_VALUE;
+		int maxX = Integer.MIN_VALUE;
+		int maxY = Integer.MIN_VALUE;
+		for (int drawY = y; drawY < y + height; drawY++) {
+			for (int drawX = x; drawX < x + width; drawX++) {
+				if (image.getPixel(drawY, image.getHeight() - drawX - 1) == color) {
+					minX = Math.min(minX, drawX);
+					minY = Math.min(minY, drawY);
+					maxX = Math.max(maxX, drawX);
+					maxY = Math.max(maxY, drawY);
+				}
+			}
+		}
+		return new int[]{minX, minY, maxX, maxY};
 	}
 }

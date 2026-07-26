@@ -19,15 +19,12 @@ public final class RouteSignCorridorRenderer {
 	private static final int ABGR_SEPARATOR = 0xFFDEDAD6;
 	private static final int ABGR_ICON = 0xFF9F6721;
 
-	private static final int CURRENT_RING_OUTER = 18;
-	private static final int CURRENT_RING_INNER = 10;
 	private static final int NEXT_RING_OUTER = 16;
 	private static final int NEXT_RING_INNER = 10;
-	private static final int BADGE_HEIGHT = 20;
 	private static final int BADGE_TEXT_PADDING = 4;
 	private static final int INLINE_GAP = 5;
-	private static final int HEADING_ICON_SIZE = 12;
-	private static final int TOKEN_ICON_SIZE = 7;
+	private static final int HEADING_ICON_SIZE = RouteSignCorridorLayout.HEADING_ICON_SIZE;
+	private static final int TOKEN_ICON_SIZE = RouteSignCorridorLayout.TOKEN_ICON_SIZE;
 	private static final int ICON_GAP = 2;
 
 	private static final String RAILWAY_INTERCHANGE_RESOURCE = "textures/block/sign/railway_interchange.png";
@@ -68,7 +65,7 @@ public final class RouteSignCorridorRenderer {
 
 	private RouteAssetImage draw() {
 		drawPhysicalRect(0, 0, physicalWidth, physicalHeight, ABGR_WHITE);
-		drawCurrentBand(layout.getCurrentBand());
+		drawPlatformMasthead(layout.getPlatformMasthead());
 		for (int index = 0; index < layout.getCorridors().size(); index++) {
 			final RouteSignCorridorLayout.CorridorBox corridor = layout.getCorridors().get(index);
 			if (index > 0) drawLogicalRect(0, corridor.getY() - 1, LOGICAL_WIDTH, RouteSignCorridorLayout.SEPARATOR_HEIGHT, ABGR_SEPARATOR);
@@ -77,26 +74,10 @@ public final class RouteSignCorridorRenderer {
 		return image;
 	}
 
-	private void drawCurrentBand(RouteSignCorridorLayout.CurrentBand band) {
-		final int ringX = band.getX() + band.getXPadding();
-		final int ringY = band.getY() + (band.getHeight() - CURRENT_RING_OUTER) / 2;
-		drawLogicalRing(ringX, ringY, CURRENT_RING_OUTER, CURRENT_RING_INNER);
-
-		int right = band.getX() + band.getWidth() - band.getXPadding();
-		if (!band.getPlatformName().isEmpty()) {
-			final int naturalWidth = measureLogicalWidth(band.getPlatformName(), 8, 6, false);
-			final int badgeWidth = Math.max(28, naturalWidth + BADGE_TEXT_PADDING * 2);
-			final int badgeX = right - badgeWidth;
-			final int badgeY = band.getY() + (band.getHeight() - BADGE_HEIGHT) / 2;
-			drawLogicalRect(badgeX, badgeY, badgeWidth, BADGE_HEIGHT, ABGR_PRIMARY);
-			drawLogicalText(band.getPlatformName(), badgeX + BADGE_TEXT_PADDING, badgeY,
-					badgeWidth - BADGE_TEXT_PADDING * 2, BADGE_HEIGHT, 8, 6, ABGR_WHITE, Horizontal.CENTER, true);
-			right = badgeX - INLINE_GAP;
-		}
-
-		final int nameX = ringX + CURRENT_RING_OUTER + INLINE_GAP;
-		drawLogicalText(band.getStationName(), nameX, band.getY(), Math.max(1, right - nameX), band.getHeight(),
-				16, 8, ABGR_PRIMARY, Horizontal.LEFT, true);
+	private void drawPlatformMasthead(RouteSignCorridorLayout.CurrentBand masthead) {
+		drawLogicalText(masthead.getPlatformDisplayName(), masthead.getXPadding(), masthead.getY(),
+				masthead.getWidth() - masthead.getXPadding() * 2, masthead.getHeight(),
+				32, 32, ABGR_PRIMARY, Horizontal.LEFT, false);
 	}
 
 	private void drawCorridor(RouteSignCorridorLayout.CorridorBox corridor) {
@@ -120,7 +101,7 @@ public final class RouteSignCorridorRenderer {
 		final int nameX = ringX + NEXT_RING_OUTER + INLINE_GAP;
 		final int nameRight = iconsWidth == 0 ? nextX - INLINE_GAP : iconsX - INLINE_GAP;
 		drawLogicalText(corridor.getStationName(), nameX, corridor.getHeadingY(), Math.max(1, nameRight - nameX),
-				corridor.getHeadingHeight(), 16, 8, ABGR_PRIMARY, Horizontal.LEFT, true);
+				corridor.getHeadingHeight(), 18, 10, ABGR_PRIMARY, Horizontal.LEFT, true);
 
 		for (final RouteSignCorridorLayout.RouteRowBox row : corridor.getRows()) drawRouteRow(row);
 	}
@@ -130,40 +111,22 @@ public final class RouteSignCorridorRenderer {
 		drawLogicalRect(row.getRuleX(), row.getRuleY(), row.getRuleWidth(), row.getRuleHeight(), routeColor);
 		drawLogicalRect(row.getRouteBadgeX(), row.getBadgeY(), row.getRouteBadgeWidth(), row.getBadgeHeight(), routeColor);
 		drawLogicalText(displayRouteName(row.getRouteName()), row.getRouteBadgeX() + BADGE_TEXT_PADDING, row.getBadgeY(),
-				row.getRouteBadgeWidth() - BADGE_TEXT_PADDING * 2, row.getBadgeHeight(), 9, 7, ABGR_WHITE, Horizontal.CENTER, true);
-
-		if (row.getPlatformBadgeWidth() > 0) {
-			drawLogicalRect(row.getPlatformBadgeX(), row.getBadgeY(), row.getPlatformBadgeWidth(), row.getBadgeHeight(), routeColor);
-			drawLogicalText(row.getNextPlatformName(), row.getPlatformBadgeX() + BADGE_TEXT_PADDING, row.getBadgeY(),
-					row.getPlatformBadgeWidth() - BADGE_TEXT_PADDING * 2, row.getBadgeHeight(), 8, 6, ABGR_WHITE, Horizontal.CENTER, true);
-		}
+				row.getRouteBadgeWidth() - BADGE_TEXT_PADDING * 2, row.getBadgeHeight(), 11, 8, ABGR_WHITE, Horizontal.CENTER, true);
 
 		final List<RouteSignCorridorLayout.DisplayToken> tokens = row.getTokens();
 		for (int index = 0; index < tokens.size(); index++) {
 			final RouteSignCorridorLayout.DisplayToken token = tokens.get(index);
 			final int color = token.getKind() == RouteSignCorridorLayout.DisplayToken.Kind.COLLAPSED ? ABGR_SECONDARY : ABGR_PRIMARY;
+			final RouteSignCorridorLayout.FontPreset preset = layout.getFontPreset();
 			drawLogicalText(token.getDisplayText(), token.getX(), token.getY(), token.getWidth(), token.getHeight(),
-					9, 6, color, Horizontal.LEFT, false);
-			drawTokenIcons(row, tokens, index);
+					preset.getCjkSize(), preset.getLatinSize(), color, Horizontal.LEFT, false);
+			drawTokenIcons(token);
 		}
 	}
 
-	private void drawTokenIcons(RouteSignCorridorLayout.RouteRowBox row,
-			List<RouteSignCorridorLayout.DisplayToken> tokens, int tokenIndex) {
-		final RouteSignCorridorLayout.DisplayToken token = tokens.get(tokenIndex);
-		if (token.getKind() == RouteSignCorridorLayout.DisplayToken.Kind.COLLAPSED) return;
-		final RouteAssetRenderSnapshot.Interchange interchange = token.getInterchange();
-		final int iconCount = (interchange.hasRailway() ? 1 : 0) + (interchange.hasAirport() ? 1 : 0);
-		if (iconCount == 0) return;
-		final int requiredWidth = iconCount * TOKEN_ICON_SIZE + (iconCount - 1) * ICON_GAP;
-		final int iconX = token.getX() + token.getWidth() + ICON_GAP;
-		int availableEnd = row.getTextX() + row.getTextWidth();
-		if (tokenIndex + 1 < tokens.size() && tokens.get(tokenIndex + 1).getLine() == token.getLine()) {
-			availableEnd = tokens.get(tokenIndex + 1).getX() - ICON_GAP;
-		}
-		if (iconX + requiredWidth > availableEnd) return;
-		final int iconY = token.getY() + (token.getHeight() - TOKEN_ICON_SIZE) / 2;
-		drawInterchangeIcons(interchange, iconX, iconY, TOKEN_ICON_SIZE, true);
+	private void drawTokenIcons(RouteSignCorridorLayout.DisplayToken token) {
+		if (token.getIconCount() == 0) return;
+		drawInterchangeIcons(token.getInterchange(), token.getIconX(), token.getIconY(), TOKEN_ICON_SIZE, true);
 	}
 
 	private void drawInterchangeIcons(RouteAssetRenderSnapshot.Interchange interchange, int x, int y, int size, boolean tint) {

@@ -121,11 +121,12 @@ public final class RouteAssetRenderer {
 	private static RouteAssetImage generateRouteMap(Context context) {
 		final RouteAssetCanonicalKeyFactory.RouteMapParameters parameters = Objects.requireNonNull(RouteAssetCanonicalKeyFactory.decodeRouteMap(context.key), "Invalid route map key");
 		if (parameters.purpose == RouteMapPurpose.ROUTE_SIGN &&
+				parameters.styleMode != RouteSignStyleMode.NORMAL &&
 				parameters.vertical &&
 				!parameters.flip &&
 				!parameters.transparentWhite &&
 				Float.compare(parameters.aspectRatio, 37F / 22) == 0) {
-			final Optional<RouteSignCorridorModel.Model> model = RouteSignCorridorModel.tryBuild(context.snapshot);
+			final Optional<RouteSignCorridorModel.Model> model = RouteSignCorridorModel.tryBuild(context.snapshot, parameters.styleMode);
 			if (model.isPresent()) {
 				final Optional<RouteSignCorridorLayout.Layout> layout = RouteSignCorridorLayout.fit(model.get(), context.rasterizer, context.key.getVariant().getLanguage());
 				if (layout.isPresent()) return RouteSignCorridorRenderer.render(layout.get(), context.rasterizer, context.sources, context.resolution, context.key.getVariant().getLanguage());
