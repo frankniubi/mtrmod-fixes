@@ -73,6 +73,73 @@ public final class RouteAssetRendererParityTest {
 	}
 
 	@Test
+	public void corridorTextAndIconsAreUprightAfterTheSingleNativeTransformAndWallSeam() throws Exception {
+		final byte[] lMask = new byte[9];
+		lMask[1] = (byte) 0xFF;
+		lMask[6] = (byte) 0xFF;
+		lMask[7] = (byte) 0xFF;
+		lMask[8] = (byte) 0xFF;
+		final RouteAssetTextRasterizer asymmetricText = (value, maxWidth, maxHeight, cjkSize, latinSize, padding, alignment, language) ->
+				new RouteAssetTextRasterizer.RasterizedText(lMask, 3, 3);
+
+		final RouteAssetImage icon = new RouteAssetImage(3, 3);
+		icon.setPixel(1, 0, 0xFFFFFFFF);
+		icon.setPixel(0, 2, 0xFFFFFFFF);
+		icon.setPixel(1, 2, 0xFFFFFFFF);
+		icon.setPixel(2, 2, 0xFFFFFFFF);
+		final byte[] iconPng = icon.toPng();
+		final RouteAssetSourceImages asymmetricSources = new RouteAssetSourceImages(path -> iconPng);
+
+		final RouteAssetRenderSnapshot.Interchange bothIcons = new RouteAssetRenderSnapshot.Interchange(List.of(), List.of(), true, true);
+		final RouteAssetRenderSnapshot.Station current = new RouteAssetRenderSnapshot.Station(100, "P1", 10, 10, "Current|Current", "Terminal|Terminal", RouteAssetRenderSnapshot.Interchange.empty());
+		final RouteAssetRenderSnapshot.Station next = new RouteAssetRenderSnapshot.Station(200, "P2", 20, 20, "Next|Next", "Terminal|Terminal", bothIcons);
+		final RouteAssetRenderSnapshot.Station terminal = new RouteAssetRenderSnapshot.Station(300, "P3", 30, 30, "Terminal|Terminal", "Terminal|Terminal", bothIcons);
+		final RouteAssetRenderSnapshot.Route route = new RouteAssetRenderSnapshot.Route(1, "HS1", 0x14755E, RouteAssetRenderSnapshot.CircularState.NONE, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED, 0, List.of(current, next, terminal));
+		final RouteAssetRenderSnapshot snapshot = RouteAssetRenderSnapshot.builder()
+				.selectedPlatformId(100)
+				.selectedStationId(10)
+				.platformDisplayName("P1")
+				.routeMapPurpose(RouteMapPurpose.ROUTE_SIGN)
+				.vertical(true)
+				.aspectRatio(37F / 22)
+				.routes(List.of(route))
+				.build();
+		final RouteSignCorridorLayout.Layout layout = RouteSignCorridorLayout.fit(RouteSignCorridorModel.tryBuild(snapshot).orElseThrow(), asymmetricText, "NORMAL").orElseThrow();
+		final RouteAssetImage image = RouteSignCorridorRenderer.render(layout, asymmetricText, asymmetricSources, 1, "NORMAL");
+		Assertions.assertEquals(538, image.getWidth());
+		Assertions.assertEquals(320, image.getHeight());
+
+		final int primary = 0xFF1D1A17;
+		final RouteSignCorridorLayout.DisplayToken terminalToken = layout.row("HS1").getTokens().get(0);
+		final int tokenTop = terminalToken.getY();
+		final int tokenLeft = terminalToken.getX();
+		Assertions.assertEquals(1, countPhysicalColor(image, tokenLeft, tokenTop, terminalToken.getWidth(), 1, primary));
+		Assertions.assertEquals(3, countPhysicalColor(image, tokenLeft, tokenTop + 2, terminalToken.getWidth(), 1, primary));
+
+		final RouteSignCorridorLayout.CorridorBox corridor = layout.getCorridors().get(0);
+		final int iconColor = 0xFF9F6721;
+		int firstIconRow = -1;
+		int lastIconRow = -1;
+		for (int y = corridor.getHeadingY(); y < corridor.getHeadingY() + corridor.getHeadingHeight(); y++) {
+			if (countPhysicalColor(image, 0, y, 320, 1, iconColor) > 0) {
+				if (firstIconRow < 0) firstIconRow = y;
+				lastIconRow = y;
+			}
+		}
+		Assertions.assertTrue(firstIconRow >= 0 && lastIconRow > firstIconRow);
+		Assertions.assertTrue(
+				countPhysicalColor(image, 0, lastIconRow, 320, 1, iconColor) > countPhysicalColor(image, 0, firstIconRow, 320, 1, iconColor),
+				"the reconstructed physical icon must retain its wide bottom edge"
+		);
+
+		final int nativeSeam = Math.round(image.getWidth() * 26F / 37F);
+		final RouteAssetImage rejoined = new RouteAssetImage(image.getWidth(), image.getHeight());
+		for (int x = 0; x < nativeSeam; x++) for (int y = 0; y < image.getHeight(); y++) rejoined.setPixel(x, y, image.getPixel(x, y));
+		for (int x = nativeSeam; x < image.getWidth(); x++) for (int y = 0; y < image.getHeight(); y++) rejoined.setPixel(x, y, image.getPixel(x, y));
+		Assertions.assertArrayEquals(image.toPng(), rejoined.toPng());
+	}
+
+	@Test
 	public void languageVariantsRasterizeTheSameSelectedLinesAsDynamicTextureCache() {
 		final RouteAssetTextRasterizer.RasterizedText normal = text.rasterize("中央|Central", 512, 128, 32, 16, 0, RouteAssetTextRasterizer.Alignment.CENTER, "NORMAL");
 		final RouteAssetTextRasterizer.RasterizedText cjk = text.rasterize("中央|Central", 512, 128, 32, 16, 0, RouteAssetTextRasterizer.Alignment.CENTER, "CJK");
@@ -97,5 +164,15 @@ public final class RouteAssetRendererParityTest {
 		final RouteAssetRenderSnapshot anticlockwiseSnapshot = RouteAssetRenderSnapshot.builder().platformDisplayName("P2").routes(List.of(new RouteAssetRenderSnapshot.Route(7, "R7", 0x14755E, RouteAssetRenderSnapshot.CircularState.ANTICLOCKWISE, RouteAssetRenderSnapshot.RouteKind.METRO, 1, stations))).aspectRatio(22F / 5).paddingScale(0.2F).hasLeft(true).backgroundColor(0xFF000000).textColor(0xFFFFFFFF).build();
 		final RouteAssetImage anticlockwise = renderer.render(RouteAssetCanonicalKeyFactory.directionArrow("minecraft/overworld", 101, 1, "NORMAL", true, false, RouteAssetTextRasterizer.Alignment.CENTER, true, 0.2F, 22F / 5, 0xFF000000, 0xFFFFFFFF, 0), anticlockwiseSnapshot, text, sources);
 		Assertions.assertNotEquals(RouteAssetHash.sha256(clockwise.toPng()), RouteAssetHash.sha256(anticlockwise.toPng()));
+	}
+
+	private static int countPhysicalColor(RouteAssetImage image, int x, int y, int width, int height, int color) {
+		int count = 0;
+		for (int drawY = y; drawY < y + height; drawY++) {
+			for (int drawX = x; drawX < x + width; drawX++) {
+				if (image.getPixel(drawY, image.getHeight() - drawX - 1) == color) count++;
+			}
+		}
+		return count;
 	}
 }

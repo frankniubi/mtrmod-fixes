@@ -30,11 +30,10 @@ public final class InterchangeConsumerIntegrationTest {
 		Assertions.assertTrue(source.contains("RouteMapStationNameLayout"));
 		Assertions.assertTrue(source.contains("RAILWAY_INTERCHANGE_RESOURCE"));
 		Assertions.assertTrue(source.contains("AIRPORT_INTERCHANGE_RESOURCE"));
-		Assertions.assertTrue(source.contains("DenseRouteMapLayout.shouldUseDenseLayout"));
-		Assertions.assertTrue(source.contains("DenseRouteMapLayout.classifyPlatform"));
-		Assertions.assertTrue(source.contains("classifyDensePlatform(long platformId)"));
-		Assertions.assertTrue(source.contains("simplifiedRoute.getPlatformIndex(platformId) >= 0"), "platform classification must include terminating routes, not only drawable route details");
-		Assertions.assertTrue(source.contains("generateDenseVerticalRouteMap"));
+		Assertions.assertFalse(source.contains("DenseRouteMapLayout"));
+		Assertions.assertFalse(source.contains("classifyDensePlatform"));
+		Assertions.assertFalse(source.contains("generateDenseVerticalRouteMap"));
+		Assertions.assertFalse(source.contains("drawDense"));
 		Assertions.assertFalse(source.contains("InterchangeRouteDisplay.flattenForRouteMap"));
 		Assertions.assertFalse(source.contains("InterchangeRouteDisplay.deduplicateForBroadcast"));
 		Assertions.assertTrue(source.contains("excludedRouteColors.add(InterchangeRouteDisplay.normalizeColor"));

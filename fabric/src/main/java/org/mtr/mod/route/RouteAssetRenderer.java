@@ -5,14 +5,12 @@ import org.mtr.mod.generated.lang.TranslationProvider;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Objects;
-import java.util.Set;
+import java.util.Optional;
 import java.util.TreeMap;
 
 /** The legacy RouteMapGenerator raster algorithms with no client or GPU linkage. */
@@ -121,11 +119,25 @@ public final class RouteAssetRenderer {
 	}
 
 	private static RouteAssetImage generateRouteMap(Context context) {
+		final RouteAssetCanonicalKeyFactory.RouteMapParameters parameters = Objects.requireNonNull(RouteAssetCanonicalKeyFactory.decodeRouteMap(context.key), "Invalid route map key");
+		if (parameters.purpose == RouteMapPurpose.ROUTE_SIGN &&
+				parameters.vertical &&
+				!parameters.flip &&
+				!parameters.transparentWhite &&
+				Float.compare(parameters.aspectRatio, 37F / 22) == 0) {
+			final Optional<RouteSignCorridorModel.Model> model = RouteSignCorridorModel.tryBuild(context.snapshot);
+			if (model.isPresent()) {
+				final Optional<RouteSignCorridorLayout.Layout> layout = RouteSignCorridorLayout.fit(model.get(), context.rasterizer, context.key.getVariant().getLanguage());
+				if (layout.isPresent()) return RouteSignCorridorRenderer.render(layout.get(), context.rasterizer, context.sources, context.resolution, context.key.getVariant().getLanguage());
+			}
+		}
+		return generateNormalRouteMap(context);
+	}
+
+	private static RouteAssetImage generateNormalRouteMap(Context context) {
 		final List<RouteAssetRenderSnapshot.Route> routeDetails = new ArrayList<>();
 		for (final RouteAssetRenderSnapshot.Route route : context.routes()) if (!route.isTerminating()) routeDetails.add(route);
 		if (routeDetails.isEmpty()) return singlePixelMap(context.snapshot.getTransparentColor() == ARGB_WHITE);
-		final DenseRouteMapLayout.Layout denseLayout = buildDenseRouteMapLayout(routeDetails);
-		if (DenseRouteMapLayout.shouldUseDenseLayout(context.snapshot.isVertical(), classifyDensePlatform(context.routes()), denseLayout)) return generateDenseVerticalRouteMap(context, denseLayout);
 
 		final int routeCount = routeDetails.size();
 		final List<List<Long>> stationIdsBefore = new ArrayList<>();
@@ -230,113 +242,6 @@ public final class RouteAssetRenderer {
 		return image;
 	}
 
-	private static DenseRouteMapLayout.Layout buildDenseRouteMapLayout(List<RouteAssetRenderSnapshot.Route> routes) {
-		final List<DenseRouteMapLayout.RouteInput> inputs = new ArrayList<>();
-		for (final RouteAssetRenderSnapshot.Route route : routes) {
-			final List<DenseRouteMapLayout.StationInput> stations = new ArrayList<>();
-			for (int index = route.getCurrentStationIndex(); index < route.getStations().size(); index++) stations.add(new DenseRouteMapLayout.StationInput(route.getStations().get(index).getStationId(), route.getStations().get(index).getName()));
-			inputs.add(new DenseRouteMapLayout.RouteInput(route.getName().split("\\|\\|", -1)[0], route.getColor(), stations));
-		}
-		return DenseRouteMapLayout.build(inputs);
-	}
-
-	private static DenseRouteMapLayout.PlatformType classifyDensePlatform(List<RouteAssetRenderSnapshot.Route> routes) {
-		final List<DenseRouteMapLayout.RouteType> types = new ArrayList<>();
-		for (final RouteAssetRenderSnapshot.Route route : routes) types.add(route.getRouteKind() == RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED ? DenseRouteMapLayout.RouteType.HIGH_SPEED : route.getRouteKind() == RouteAssetRenderSnapshot.RouteKind.METRO ? DenseRouteMapLayout.RouteType.METRO : DenseRouteMapLayout.RouteType.UNRESOLVED);
-		return DenseRouteMapLayout.classifyPlatform(types);
-	}
-
-	private static RouteAssetImage generateDenseVerticalRouteMap(Context context, DenseRouteMapLayout.Layout layout) {
-		final int physicalWidth = context.scale * MIN_VERTICAL_SIZE;
-		final int physicalHeight = Math.max(1, Math.round(physicalWidth * context.snapshot.getAspectRatio()));
-		final RouteAssetImage image = new RouteAssetImage(physicalHeight, physicalWidth);
-		image.fillRect(0, 0, image.getWidth(), image.getHeight(), RouteAssetImage.argbToAbgr(ARGB_WHITE));
-		final int margin = denseScale(10, physicalWidth);
-		final int gap = denseScale(5, physicalWidth);
-		final int labelHeight = denseScale(16, physicalWidth);
-		final int currentHeight = denseScale(48, physicalWidth);
-		final int routeCount = layout.getRoutes().size();
-		final int chipRows = Math.max(1, (routeCount + 3) / 4);
-		final int serviceBandHeight = denseScale(chipRows == 1 ? 36 : 61, physicalWidth);
-		final boolean hasPrefixes = layout.getRoutes().stream().anyMatch(route -> !route.getPrefixStations().isEmpty());
-		final boolean hasCommonStations = !layout.getCommonStations().isEmpty();
-		final int prefixHeight = hasPrefixes ? denseScale(Math.max(78, routeCount * 28), physicalWidth) : 0;
-		final int commonHeight = hasCommonStations ? denseScale(Math.max(68, layout.getCommonStations().size() * 38), physicalWidth) : 0;
-		final int labels = (hasPrefixes ? 1 : 0) + (hasCommonStations ? 1 : 0) + 1;
-		final int tailHeight = Math.max(denseScale(routeCount * 42, physicalWidth), physicalHeight - serviceBandHeight - currentHeight - prefixHeight - commonHeight - labelHeight * labels);
-		int y = 0;
-		drawDenseServiceBand(context, image, physicalWidth, layout.getRoutes(), y, serviceBandHeight, margin, gap); y += serviceBandHeight;
-		drawPhysicalRect(image, physicalWidth, 0, y, physicalWidth, currentHeight, ARGB_WHITE);
-		drawPhysicalStationCircle(image, physicalWidth, margin + denseScale(7, physicalWidth), y + currentHeight / 2, denseScale(7, physicalWidth), ARGB_BLACK);
-		drawPhysicalString(context, image, physicalWidth, layout.getCurrentStation().getName(), margin + denseScale(25, physicalWidth), y + denseScale(4, physicalWidth), physicalWidth - margin * 2 - denseScale(25, physicalWidth), currentHeight - denseScale(8, physicalWidth), denseScale(14, physicalWidth), denseScale(8, physicalWidth), ARGB_BLACK, false); y += currentHeight;
-		if (hasPrefixes) { drawDenseSectionLabel(context, image, physicalWidth, "汇合前|Before convergence", y, labelHeight); y += labelHeight; drawDenseRouteRows(context, image, physicalWidth, layout.getRoutes(), true, y, prefixHeight, margin, gap); y += prefixHeight; }
-		if (hasCommonStations) { drawDenseSectionLabel(context, image, physicalWidth, "共同经过|All services", y, labelHeight); y += labelHeight; drawDenseCommonStations(context, image, physicalWidth, layout.getCommonStations(), layout.getRoutes(), y, commonHeight, margin); y += commonHeight; }
-		drawDenseSectionLabel(context, image, physicalWidth, "其后各线|Route-specific stops", y, labelHeight); y += labelHeight;
-		drawDenseRouteRows(context, image, physicalWidth, layout.getRoutes(), false, y, Math.min(tailHeight, physicalHeight - y), margin, gap);
-		if (context.snapshot.getTransparentColor() == ARGB_WHITE) clearColor(image, RouteAssetImage.argbToAbgr(ARGB_WHITE));
-		return image;
-	}
-
-	private static void drawDenseServiceBand(Context context, RouteAssetImage image, int physicalWidth, List<DenseRouteMapLayout.RouteSummary> routes, int y, int height, int margin, int gap) {
-		drawPhysicalRect(image, physicalWidth, 0, y, physicalWidth, height, 0xFFE7EAEC);
-		final int columns = Math.min(4, routes.size()); final int rows = Math.max(1, (routes.size() + columns - 1) / columns); final int chipHeight = (height - margin - gap * (rows - 1)) / rows; final int chipWidth = (physicalWidth - margin * 2 - gap * (columns - 1)) / columns;
-		for (int index = 0; index < routes.size(); index++) { final int row = index / columns; final int column = index % columns; final int x = margin + column * (chipWidth + gap); final int chipY = y + margin / 2 + row * (chipHeight + gap); final DenseRouteMapLayout.RouteSummary route = routes.get(index); drawPhysicalRect(image, physicalWidth, x, chipY, chipWidth, chipHeight, ARGB_BLACK | route.getColor()); drawPhysicalString(context, image, physicalWidth, route.getName(), x + denseScale(3, physicalWidth), chipY, chipWidth - denseScale(6, physicalWidth), chipHeight, denseScale(9, physicalWidth), denseScale(7, physicalWidth), ARGB_WHITE, true); }
-	}
-
-	private static void drawDenseSectionLabel(Context context, RouteAssetImage image, int physicalWidth, String value, int y, int height) {
-		drawPhysicalRect(image, physicalWidth, 0, y, physicalWidth, height, 0xFFC4C9CC);
-		drawPhysicalString(context, image, physicalWidth, value, denseScale(10, physicalWidth), y, physicalWidth - denseScale(20, physicalWidth), height, denseScale(8, physicalWidth), denseScale(6, physicalWidth), 0xFF596269, false);
-	}
-
-	private static void drawDenseRouteRows(Context context, RouteAssetImage image, int physicalWidth, List<DenseRouteMapLayout.RouteSummary> routes, boolean prefixes, int y, int height, int margin, int gap) {
-		if (routes.isEmpty() || height <= 0) return;
-		final int rowHeight = Math.max(1, (height - gap * (routes.size() + 1)) / routes.size());
-		for (int index = 0; index < routes.size(); index++) {
-			final DenseRouteMapLayout.RouteSummary route = routes.get(index); final List<DenseRouteMapLayout.StationInput> stations = prefixes ? route.getPrefixStations() : route.getSuffixStations(); final int rowY = y + gap + index * (rowHeight + gap);
-			drawPhysicalRect(image, physicalWidth, margin, rowY, physicalWidth - margin * 2, rowHeight, 0xFFF6F7F7); final int badgeWidth = denseScale(38, physicalWidth); drawPhysicalRect(image, physicalWidth, margin + denseScale(5, physicalWidth), rowY + denseScale(5, physicalWidth), badgeWidth, rowHeight - denseScale(10, physicalWidth), ARGB_BLACK | route.getColor()); drawPhysicalString(context, image, physicalWidth, route.getName(), margin + denseScale(7, physicalWidth), rowY + denseScale(5, physicalWidth), badgeWidth - denseScale(4, physicalWidth), rowHeight - denseScale(10, physicalWidth), denseScale(8, physicalWidth), denseScale(6, physicalWidth), ARGB_WHITE, true);
-			final int ruleX = margin + denseScale(49, physicalWidth); drawPhysicalRect(image, physicalWidth, ruleX, rowY + denseScale(5, physicalWidth), denseScale(4, physicalWidth), rowHeight - denseScale(10, physicalWidth), ARGB_BLACK | route.getColor()); final DenseStationInfo info = getDenseStationInfo(context, stations); final int iconSize = denseScale(13, physicalWidth); final int iconGap = denseScale(3, physicalWidth); final int iconCount = (info.railway ? 1 : 0) + (info.airport ? 1 : 0); int textX = ruleX + denseScale(9, physicalWidth); int iconIndex = 0;
-			if (info.railway) drawPhysicalResource(context, image, physicalWidth, RAILWAY_INTERCHANGE_RESOURCE, textX + iconIndex++ * (iconSize + iconGap), rowY + (rowHeight - iconSize) / 2, iconSize, iconSize, RAILWAY_INTERCHANGE_COLOR);
-			if (info.airport) drawPhysicalResource(context, image, physicalWidth, AIRPORT_INTERCHANGE_RESOURCE, textX + iconIndex * (iconSize + iconGap), rowY + (rowHeight - iconSize) / 2, iconSize, iconSize, RAILWAY_INTERCHANGE_COLOR);
-			if (iconCount > 0) textX += iconCount * (iconSize + iconGap);
-			drawPhysicalString(context, image, physicalWidth, stations.isEmpty() ? "—" : joinDenseStationNames(stations), textX, rowY + denseScale(3, physicalWidth), physicalWidth - margin - textX - denseScale(5, physicalWidth), rowHeight - denseScale(6, physicalWidth), denseScale(9, physicalWidth), denseScale(6, physicalWidth), stations.isEmpty() ? 0xFF8B9195 : ARGB_BLACK, false);
-		}
-	}
-
-	private static void drawDenseCommonStations(Context context, RouteAssetImage image, int physicalWidth, List<DenseRouteMapLayout.StationInput> stations, List<DenseRouteMapLayout.RouteSummary> routes, int y, int height, int margin) {
-		drawPhysicalRect(image, physicalWidth, 0, y, physicalWidth, height, 0xFFD7D9DA); final int rowHeight = Math.max(1, height / stations.size()); final int lineX = margin + denseScale(7, physicalWidth); final int stripeWidth = Math.max(1, denseScale(6, physicalWidth) / routes.size());
-		for (int routeIndex = 0; routeIndex < routes.size(); routeIndex++) drawPhysicalRect(image, physicalWidth, lineX - stripeWidth * routes.size() / 2 + routeIndex * stripeWidth, y, stripeWidth, height, ARGB_BLACK | routes.get(routeIndex).getColor());
-		for (int index = 0; index < stations.size(); index++) {
-			final DenseRouteMapLayout.StationInput station = stations.get(index); final int rowY = y + index * rowHeight; final int centerY = rowY + rowHeight / 2; drawPhysicalStationCircle(image, physicalWidth, lineX, centerY, denseScale(7, physicalWidth), ARGB_BLACK); final DenseStationInfo info = getDenseStationInfo(context, List.of(station)); final int iconSize = denseScale(14, physicalWidth); final int iconGap = denseScale(3, physicalWidth); int nameX = margin + denseScale(24, physicalWidth);
-			if (info.railway) { drawPhysicalResource(context, image, physicalWidth, RAILWAY_INTERCHANGE_RESOURCE, nameX, centerY - iconSize / 2, iconSize, iconSize, RAILWAY_INTERCHANGE_COLOR); nameX += iconSize + iconGap; }
-			if (info.airport) { drawPhysicalResource(context, image, physicalWidth, AIRPORT_INTERCHANGE_RESOURCE, nameX, centerY - iconSize / 2, iconSize, iconSize, RAILWAY_INTERCHANGE_COLOR); nameX += iconSize + iconGap; }
-			final int interchangeWidth = info.normalText.isEmpty() ? 0 : denseScale(62, physicalWidth); drawPhysicalString(context, image, physicalWidth, station.getName(), nameX, rowY + denseScale(3, physicalWidth), physicalWidth - margin - nameX - interchangeWidth, rowHeight - denseScale(6, physicalWidth), denseScale(12, physicalWidth), denseScale(7, physicalWidth), ARGB_BLACK, false); if (!info.normalText.isEmpty()) drawPhysicalString(context, image, physicalWidth, info.normalText, physicalWidth - margin - interchangeWidth, rowY + denseScale(3, physicalWidth), interchangeWidth, rowHeight - denseScale(6, physicalWidth), denseScale(7, physicalWidth), denseScale(5, physicalWidth), 0xFF596269, false);
-		}
-	}
-
-	private static DenseStationInfo getDenseStationInfo(Context context, List<DenseRouteMapLayout.StationInput> stations) {
-		boolean railway = false; boolean airport = false; final List<String> names = new ArrayList<>();
-		for (final DenseRouteMapLayout.StationInput station : stations) { final RouteAssetRenderSnapshot.Station snapshot = context.snapshot.findStation(station.getId()).orElse(null); if (snapshot != null) { railway |= snapshot.getInterchange().hasRailway(); airport |= snapshot.getInterchange().hasAirport(); names.addAll(snapshot.getInterchange().getNames()); } }
-		return new DenseStationInfo(railway, airport, RouteAssetText.mergeStations(names));
-	}
-
-	private static String joinDenseStationNames(List<DenseRouteMapLayout.StationInput> stations) {
-		final StringBuilder primary = new StringBuilder(); final StringBuilder secondary = new StringBuilder();
-		for (final DenseRouteMapLayout.StationInput station : stations) { final String[] parts = station.getName().split("\\|", -1); if (primary.length() > 0) { primary.append(" · "); secondary.append(" · "); } primary.append(parts[0]); secondary.append(parts.length > 1 ? parts[1] : parts[0]); }
-		return primary + "|" + secondary;
-	}
-
-	private static void drawPhysicalString(Context context, RouteAssetImage image, int physicalWidth, String value, int x, int y, int width, int height, int cjkSize, int latinSize, int color, boolean centered) {
-		if (width <= 0 || height <= 0 || value.isEmpty()) return; final RouteAssetTextRasterizer.RasterizedText text = context.text(value, width, height, cjkSize, latinSize, 0, centered ? Alignment.CENTER : Alignment.LEFT); final int left = x + (centered ? Math.max(0, (width - text.getWidth()) / 2) : 0); final int top = y + Math.max(0, (height - text.getHeight()) / 2); final byte[] pixels = text.pixels();
-		for (int sourceY = 0; sourceY < text.getHeight(); sourceY++) for (int sourceX = 0; sourceX < text.getWidth(); sourceX++) blendPhysicalPixel(image, physicalWidth, left + sourceX, top + sourceY, ((pixels[sourceY * text.getWidth() + sourceX] & 0xFF) << 24) | (color & RGB_WHITE));
-	}
-
-	private static void drawPhysicalRect(RouteAssetImage image, int physicalWidth, int x, int y, int width, int height, int color) { for (int drawX = 0; drawX < width; drawX++) for (int drawY = 0; drawY < height; drawY++) drawPhysicalPixel(image, physicalWidth, x + drawX, y + drawY, color); }
-	private static void drawPhysicalStationCircle(RouteAssetImage image, int physicalWidth, int centerX, int centerY, int radius, int outlineColor) { final int inner = Math.max(0, radius - denseScale(3, physicalWidth)); for (int x = -radius; x <= radius; x++) for (int y = -radius; y <= radius; y++) { final int distance = x * x + y * y; if (distance <= radius * radius) drawPhysicalPixel(image, physicalWidth, centerX + x, centerY + y, distance <= inner * inner ? ARGB_WHITE : outlineColor); } }
-	private static void drawPhysicalResource(Context context, RouteAssetImage image, int physicalWidth, String resource, int x, int y, int width, int height, int color) { final RouteAssetImage source = context.source(resource); for (int drawX = 0; drawX < width; drawX++) for (int drawY = 0; drawY < height; drawY++) { final int sourceX = clamp(drawX * source.getWidth() / width, 0, source.getWidth() - 1); final int sourceY = clamp(drawY * source.getHeight() / height, 0, source.getHeight() - 1); blendPhysicalPixel(image, physicalWidth, x + drawX, y + drawY, (source.getPixel(sourceX, sourceY) >>> 24) << 24 | (color & RGB_WHITE)); } }
-	private static void drawPhysicalPixel(RouteAssetImage image, int physicalWidth, int x, int y, int color) { drawPixelSafe(image, y, physicalWidth - x - 1, color); }
-	private static void blendPhysicalPixel(RouteAssetImage image, int physicalWidth, int x, int y, int color) { blendPixel(image, y, physicalWidth - x - 1, color); }
-	private static int denseScale(int value, int physicalWidth) { return Math.max(1, Math.round((float) value * physicalWidth / 320)); }
-
 	private static void setup(Context context, List<NavigableMap<Integer, StationPosition>> stationPositions, List<List<Long>> stationIdLists, int[] colorIndices, float[] bounds, boolean passed, boolean reverse) {
 		final int passedMultiplier = passed ? -1 : 1; final int reverseMultiplier = reverse ? -1 : 1; bounds[0] = 0; final List<Long> commonStationIds = new ArrayList<>();
 		for (final long stationId : stationIdLists.get(0)) if (stationId != 0 && !commonStationIds.contains(stationId) && stationIdLists.stream().allMatch(ids -> ids.contains(stationId))) commonStationIds.add(stationId);
@@ -395,8 +300,8 @@ public final class RouteAssetRenderer {
 	enum VerticalAlignment { TOP, CENTER, BOTTOM; float offset(float value, float size) { return this == CENTER ? value - size / 2 : this == BOTTOM ? value - size : value; } }
 
 	private static final class Context {
-		private final RouteAssetKey key; private final RouteAssetRenderSnapshot snapshot; private final RouteAssetTextRasterizer rasterizer; private final RouteAssetSourceImages sources; private final int scale; private final int lineSize; private final int lineSpacing; private final int fontSizeBig; private final int fontSizeSmall;
-		private Context(RouteAssetKey key, RouteAssetRenderSnapshot snapshot, RouteAssetTextRasterizer rasterizer, RouteAssetSourceImages sources, int resolution) { this.key = key; this.snapshot = snapshot; this.rasterizer = rasterizer; this.sources = sources; scale = 1 << resolution + 5; lineSize = scale / 8; lineSpacing = lineSize * 3 / 2; fontSizeBig = lineSize * 2; fontSizeSmall = fontSizeBig / 2; }
+		private final RouteAssetKey key; private final RouteAssetRenderSnapshot snapshot; private final RouteAssetTextRasterizer rasterizer; private final RouteAssetSourceImages sources; private final int resolution; private final int scale; private final int lineSize; private final int lineSpacing; private final int fontSizeBig; private final int fontSizeSmall;
+		private Context(RouteAssetKey key, RouteAssetRenderSnapshot snapshot, RouteAssetTextRasterizer rasterizer, RouteAssetSourceImages sources, int resolution) { this.key = key; this.snapshot = snapshot; this.rasterizer = rasterizer; this.sources = sources; this.resolution = resolution; scale = 1 << resolution + 5; lineSize = scale / 8; lineSpacing = lineSize * 3 / 2; fontSizeBig = lineSize * 2; fontSizeSmall = fontSizeBig / 2; }
 		private RouteAssetTextRasterizer.RasterizedText text(String value, int maxWidth, int maxHeight, int cjkSize, int latinSize, int padding, Alignment alignment) { return rasterizer.rasterize(value, maxWidth, maxHeight, cjkSize, latinSize, padding, RouteAssetTextRasterizer.Alignment.valueOf(alignment.name()), key.getVariant().getLanguage()); }
 		private RouteAssetImage source(String path) { try { return sources.get(path); } catch (IOException exception) { throw new IllegalStateException("Unable to load route texture source " + path, exception); } }
 		private List<RouteAssetRenderSnapshot.Route> routes() {
@@ -409,5 +314,4 @@ public final class RouteAssetRenderer {
 
 	private static final class StationPosition { private final float x, y; private final boolean isCommon; private StationPosition(float x, float y, boolean isCommon) { this.x = x; this.y = y; this.isCommon = isCommon; } }
 	private static final class StationPositionGrouped { private final StationPosition position; private final int stationOffset; private final RouteAssetRenderSnapshot.Interchange interchange; private StationPositionGrouped(StationPosition position, int stationOffset, RouteAssetRenderSnapshot.Interchange interchange) { this.position = position; this.stationOffset = stationOffset; this.interchange = interchange; } }
-	private static final class DenseStationInfo { private final boolean railway, airport; private final String normalText; private DenseStationInfo(boolean railway, boolean airport, String normalText) { this.railway = railway; this.airport = airport; this.normalText = normalText; } }
 }
