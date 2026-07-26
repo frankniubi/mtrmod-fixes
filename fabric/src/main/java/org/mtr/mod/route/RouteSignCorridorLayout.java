@@ -2,240 +2,230 @@ package org.mtr.mod.route;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Canonical 320 by 538 route-sign layout with deterministic path compaction. */
+/** Canonical 320 by 538 Route Sign layout with complete, icon-aware station paths. */
 public final class RouteSignCorridorLayout {
 
 	public static final int LOGICAL_WIDTH = 320;
 	public static final int LOGICAL_HEIGHT = 538;
-	public static final int CURRENT_BAND_HEIGHT = 52;
+	public static final int MASTHEAD_HEIGHT = 52;
+	public static final int CURRENT_BAND_HEIGHT = MASTHEAD_HEIGHT;
 	public static final int CONTENT_PADDING_X = 10;
 	public static final int CORRIDOR_PADDING_Y = 8;
-	public static final int CORRIDOR_HEADING_MIN_HEIGHT = 30;
+	public static final int CORRIDOR_HEADING_MIN_HEIGHT = 34;
 	public static final int SEPARATOR_HEIGHT = 1;
-	public static final int ROUTE_ROW_MIN_HEIGHT = 30;
-	public static final int PATH_MAX_LINES = 2;
-	public static final int PATH_LINE_HEIGHT = 11;
+	public static final int ROUTE_ROW_BASE_HEIGHT = 32;
+	public static final int ROUTE_BADGE_MIN_WIDTH = 38;
+	public static final int BADGE_HEIGHT = 24;
+	public static final int ROUTE_RULE_WIDTH = 5;
+	public static final int INLINE_GAP = 5;
+	public static final int TOKEN_ICON_SIZE = 9;
+	public static final int HEADING_ICON_SIZE = 12;
+	public static final int ICON_GAP = 2;
 	public static final String NEXT = "\u4E0B\u4E00\u7AD9|NEXT";
 	public static final String RETURN = "\u8FD4\u56DE|RETURN";
-	public static final String CONTINUES = "\u7EE7\u7EED|CONTINUES";
-	public static final String ONE_STOP = "+1\u7AD9|+1 stop";
-	public static final String MANY_STOPS = "+%d\u7AD9|+%d stops";
-	public static final String CONTINUES_VIA = "\u7EE7\u7EED\u7ECF\u7531 %s %s|CONTINUES VIA %s %s";
+	public static final String CONTINUES_VIA = "\u7ECF\u7531 %s %s|CONTINUES VIA %s %s";
 
-	private static final int INLINE_CONTROL_GAP = 5;
-	private static final int ROUTE_RULE_WIDTH = 5;
-	private static final int ROUTE_BADGE_MIN_WIDTH = 38;
-	private static final int PLATFORM_BADGE_MIN_WIDTH = 28;
-	private static final int BADGE_HEIGHT = 20;
 	private static final int BADGE_TEXT_PADDING_X = 4;
-	private static final int ROW_VERTICAL_PADDING = 8;
+	private static final int UPPER_LINE_X = CONTENT_PADDING_X;
+	private static final int UPPER_LINE_WIDTH = LOGICAL_WIDTH - CONTENT_PADDING_X * 2;
+	private static final List<FontPreset> FONT_PRESETS = List.of(
+			new FontPreset(14, 10, 17),
+			new FontPreset(13, 9, 16),
+			new FontPreset(12, 8, 15),
+			new FontPreset(11, 7, 13),
+			new FontPreset(10, 7, 12),
+			new FontPreset(9, 6, 11)
+	);
 
 	private RouteSignCorridorLayout() {
 	}
 
 	public static Optional<Layout> fit(RouteSignCorridorModel.Model model, RouteAssetTextRasterizer text, String language) {
 		Objects.requireNonNull(model, "model");
-		final RouteAssetTextRasterizer rasterizer = Objects.requireNonNull(text, "text");
-		final String languageMode = requireLanguage(language);
+		final RouteAssetTextRasterizer checkedText = Objects.requireNonNull(text, "text");
+		final String checkedLanguage = requireLanguage(language);
 		if (model.getCorridors().isEmpty() || model.getRows().isEmpty()) return Optional.empty();
+		for (final FontPreset preset : FONT_PRESETS) {
+			final Optional<Layout> layout = fitAtPreset(model, checkedText, checkedLanguage, preset);
+			if (layout.isPresent()) return layout;
+		}
+		return Optional.empty();
+	}
 
-		final List<CorridorDraft> corridorDrafts = new ArrayList<>();
-		int minimumHeight = CURRENT_BAND_HEIGHT + SEPARATOR_HEIGHT * Math.max(0, model.getCorridors().size() - 1);
+	private static Optional<Layout> fitAtPreset(RouteSignCorridorModel.Model model, RouteAssetTextRasterizer text,
+			String language, FontPreset preset) {
+		final List<CorridorDraft> drafts = new ArrayList<>();
+		int usedHeight = MASTHEAD_HEIGHT + Math.max(0, model.getCorridors().size() - 1) * SEPARATOR_HEIGHT;
 		for (final RouteSignCorridorModel.Corridor corridor : model.getCorridors()) {
-			final List<RowDraft> rowDrafts = new ArrayList<>();
+			final List<RowDraft> rows = new ArrayList<>();
 			int rowsHeight = 0;
 			for (final RouteSignCorridorModel.RouteRow row : corridor.getRows()) {
-				final Optional<RowDraft> rowDraft = fitRow(model, row, rasterizer, languageMode);
+				final Optional<RowDraft> rowDraft = fitRow(model, row, text, language, preset);
 				if (rowDraft.isEmpty()) return Optional.empty();
-				rowDrafts.add(rowDraft.get());
+				rows.add(rowDraft.get());
 				rowsHeight += rowDraft.get().height;
 			}
-			final int corridorHeight = CORRIDOR_PADDING_Y * 2 + CORRIDOR_HEADING_MIN_HEIGHT + rowsHeight;
-			minimumHeight += corridorHeight;
-			corridorDrafts.add(new CorridorDraft(corridor, rowDrafts, corridorHeight));
+			final int height = CORRIDOR_PADDING_Y * 2 + CORRIDOR_HEADING_MIN_HEIGHT + rowsHeight;
+			usedHeight += height;
+			drafts.add(new CorridorDraft(corridor, rows, height));
 		}
-		if (minimumHeight > LOGICAL_HEIGHT) return Optional.empty();
+		if (usedHeight > LOGICAL_HEIGHT) return Optional.empty();
 
-		final int remaining = LOGICAL_HEIGHT - minimumHeight;
-		final int commonExtra = remaining / corridorDrafts.size();
-		final int extraRemainder = remaining % corridorDrafts.size();
-		final List<CorridorBox> corridorBoxes = new ArrayList<>();
-		int corridorY = CURRENT_BAND_HEIGHT;
-		for (int corridorIndex = 0; corridorIndex < corridorDrafts.size(); corridorIndex++) {
-			final CorridorDraft draft = corridorDrafts.get(corridorIndex);
-			final int extra = commonExtra + (corridorIndex < extraRemainder ? 1 : 0);
-			final int corridorHeight = draft.minimumHeight + extra;
-			final int contentExtraTop = extra / 2;
-			final int headingY = corridorY + CORRIDOR_PADDING_Y + contentExtraTop;
+		final List<CorridorBox> corridors = new ArrayList<>();
+		int y = MASTHEAD_HEIGHT;
+		for (int corridorIndex = 0; corridorIndex < drafts.size(); corridorIndex++) {
+			final CorridorDraft draft = drafts.get(corridorIndex);
+			final int headingY = y + CORRIDOR_PADDING_Y;
 			int rowY = headingY + CORRIDOR_HEADING_MIN_HEIGHT;
 			final List<RouteRowBox> rows = new ArrayList<>();
-			for (final RowDraft rowDraft : draft.rows) {
-				rows.add(rowDraft.freeze(rowY));
-				rowY += rowDraft.height;
+			for (final RowDraft row : draft.rows) {
+				rows.add(row.freeze(rowY, preset));
+				rowY += row.height;
 			}
 			final RouteSignCorridorModel.StopOccurrence headingStop = draft.corridor.getRows().get(0).getNext();
-			corridorBoxes.add(new CorridorBox(
+			corridors.add(new CorridorBox(
 					draft.corridor.getStationId(), draft.corridor.getStationName(), headingStop,
-					0, corridorY, LOGICAL_WIDTH, corridorHeight,
-					CONTENT_PADDING_X, headingY, LOGICAL_WIDTH - CONTENT_PADDING_X * 2, CORRIDOR_HEADING_MIN_HEIGHT,
-					rows
+					0, y, LOGICAL_WIDTH, draft.height,
+					CONTENT_PADDING_X, headingY, UPPER_LINE_WIDTH, CORRIDOR_HEADING_MIN_HEIGHT, rows
 			));
-			corridorY += corridorHeight;
-			if (corridorIndex + 1 < corridorDrafts.size()) corridorY += SEPARATOR_HEIGHT;
+			y += draft.height;
+			if (corridorIndex + 1 < drafts.size()) y += SEPARATOR_HEIGHT;
 		}
-		if (corridorY != LOGICAL_HEIGHT) return Optional.empty();
 
 		return Optional.of(new Layout(
-				new CurrentBand(0, 0, LOGICAL_WIDTH, CURRENT_BAND_HEIGHT, CONTENT_PADDING_X,
-						model.getSelectedStationId(), model.getSelectedStationName(), model.getSelectedPlatformId(), model.getSelectedPlatformDisplayName()),
-				corridorBoxes
+				new CurrentBand(0, 0, LOGICAL_WIDTH, MASTHEAD_HEIGHT, CONTENT_PADDING_X,
+						model.getSelectedStationId(), "", model.getSelectedPlatformId(), model.getSelectedPlatformDisplayName()),
+				corridors, preset, usedHeight
 		));
 	}
 
 	private static Optional<RowDraft> fitRow(RouteSignCorridorModel.Model model, RouteSignCorridorModel.RouteRow row,
-			RouteAssetTextRasterizer text, String language) {
+			RouteAssetTextRasterizer text, String language, FontPreset preset) {
 		final int routeBadgeWidth = Math.max(ROUTE_BADGE_MIN_WIDTH,
-				measure(text, displayRouteName(row.getRouteName()), 9, 7, language).width + BADGE_TEXT_PADDING_X * 2);
-		final String nextPlatformName = row.getNext().getPlatformDisplayName();
-		final int platformBadgeWidth = nextPlatformName.isEmpty() ? 0 : Math.max(PLATFORM_BADGE_MIN_WIDTH,
-				measure(text, nextPlatformName, 8, 6, language).width + BADGE_TEXT_PADDING_X * 2);
+				measure(text, displayRouteName(row.getRouteName()), 11, 8, language).width + BADGE_TEXT_PADDING_X * 2);
 		final int ruleX = CONTENT_PADDING_X;
-		final int routeBadgeX = ruleX + ROUTE_RULE_WIDTH + INLINE_CONTROL_GAP;
-		final int platformBadgeX = routeBadgeX + routeBadgeWidth + INLINE_CONTROL_GAP;
-		final int firstLineX = platformBadgeX + (platformBadgeWidth == 0 ? 0 : platformBadgeWidth + INLINE_CONTROL_GAP);
-		final int textX = CONTENT_PADDING_X;
-		final int textWidth = LOGICAL_WIDTH - CONTENT_PADDING_X - textX;
-		final int lowerLineOffset = firstLineX - textX;
-		final int lowerLineWidth = textWidth - lowerLineOffset;
-		if (lowerLineWidth <= 0) return Optional.empty();
+		final int routeBadgeX = ruleX + ROUTE_RULE_WIDTH + INLINE_GAP;
+		final int finalLineX = routeBadgeX + routeBadgeWidth + INLINE_GAP;
+		final int finalLineWidth = LOGICAL_WIDTH - CONTENT_PADDING_X - finalLineX;
+		if (finalLineWidth <= 0) return Optional.empty();
 
-		final List<RouteSignCorridorModel.StopOccurrence> pathStops = row.getFutureStops().subList(1, row.getFutureStops().size());
-		if (pathStops.size() > RouteSignCorridorModel.MAX_TOKENS_PER_ROW) return Optional.empty();
-		final List<OptionalRun> optionalRuns = optionalRuns(row, pathStops);
-		optionalRuns.sort(Comparator.comparingInt(OptionalRun::size).reversed().thenComparingInt(OptionalRun::getFirstStopIndex));
-		final List<TokenSeed> stationSeeds = new ArrayList<>();
-		for (final RouteSignCorridorModel.StopOccurrence stop : pathStops) stationSeeds.add(stopSeed(model, row, stop));
-
-		final PathFitState mandatoryState = new PathFitState(stationSeeds, lowerLineWidth, textWidth, text, language);
-		for (final OptionalRun run : optionalRuns) mandatoryState.collapse(run);
-		if (!mandatoryState.fits(PATH_MAX_LINES)) return Optional.empty();
-		final Optional<WrappedTokens> mandatoryWrapped = wrap(mandatoryState.tokens(),
-				lowerLineOffset, lowerLineWidth, textWidth, text, language);
-		if (mandatoryWrapped.isEmpty()) return Optional.empty();
-		final int allocatedLineCount = mandatoryWrapped.get().lineCount;
-
-		final PathFitState selectedState = new PathFitState(stationSeeds, lowerLineWidth, textWidth, text, language);
-		for (final OptionalRun run : optionalRuns) {
-			if (selectedState.fits(allocatedLineCount)) break;
-			selectedState.collapse(run);
+		final List<TokenSeed> seeds = new ArrayList<>();
+		final List<RouteSignCorridorModel.StopOccurrence> futureStops = row.getFutureStops();
+		for (int index = 1; index < futureStops.size(); index++) {
+			seeds.add(stopSeed(model, row, futureStops.get(index)));
 		}
-		if (!selectedState.fits(allocatedLineCount)) return Optional.empty();
-		final Optional<WrappedTokens> wrapped = wrap(selectedState.tokens(),
-				lowerLineOffset, lowerLineWidth, textWidth, text, language);
-		if (wrapped.isEmpty() || wrapped.get().lineCount > allocatedLineCount) return Optional.empty();
-		final int rowHeight = allocatedLineCount == 1 ? ROUTE_ROW_MIN_HEIGHT :
-				Math.max(ROUTE_ROW_MIN_HEIGHT, PATH_LINE_HEIGHT + BADGE_HEIGHT + ROW_VERTICAL_PADDING);
-		return Optional.of(new RowDraft(row, routeBadgeX, routeBadgeWidth, platformBadgeX, platformBadgeWidth,
-				ruleX, textX, textWidth, rowHeight, wrapped.get()));
+		if (seeds.size() > RouteSignCorridorModel.MAX_TOKENS_PER_ROW) return Optional.empty();
+
+		final List<NaturalSize> sizes = new ArrayList<>();
+		for (final TokenSeed seed : seeds) {
+			final NaturalSize textSize = measure(text, seed.displayText, preset.cjkSize, preset.latinSize, language);
+			final int iconCount = iconCount(seed.interchange());
+			final int iconsWidth = iconsWidth(iconCount);
+			final int unitWidth = textSize.width + (iconCount == 0 ? 0 : ICON_GAP + iconsWidth);
+			if (unitWidth > UPPER_LINE_WIDTH) return Optional.empty();
+			sizes.add(new NaturalSize(unitWidth, Math.min(preset.lineHeight, textSize.height), textSize.width, iconCount, iconsWidth));
+		}
+
+		final Optional<WrappedTokens> wrapped = wrap(seeds, sizes, finalLineX, finalLineWidth);
+		if (wrapped.isEmpty()) return Optional.empty();
+		return Optional.of(new RowDraft(row, ruleX, routeBadgeX, routeBadgeWidth, UPPER_LINE_X,
+				UPPER_LINE_WIDTH, rowHeight(wrapped.get().lineCount, preset), wrapped.get()));
 	}
 
-	private static List<OptionalRun> optionalRuns(RouteSignCorridorModel.RouteRow row, List<RouteSignCorridorModel.StopOccurrence> stops) {
-		final List<OptionalRun> runs = new ArrayList<>();
-		int start = -1;
-		for (int index = 0; index <= stops.size(); index++) {
-			final boolean optional = index < stops.size() && !row.isMandatory(stops.get(index).getStopIndex());
-			if (optional && start < 0) start = index;
-			if (!optional && start >= 0) {
-				runs.add(new OptionalRun(start, index, stops.subList(start, index)));
-				start = -1;
+	private static Optional<WrappedTokens> wrap(List<TokenSeed> seeds, List<NaturalSize> sizes,
+			int finalLineX, int finalLineWidth) {
+		if (seeds.isEmpty()) return Optional.of(new WrappedTokens(List.of(), 1));
+		WrappedTokens best = null;
+		for (int finalStart = 0; finalStart <= seeds.size(); finalStart++) {
+			if (rangeWidth(sizes, finalStart, sizes.size()) > finalLineWidth) continue;
+			final List<MeasuredToken> measured = new ArrayList<>();
+			int line = 0;
+			int x = UPPER_LINE_X;
+			boolean valid = true;
+			for (int index = 0; index < finalStart; index++) {
+				final NaturalSize size = sizes.get(index);
+				final int required = (x == UPPER_LINE_X ? 0 : INLINE_GAP) + size.width;
+				if (x + required > UPPER_LINE_X + UPPER_LINE_WIDTH) {
+					line++;
+					x = UPPER_LINE_X;
+				}
+				if (x + size.width > UPPER_LINE_X + UPPER_LINE_WIDTH) {
+					valid = false;
+					break;
+				}
+				if (x != UPPER_LINE_X) x += INLINE_GAP;
+				measured.add(new MeasuredToken(seeds.get(index), size, x, line));
+				x += size.width;
 			}
+			if (!valid) continue;
+
+			final int finalLine = finalStart == 0 ? 0 : line + 1;
+			x = finalLineX;
+			for (int index = finalStart; index < seeds.size(); index++) {
+				if (index > finalStart) x += INLINE_GAP;
+				final NaturalSize size = sizes.get(index);
+				measured.add(new MeasuredToken(seeds.get(index), size, x, finalLine));
+				x += size.width;
+			}
+			final int lineCount = finalLine + 1;
+			if (best == null || lineCount < best.lineCount) best = new WrappedTokens(measured, lineCount);
 		}
-		return runs;
+		return Optional.ofNullable(best);
+	}
+
+	private static int rangeWidth(List<NaturalSize> sizes, int start, int end) {
+		int width = 0;
+		for (int index = start; index < end; index++) {
+			if (index > start) width += INLINE_GAP;
+			width += sizes.get(index).width;
+		}
+		return width;
 	}
 
 	private static TokenSeed stopSeed(RouteSignCorridorModel.Model model, RouteSignCorridorModel.RouteRow row,
 			RouteSignCorridorModel.StopOccurrence stop) {
 		if (stop.getStationId() == model.getSelectedStationId()) {
+			final String platform = stop.getPlatformDisplayName();
 			if (stop.getStopIndex() < row.getOrderedStops().get(row.getOrderedStops().size() - 1).getStopIndex()) {
-				final String platform = stop.getPlatformDisplayName();
 				final String display = continuesVia(stop.getStationName(), platform);
 				final String semantic = "CONTINUES VIA " + englishPart(stop.getStationName()).toUpperCase(Locale.ROOT) +
 						(platform.isEmpty() ? "" : " " + platform);
-				return new TokenSeed(DisplayToken.Kind.CONTINUES, display, semantic, List.of(stop), platform);
+				return new TokenSeed(DisplayToken.Kind.CONTINUES, display, semantic, stop, platform);
 			}
-			final String platform = stop.getPlatformDisplayName();
 			final String display = appendToEachLanguage(RETURN, platform);
-			return new TokenSeed(DisplayToken.Kind.RETURN, display, platform.isEmpty() ? "RETURN" : "RETURN " + platform, List.of(stop), platform);
+			return new TokenSeed(DisplayToken.Kind.RETURN, display,
+					platform.isEmpty() ? "RETURN" : "RETURN " + platform, stop, platform);
 		}
-		return new TokenSeed(DisplayToken.Kind.STATION,
-				appendToEachLanguage(stop.getStationName(), stop.getPlatformDisplayName()),
-				englishPart(stop.getStationName()), List.of(stop), stop.getPlatformDisplayName());
+		return new TokenSeed(DisplayToken.Kind.STATION, stop.getStationName(), englishPart(stop.getStationName()), stop, "");
 	}
 
-	private static Optional<WrappedTokens> wrap(List<TokenSeed> seeds, int lowerLineOffset, int lowerLineWidth,
-			int upperLineWidth, RouteAssetTextRasterizer text, String language) {
-		final List<NaturalSize> sizes = new ArrayList<>();
-		for (final TokenSeed seed : seeds) {
-			final NaturalSize size = seed.measure(text, language);
-			if (size.width > upperLineWidth) return Optional.empty();
-			sizes.add(size);
-		}
-		final int[] prefixWidths = new int[sizes.size() + 1];
-		for (int index = 0; index < sizes.size(); index++) prefixWidths[index + 1] = prefixWidths[index] + sizes.get(index).width;
-
-		final int completeWidth = lineWidth(prefixWidths, 0, seeds.size());
-		final boolean oneLine = completeWidth <= lowerLineWidth;
-		int split = 0;
-		if (!oneLine) {
-			split = -1;
-			int bestMaximumWidth = Integer.MAX_VALUE;
-			for (int candidate = 1; candidate <= seeds.size(); candidate++) {
-				final int upperWidth = lineWidth(prefixWidths, 0, candidate);
-				final int lowerWidth = lineWidth(prefixWidths, candidate, sizes.size());
-				final int maximumWidth = Math.max(upperWidth, lowerWidth);
-				if (upperWidth <= upperLineWidth && lowerWidth <= lowerLineWidth && maximumWidth < bestMaximumWidth) {
-					split = candidate;
-					bestMaximumWidth = maximumWidth;
-				}
-			}
-			if (split < 0) return Optional.empty();
-		}
-
-		final List<MeasuredToken> measured = new ArrayList<>();
-		int x = oneLine ? lowerLineOffset : 0;
-		for (int index = 0; index < seeds.size(); index++) {
-			final int line = oneLine || index < split ? 0 : 1;
-			if (!oneLine && index == split) x = lowerLineOffset;
-			if (index > 0 && index != split) x += INLINE_CONTROL_GAP;
-			final NaturalSize size = sizes.get(index);
-			measured.add(new MeasuredToken(seeds.get(index), x,
-					size.width, Math.min(PATH_LINE_HEIGHT, size.height), line));
-			x += size.width;
-		}
-		return Optional.of(new WrappedTokens(measured, oneLine ? 1 : PATH_MAX_LINES));
+	private static int rowHeight(int lineCount, FontPreset preset) {
+		return ROUTE_ROW_BASE_HEIGHT + Math.max(0, lineCount - 1) * preset.lineHeight;
 	}
 
-	private static int lineWidth(int[] prefixWidths, int start, int end) {
-		return prefixWidths[end] - prefixWidths[start] + Math.max(0, end - start - 1) * INLINE_CONTROL_GAP;
+	private static int iconCount(RouteAssetRenderSnapshot.Interchange interchange) {
+		return (interchange.hasRailway() ? 1 : 0) + (interchange.hasAirport() ? 1 : 0);
+	}
+
+	private static int iconsWidth(int count) {
+		return count == 0 ? 0 : count * TOKEN_ICON_SIZE + (count - 1) * ICON_GAP;
 	}
 
 	private static NaturalSize measure(RouteAssetTextRasterizer text, String value, int cjkSize, int latinSize, String language) {
 		final RouteAssetTextRasterizer.RasterizedText rendered = text.rasterize(value, Integer.MAX_VALUE, Integer.MAX_VALUE,
 				cjkSize, latinSize, 0, null, language);
-		return new NaturalSize(rendered.getWidth(), rendered.getHeight());
+		return new NaturalSize(rendered.getWidth(), rendered.getHeight(), rendered.getWidth(), 0, 0);
 	}
 
 	private static String continuesVia(String stationName, String platformName) {
-		final String primary = primaryPart(stationName);
-		final String secondary = englishPart(stationName);
-		return String.format(Locale.ROOT, CONTINUES_VIA, primary, platformName, secondary, platformName).replace("  ", " ").trim();
+		return String.format(Locale.ROOT, CONTINUES_VIA, primaryPart(stationName), platformName,
+				englishPart(stationName), platformName).replace("  ", " ").trim();
 	}
 
 	private static String appendToEachLanguage(String value, String suffix) {
@@ -253,7 +243,9 @@ public final class RouteSignCorridorLayout {
 
 	private static String englishPart(String value) {
 		final String[] parts = value.split("\\|", -1);
-		for (int index = parts.length - 1; index >= 0; index--) if (!parts[index].isEmpty() && !RouteAssetTextRasterizer.isCjk(parts[index])) return parts[index];
+		for (int index = parts.length - 1; index >= 0; index--) {
+			if (!parts[index].isEmpty() && !RouteAssetTextRasterizer.isCjk(parts[index])) return parts[index];
+		}
 		return parts.length == 0 ? value : parts[parts.length - 1];
 	}
 
@@ -263,7 +255,9 @@ public final class RouteSignCorridorLayout {
 
 	private static String requireLanguage(String language) {
 		final String value = Objects.requireNonNull(language, "language").trim().toUpperCase(Locale.ROOT);
-		if (!value.equals("NORMAL") && !value.equals("CJK") && !value.equals("LATIN")) throw new IllegalArgumentException("Unsupported route-sign language");
+		if (!value.equals("NORMAL") && !value.equals("CJK") && !value.equals("LATIN")) {
+			throw new IllegalArgumentException("Unsupported route-sign language");
+		}
 		return value;
 	}
 
@@ -274,196 +268,104 @@ public final class RouteSignCorridorLayout {
 	private static final class CorridorDraft {
 		private final RouteSignCorridorModel.Corridor corridor;
 		private final List<RowDraft> rows;
-		private final int minimumHeight;
+		private final int height;
 
-		private CorridorDraft(RouteSignCorridorModel.Corridor corridor, List<RowDraft> rows, int minimumHeight) {
+		private CorridorDraft(RouteSignCorridorModel.Corridor corridor, List<RowDraft> rows, int height) {
 			this.corridor = corridor;
 			this.rows = rows;
-			this.minimumHeight = minimumHeight;
+			this.height = height;
 		}
 	}
 
 	private static final class RowDraft {
 		private final RouteSignCorridorModel.RouteRow row;
+		private final int ruleX;
 		private final int routeBadgeX;
 		private final int routeBadgeWidth;
-		private final int platformBadgeX;
-		private final int platformBadgeWidth;
-		private final int ruleX;
 		private final int textX;
 		private final int textWidth;
 		private final int height;
 		private final WrappedTokens wrapped;
 
-		private RowDraft(RouteSignCorridorModel.RouteRow row, int routeBadgeX, int routeBadgeWidth, int platformBadgeX,
-				int platformBadgeWidth, int ruleX, int textX, int textWidth, int height, WrappedTokens wrapped) {
+		private RowDraft(RouteSignCorridorModel.RouteRow row, int ruleX, int routeBadgeX, int routeBadgeWidth,
+				int textX, int textWidth, int height, WrappedTokens wrapped) {
 			this.row = row;
+			this.ruleX = ruleX;
 			this.routeBadgeX = routeBadgeX;
 			this.routeBadgeWidth = routeBadgeWidth;
-			this.platformBadgeX = platformBadgeX;
-			this.platformBadgeWidth = platformBadgeWidth;
-			this.ruleX = ruleX;
 			this.textX = textX;
 			this.textWidth = textWidth;
 			this.height = height;
 			this.wrapped = wrapped;
 		}
 
-		private RouteRowBox freeze(int y) {
-			final int badgeY = wrapped.lineCount == 1 ? y + (height - BADGE_HEIGHT) / 2 :
-					y + ROW_VERTICAL_PADDING / 2 + PATH_LINE_HEIGHT;
-			final int oneLineTextY = y + (height - PATH_LINE_HEIGHT) / 2;
-			final int upperTextY = y + ROW_VERTICAL_PADDING / 2;
-			final int lowerTextY = badgeY + (BADGE_HEIGHT - PATH_LINE_HEIGHT) / 2;
+		private RouteRowBox freeze(int y, FontPreset preset) {
+			final int finalBaseY = y + (wrapped.lineCount - 1) * preset.lineHeight;
+			final int badgeY = finalBaseY + (ROUTE_ROW_BASE_HEIGHT - BADGE_HEIGHT) / 2;
 			final List<DisplayToken> tokens = new ArrayList<>();
 			for (final MeasuredToken measured : wrapped.tokens) {
-				final int tokenY = wrapped.lineCount == 1 ? oneLineTextY : measured.line == 0 ? upperTextY : lowerTextY;
+				final boolean finalLine = measured.line == wrapped.lineCount - 1;
+				final int lineY = finalLine
+						? finalBaseY + (ROUTE_ROW_BASE_HEIGHT - measured.size.height) / 2
+						: y + measured.line * preset.lineHeight + (preset.lineHeight - measured.size.height) / 2;
+				final int iconX = measured.x + measured.size.textWidth + (measured.size.iconCount == 0 ? 0 : ICON_GAP);
 				tokens.add(new DisplayToken(measured.seed.kind, measured.seed.displayText, measured.seed.semanticLabel,
-						measured.seed.sourceStops, measured.seed.platformLabel, textX + measured.x, tokenY,
-						measured.width, measured.height, measured.line));
+						List.of(measured.seed.stop), measured.seed.platformLabel, measured.x, lineY,
+						measured.size.textWidth, measured.size.height, measured.size.width,
+						measured.size.iconCount, iconX, measured.size.iconsWidth, measured.line));
 			}
 			return new RouteRowBox(row, 0, y, LOGICAL_WIDTH, height, ruleX, ROUTE_RULE_WIDTH,
-					routeBadgeX, routeBadgeWidth, platformBadgeX, platformBadgeWidth, badgeY,
-					textX, textWidth, wrapped.lineCount, tokens);
+					routeBadgeX, routeBadgeWidth, 0, 0, badgeY, textX, textWidth, wrapped.lineCount, tokens);
 		}
-	}
-
-	private static final class OptionalRun {
-		private final int startOffset;
-		private final int endOffset;
-		private final List<RouteSignCorridorModel.StopOccurrence> stops;
-		private final TokenSeed collapsedSeed;
-
-		private OptionalRun(int startOffset, int endOffset, List<RouteSignCorridorModel.StopOccurrence> stops) {
-			this.startOffset = startOffset;
-			this.endOffset = endOffset;
-			this.stops = immutable(stops);
-			final String display = size() == 1 ? ONE_STOP : String.format(Locale.ROOT, MANY_STOPS, size(), size());
-			final String semantic = size() == 1 ? "+1 stop" : "+" + size() + " stops";
-			collapsedSeed = new TokenSeed(DisplayToken.Kind.COLLAPSED, display, semantic, this.stops, "");
-		}
-
-		private int size() { return stops.size(); }
-		private int getFirstStopIndex() { return stops.get(0).getStopIndex(); }
 	}
 
 	private static final class TokenSeed {
 		private final DisplayToken.Kind kind;
 		private final String displayText;
 		private final String semanticLabel;
-		private final List<RouteSignCorridorModel.StopOccurrence> sourceStops;
+		private final RouteSignCorridorModel.StopOccurrence stop;
 		private final String platformLabel;
-		private NaturalSize naturalSize;
 
 		private TokenSeed(DisplayToken.Kind kind, String displayText, String semanticLabel,
-				List<RouteSignCorridorModel.StopOccurrence> sourceStops, String platformLabel) {
+				RouteSignCorridorModel.StopOccurrence stop, String platformLabel) {
 			this.kind = kind;
 			this.displayText = displayText;
 			this.semanticLabel = semanticLabel;
-			this.sourceStops = immutable(sourceStops);
+			this.stop = stop;
 			this.platformLabel = platformLabel;
 		}
 
-		private NaturalSize measure(RouteAssetTextRasterizer text, String language) {
-			if (naturalSize == null) naturalSize = RouteSignCorridorLayout.measure(text, displayText, 9, 6, language);
-			return naturalSize;
+		private RouteAssetRenderSnapshot.Interchange interchange() {
+			return stop.getInterchange();
 		}
 	}
 
-	private static final class PathFitState {
-		private final TokenSeed[] activeSeeds;
-		private final long[] contributions;
-		private final FenwickWidths widths;
-		private final int lowerLineWidth;
-		private final int upperLineWidth;
-		private final RouteAssetTextRasterizer text;
-		private final String language;
+	private static final class NaturalSize {
+		private final int width;
+		private final int height;
+		private final int textWidth;
+		private final int iconCount;
+		private final int iconsWidth;
 
-		private PathFitState(List<TokenSeed> stationSeeds, int lowerLineWidth, int upperLineWidth,
-				RouteAssetTextRasterizer text, String language) {
-			activeSeeds = stationSeeds.toArray(new TokenSeed[0]);
-			contributions = new long[activeSeeds.length];
-			widths = new FenwickWidths(activeSeeds.length);
-			this.lowerLineWidth = lowerLineWidth;
-			this.upperLineWidth = upperLineWidth;
-			this.text = text;
-			this.language = language;
-			for (int index = 0; index < activeSeeds.length; index++) replace(index, activeSeeds[index]);
-		}
-
-		private void collapse(OptionalRun run) {
-			replace(run.startOffset, run.collapsedSeed);
-			for (int index = run.startOffset + 1; index < run.endOffset; index++) replace(index, null);
-		}
-
-		private boolean fits(int maximumLines) {
-			final long total = widths.total();
-			if (total == 0) return true;
-			if (total - INLINE_CONTROL_GAP <= lowerLineWidth) return true;
-			if (maximumLines < PATH_MAX_LINES) return false;
-			final long upperContribution = widths.prefixAtMost((long) upperLineWidth + INLINE_CONTROL_GAP);
-			if (upperContribution == 0) return false;
-			final long lowerWidth = upperContribution == total ? 0 : total - upperContribution - INLINE_CONTROL_GAP;
-			return lowerWidth <= lowerLineWidth;
-		}
-
-		private List<TokenSeed> tokens() {
-			final List<TokenSeed> result = new ArrayList<>();
-			for (final TokenSeed seed : activeSeeds) if (seed != null) result.add(seed);
-			return result;
-		}
-
-		private void replace(int index, TokenSeed seed) {
-			final long contribution = seed == null ? 0 : (long) seed.measure(text, language).width + INLINE_CONTROL_GAP;
-			widths.add(index, contribution - contributions[index]);
-			contributions[index] = contribution;
-			activeSeeds[index] = seed;
-		}
-	}
-
-	private static final class FenwickWidths {
-		private final long[] tree;
-
-		private FenwickWidths(int size) {
-			tree = new long[size + 1];
-		}
-
-		private void add(int index, long delta) {
-			for (int treeIndex = index + 1; treeIndex < tree.length; treeIndex += treeIndex & -treeIndex) tree[treeIndex] += delta;
-		}
-
-		private long total() {
-			long result = 0;
-			for (int index = tree.length - 1; index > 0; index -= index & -index) result += tree[index];
-			return result;
-		}
-
-		private long prefixAtMost(long limit) {
-			int index = 0;
-			long sum = 0;
-			for (int step = Integer.highestOneBit(tree.length - 1); step != 0; step >>= 1) {
-				final int next = index + step;
-				if (next < tree.length && sum + tree[next] <= limit) {
-					index = next;
-					sum += tree[next];
-				}
-			}
-			return sum;
+		private NaturalSize(int width, int height, int textWidth, int iconCount, int iconsWidth) {
+			this.width = width;
+			this.height = height;
+			this.textWidth = textWidth;
+			this.iconCount = iconCount;
+			this.iconsWidth = iconsWidth;
 		}
 	}
 
 	private static final class MeasuredToken {
 		private final TokenSeed seed;
+		private final NaturalSize size;
 		private final int x;
-		private final int width;
-		private final int height;
 		private final int line;
 
-		private MeasuredToken(TokenSeed seed, int x, int width, int height, int line) {
+		private MeasuredToken(TokenSeed seed, NaturalSize size, int x, int line) {
 			this.seed = seed;
+			this.size = size;
 			this.x = x;
-			this.width = width;
-			this.height = height;
 			this.line = line;
 		}
 	}
@@ -478,28 +380,47 @@ public final class RouteSignCorridorLayout {
 		}
 	}
 
-	private static final class NaturalSize {
-		private final int width;
-		private final int height;
-		private NaturalSize(int width, int height) { this.width = width; this.height = height; }
+	public static final class FontPreset {
+		private final int cjkSize;
+		private final int latinSize;
+		private final int lineHeight;
+
+		private FontPreset(int cjkSize, int latinSize, int lineHeight) {
+			this.cjkSize = cjkSize;
+			this.latinSize = latinSize;
+			this.lineHeight = lineHeight;
+		}
+
+		public int getCjkSize() { return cjkSize; }
+		public int getLatinSize() { return latinSize; }
+		public int getLineHeight() { return lineHeight; }
 	}
 
 	public static final class Layout {
 		private final CurrentBand currentBand;
 		private final List<CorridorBox> corridors;
 		private final List<RouteRowBox> rows;
+		private final FontPreset fontPreset;
+		private final int usedHeight;
 
-		private Layout(CurrentBand currentBand, List<CorridorBox> corridors) {
+		private Layout(CurrentBand currentBand, List<CorridorBox> corridors, FontPreset fontPreset, int usedHeight) {
 			this.currentBand = currentBand;
 			this.corridors = immutable(corridors);
+			this.fontPreset = fontPreset;
+			this.usedHeight = usedHeight;
 			final List<RouteRowBox> allRows = new ArrayList<>();
 			for (final CorridorBox corridor : corridors) allRows.addAll(corridor.getRows());
-			this.rows = immutable(allRows);
+			rows = immutable(allRows);
 		}
 
 		public int getWidth() { return LOGICAL_WIDTH; }
 		public int getHeight() { return LOGICAL_HEIGHT; }
+		public int getUsedHeight() { return usedHeight; }
+		public int getUnusedHeight() { return LOGICAL_HEIGHT - usedHeight; }
+		public FontPreset getFontPreset() { return fontPreset; }
 		public CurrentBand getCurrentBand() { return currentBand; }
+		public CurrentBand getMasthead() { return currentBand; }
+		public CurrentBand getPlatformMasthead() { return currentBand; }
 		public List<CorridorBox> getCorridors() { return corridors; }
 		public List<RouteRowBox> getRows() { return rows; }
 		public RouteRowBox row(String routeName) {
@@ -513,10 +434,17 @@ public final class RouteSignCorridorLayout {
 		private final long stationId, platformId;
 		private final String stationName, platformName;
 
-		private CurrentBand(int x, int y, int width, int height, int xPadding, long stationId, String stationName,
-				long platformId, String platformName) {
-			this.x = x; this.y = y; this.width = width; this.height = height; this.xPadding = xPadding;
-			this.stationId = stationId; this.stationName = stationName; this.platformId = platformId; this.platformName = platformName;
+		private CurrentBand(int x, int y, int width, int height, int xPadding, long stationId,
+				String stationName, long platformId, String platformName) {
+			this.x = x;
+			this.y = y;
+			this.width = width;
+			this.height = height;
+			this.xPadding = xPadding;
+			this.stationId = stationId;
+			this.stationName = stationName;
+			this.platformId = platformId;
+			this.platformName = platformName;
 		}
 
 		public int getX() { return x; }
@@ -528,6 +456,7 @@ public final class RouteSignCorridorLayout {
 		public String getStationName() { return stationName; }
 		public long getPlatformId() { return platformId; }
 		public String getPlatformName() { return platformName; }
+		public String getPlatformDisplayName() { return platformName; }
 	}
 
 	public static final class CorridorBox {
@@ -540,9 +469,17 @@ public final class RouteSignCorridorLayout {
 		private CorridorBox(long stationId, String stationName, RouteSignCorridorModel.StopOccurrence headingStop,
 				int x, int y, int width, int height, int headingX, int headingY, int headingWidth, int headingHeight,
 				List<RouteRowBox> rows) {
-			this.stationId = stationId; this.stationName = stationName; this.headingStop = headingStop;
-			this.x = x; this.y = y; this.width = width; this.height = height;
-			this.headingX = headingX; this.headingY = headingY; this.headingWidth = headingWidth; this.headingHeight = headingHeight;
+			this.stationId = stationId;
+			this.stationName = stationName;
+			this.headingStop = headingStop;
+			this.x = x;
+			this.y = y;
+			this.width = width;
+			this.height = height;
+			this.headingX = headingX;
+			this.headingY = headingY;
+			this.headingWidth = headingWidth;
+			this.headingHeight = headingHeight;
 			this.rows = immutable(rows);
 		}
 
@@ -569,10 +506,22 @@ public final class RouteSignCorridorLayout {
 		private RouteRowBox(RouteSignCorridorModel.RouteRow row, int x, int y, int width, int height,
 				int ruleX, int ruleWidth, int routeBadgeX, int routeBadgeWidth, int platformBadgeX,
 				int platformBadgeWidth, int badgeY, int textX, int textWidth, int lineCount, List<DisplayToken> tokens) {
-			this.row = row; this.x = x; this.y = y; this.width = width; this.height = height;
-			this.ruleX = ruleX; this.ruleWidth = ruleWidth; this.routeBadgeX = routeBadgeX; this.routeBadgeWidth = routeBadgeWidth;
-			this.platformBadgeX = platformBadgeX; this.platformBadgeWidth = platformBadgeWidth; this.badgeY = badgeY;
-			this.textX = textX; this.textWidth = textWidth; this.lineCount = lineCount; this.tokens = immutable(tokens);
+			this.row = row;
+			this.x = x;
+			this.y = y;
+			this.width = width;
+			this.height = height;
+			this.ruleX = ruleX;
+			this.ruleWidth = ruleWidth;
+			this.routeBadgeX = routeBadgeX;
+			this.routeBadgeWidth = routeBadgeWidth;
+			this.platformBadgeX = platformBadgeX;
+			this.platformBadgeWidth = platformBadgeWidth;
+			this.badgeY = badgeY;
+			this.textX = textX;
+			this.textWidth = textWidth;
+			this.lineCount = lineCount;
+			this.tokens = immutable(tokens);
 		}
 
 		public RouteSignCorridorModel.RouteRow getModelRow() { return row; }
@@ -600,7 +549,6 @@ public final class RouteSignCorridorLayout {
 		public List<DisplayToken> getTokens() { return tokens; }
 		public List<String> labels() {
 			final LinkedHashSet<String> labels = new LinkedHashSet<>();
-			if (!getNextPlatformName().isEmpty()) labels.add(getNextPlatformName());
 			for (final DisplayToken token : tokens) if (!token.getPlatformLabel().isEmpty()) labels.add(token.getPlatformLabel());
 			return immutable(new ArrayList<>(labels));
 		}
@@ -616,14 +564,25 @@ public final class RouteSignCorridorLayout {
 		private final Kind kind;
 		private final String displayText, semanticLabel, platformLabel;
 		private final List<RouteSignCorridorModel.StopOccurrence> sourceStops;
-		private final int x, y, width, height, line;
+		private final int x, y, width, height, unitWidth, iconCount, iconX, iconsWidth, line;
 
 		private DisplayToken(Kind kind, String displayText, String semanticLabel,
 				List<RouteSignCorridorModel.StopOccurrence> sourceStops, String platformLabel,
-				int x, int y, int width, int height, int line) {
-			this.kind = kind; this.displayText = displayText; this.semanticLabel = semanticLabel;
-			this.sourceStops = immutable(sourceStops); this.platformLabel = platformLabel;
-			this.x = x; this.y = y; this.width = width; this.height = height; this.line = line;
+				int x, int y, int width, int height, int unitWidth, int iconCount, int iconX, int iconsWidth, int line) {
+			this.kind = kind;
+			this.displayText = displayText;
+			this.semanticLabel = semanticLabel;
+			this.sourceStops = immutable(sourceStops);
+			this.platformLabel = platformLabel;
+			this.x = x;
+			this.y = y;
+			this.width = width;
+			this.height = height;
+			this.unitWidth = unitWidth;
+			this.iconCount = iconCount;
+			this.iconX = iconX;
+			this.iconsWidth = iconsWidth;
+			this.line = line;
 		}
 
 		public Kind getKind() { return kind; }
@@ -638,6 +597,11 @@ public final class RouteSignCorridorLayout {
 		public int getY() { return y; }
 		public int getWidth() { return width; }
 		public int getHeight() { return height; }
+		public int getTextWidth() { return width; }
+		public int getUnitWidth() { return unitWidth; }
+		public int getIconCount() { return iconCount; }
+		public int getIconX() { return iconX; }
+		public int getIconsWidth() { return iconsWidth; }
 		public int getLine() { return line; }
 	}
 }
