@@ -104,6 +104,7 @@ public final class Init implements Utilities {
 		REGISTRY.registerPacket(PacketForwardClientRequest.class, PacketForwardClientRequest::new);
 		REGISTRY.registerPacket(PacketUpdateKeyDispenserConfig.class, PacketUpdateKeyDispenserConfig::new);
 		REGISTRY.registerPacket(PacketOpenBlockEntityScreen.class, PacketOpenBlockEntityScreen::new);
+		REGISTRY.registerPacket(PacketOpenDestinationSignScreen.class, PacketOpenDestinationSignScreen::new);
 		REGISTRY.registerPacket(PacketOpenDashboardScreen.class, PacketOpenDashboardScreen::new);
 		REGISTRY.registerPacket(PacketOpenLiftCustomizationScreen.class, PacketOpenLiftCustomizationScreen::new);
 		REGISTRY.registerPacket(PacketOpenPIDSConfigScreen.class, PacketOpenPIDSConfigScreen::new);
@@ -118,6 +119,7 @@ public final class Init implements Utilities {
 		REGISTRY.registerPacket(PacketSetRouteIdHasDisabledAnnouncements.class, PacketSetRouteIdHasDisabledAnnouncements::new);
 		REGISTRY.registerPacket(PacketTurnOnBlockEntity.class, PacketTurnOnBlockEntity::new);
 		REGISTRY.registerPacket(PacketUpdateData.class, PacketUpdateData::new);
+		REGISTRY.registerPacket(PacketUpdateDestinationSignConfig.class, PacketUpdateDestinationSignConfig::new);
 		REGISTRY.registerPacket(PacketUpdateEyeCandyConfig.class, PacketUpdateEyeCandyConfig::new);
 		REGISTRY.registerPacket(PacketUpdateLastRailStyles.class, PacketUpdateLastRailStyles::new);
 		REGISTRY.registerPacket(PacketUpdateLiftTrackFloorConfig.class, PacketUpdateLiftTrackFloorConfig::new);

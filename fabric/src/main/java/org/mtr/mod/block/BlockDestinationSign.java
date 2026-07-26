@@ -10,6 +10,7 @@ import org.mtr.mapping.tool.HolderBase;
 import org.mtr.mod.BlockEntityTypes;
 import org.mtr.mod.Init;
 import org.mtr.mod.data.PersistentStateData;
+import org.mtr.mod.packet.PacketOpenDestinationSignScreen;
 import org.mtr.mod.route.DestinationSignConfiguredEntry;
 import org.mtr.mod.route.RouteAssetServerManager;
 
@@ -59,7 +60,10 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 	@Nonnull
 	@Override
 	public ActionResult onUse2(BlockState state, World world, BlockPos pos, PlayerEntity player, Hand hand, BlockHitResult hit) {
-		return IBlock.checkHoldingBrush(world, player, () -> { });
+		return IBlock.checkHoldingBrush(world, player, () -> {
+			final BlockPos anchor = resolveAnchor(world, pos, state);
+			if (anchor != null) Init.REGISTRY.sendPacketToClient(ServerPlayerEntity.cast(player), new PacketOpenDestinationSignScreen(anchor));
+		});
 	}
 
 	@Override
@@ -73,7 +77,7 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 						if (!player.isCreative()) dropStack2(world, anchor, new ItemStack(new ItemConvertible(org.mtr.mod.Blocks.DESTINATION_STATION_SIGN.get().data)));
 						removeConfiguredIndex(world, anchor);
 						final List<BlockPos> ownedCells = new ArrayList<>();
-						for (final DestinationSignFootprint.Cell cell : DestinationSignFootprint.cells(anchor, getFacing(world.getBlockState(anchor)), DestinationSignFootprint.MAX_WIDTH, DestinationSignFootprint.MAX_HEIGHT)) {
+						for (final DestinationSignFootprint.Cell cell : DestinationSignFootprint.cells(anchor, getFacing(world.getBlockState(anchor)), entity.getConfig().getWidth(), entity.getConfig().getHeight())) {
 							if (isOwnedBy(world, cell.getPosition(), anchor)) ownedCells.add(cell.getPosition());
 						}
 						ownedCells.forEach(cell -> world.setBlockState(cell, Blocks.getAirMapped().getDefaultState(), 35));
@@ -112,6 +116,7 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 	}
 
 	public static boolean applyConfig(World world, BlockPos anchor, @Nullable PlayerEntity player, DestinationSignConfig replacement) {
+		if (!isCanonicalAnchor(world, anchor)) return false;
 		final BlockEntity entity = getAnchorEntity(world, anchor);
 		if (entity == null) return false;
 		final BlockState anchorState = world.getBlockState(anchor);
@@ -120,13 +125,16 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 		final List<DestinationSignFootprint.Cell> oldCells = DestinationSignFootprint.cells(anchor, facing, previous.getWidth(), previous.getHeight());
 		final List<DestinationSignFootprint.Cell> newCells = DestinationSignFootprint.cells(anchor, facing, replacement.getWidth(), replacement.getHeight());
 		final Map<BlockPos, BlockState> finalStates = new LinkedHashMap<>();
+		final Map<BlockPos, BlockState> originalStates = new LinkedHashMap<>();
 		final Set<BlockPos> touched = new LinkedHashSet<>();
 		oldCells.forEach(cell -> touched.add(cell.getPosition()));
 		newCells.forEach(cell -> touched.add(cell.getPosition()));
 
 		for (final BlockPos position : touched) {
 			if (!world.isRegionLoaded(position, position) || player != null && !world.canPlayerModifyAt(player, position)) return false;
-			finalStates.put(position, world.getBlockState(position));
+			final BlockState originalState = world.getBlockState(position);
+			originalStates.put(position, originalState);
+			finalStates.put(position, originalState);
 		}
 		for (final DestinationSignFootprint.Cell cell : oldCells) {
 			if (isOwnedBy(world, cell.getPosition(), anchor)) finalStates.put(cell.getPosition(), Blocks.getAirMapped().getDefaultState());
@@ -135,6 +143,14 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 			final BlockState current = world.getBlockState(cell.getPosition());
 			if (!isOwnedBy(world, cell.getPosition(), anchor) && !current.data.isReplaceable()) return false;
 			finalStates.put(cell.getPosition(), state(facing, cell.getHorizontalOffset(), cell.getVerticalOffset()));
+		}
+
+		final PersistentStateData persistentState = (PersistentStateData) PersistenceStateExtension.register(ServerWorld.cast(world), PersistentStateData::new, Init.MOD_ID);
+		final boolean indexChanged;
+		try {
+			indexChanged = updateConfiguredIndex(persistentState, anchor, replacement);
+		} catch (RuntimeException exception) {
+			return false;
 		}
 
 		final List<BlockPos> positions = new ArrayList<>(touched);
@@ -155,13 +171,22 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 				world.setBlockState(position, value, 2);
 			}
 		});
-		if (!committed) return false;
+		if (!committed) {
+			restoreConfiguredIndex(persistentState, anchor, previous);
+			return false;
+		}
 
-		entity.setConfig(replacement);
-		entity.syncConfiguredIndex();
+		try {
+			entity.setConfig(replacement);
+		} catch (RuntimeException exception) {
+			originalStates.forEach((position, originalState) -> world.setBlockState(position, originalState, 2));
+			entity.setConfig(previous);
+			restoreConfiguredIndex(persistentState, anchor, previous);
+			return false;
+		}
+		if (indexChanged) notifyConfiguredAssets(world, "destination-sign-config");
 		for (final BlockPos position : touched) {
 			world.updateNeighbors(position, org.mtr.mod.Blocks.DESTINATION_STATION_SIGN.get());
-			world.updateListeners(position, finalStates.get(position), finalStates.get(position), 3);
 		}
 		return true;
 	}
@@ -189,6 +214,13 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 		return entity != null && entity.data instanceof BlockEntity ? (BlockEntity) entity.data : null;
 	}
 
+	public static boolean isCanonicalAnchor(World world, BlockPos anchor) {
+		final BlockState state = world.getBlockState(anchor);
+		if (!state.isOf(org.mtr.mod.Blocks.DESTINATION_STATION_SIGN.get()) || getHorizontalOffset(state) != 0 || getVerticalOffset(state) != 0) return false;
+		final BlockPos resolved = resolveAnchor(world, anchor, state);
+		return anchor.equals(resolved);
+	}
+
 	private static boolean isOwnedBy(World world, BlockPos cell, BlockPos expectedAnchor) {
 		final BlockState state = world.getBlockState(cell);
 		final BlockPos actualAnchor = resolveAnchor(world, cell, state);
@@ -209,6 +241,21 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 	private static void removeConfiguredIndex(World world, BlockPos anchor) {
 		final PersistentStateData persistentState = (PersistentStateData) PersistenceStateExtension.register(ServerWorld.cast(world), PersistentStateData::new, Init.MOD_ID);
 		if (persistentState.removeConfiguredSign(anchor.asLong())) notifyConfiguredAssets(world, "destination-sign-break");
+	}
+
+	private static boolean updateConfiguredIndex(PersistentStateData persistentState, BlockPos anchor, DestinationSignConfig config) {
+		return config.isConfigured()
+				? persistentState.configureDestinationSign(anchor.asLong(), configuredEntry(config))
+				: persistentState.removeConfiguredSign(anchor.asLong());
+	}
+
+	private static void restoreConfiguredIndex(PersistentStateData persistentState, BlockPos anchor, DestinationSignConfig previous) {
+		if (previous.isConfigured()) persistentState.configureDestinationSign(anchor.asLong(), configuredEntry(previous));
+		else persistentState.removeConfiguredSign(anchor.asLong());
+	}
+
+	private static DestinationSignConfiguredEntry configuredEntry(DestinationSignConfig config) {
+		return new DestinationSignConfiguredEntry(config.getSourceStationId(), config.getDestinationStationId(), config.getWidth(), config.getHeight(), config.getStyle(), config.isShowEta());
 	}
 
 	private static void notifyConfiguredAssets(World world, String cause) {
@@ -256,12 +303,7 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 			if (world == null || world.isClient()) return;
 			final PersistentStateData persistentState = (PersistentStateData) PersistenceStateExtension.register(ServerWorld.cast(world), PersistentStateData::new, Init.MOD_ID);
 			final boolean changed;
-			if (config.isConfigured()) {
-				changed = persistentState.configureDestinationSign(getPos2().asLong(), new DestinationSignConfiguredEntry(
-						config.getSourceStationId(), config.getDestinationStationId(), config.getWidth(), config.getHeight(), config.getStyle(), config.isShowEta()));
-			} else {
-				changed = persistentState.removeConfiguredSign(getPos2().asLong());
-			}
+			changed = updateConfiguredIndex(persistentState, getPos2(), config);
 			if (changed) notifyConfiguredAssets(world, "destination-sign-config");
 		}
 	}

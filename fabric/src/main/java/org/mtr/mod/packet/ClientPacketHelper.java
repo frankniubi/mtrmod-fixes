@@ -59,6 +59,14 @@ public final class ClientPacketHelper {
 		});
 	}
 
+	public static void openDestinationSignScreen(BlockPos blockPos) {
+		getBlockEntity(blockPos, blockEntity -> {
+			if (blockEntity.data instanceof BlockDestinationSign.BlockEntity) {
+				openScreen(new DestinationSignConfigScreen(blockPos), screenExtension -> screenExtension instanceof DestinationSignConfigScreen);
+			}
+		});
+	}
+
 	public static void openDashboardScreen(TransportMode transportMode, PacketOpenDashboardScreen.ScreenType screenType, long id) {
 		switch (screenType) {
 			case STATION:
