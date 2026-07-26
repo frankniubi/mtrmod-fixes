@@ -145,6 +145,106 @@ public final class DynamicTextureDependencyTrackerTest {
 		}
 	}
 
+	@Test
+	public void slowResolvedValueIsDiscardedWhenRouteEpochChanges() throws Exception {
+		final DynamicTextureDependencyTracker tracker = new DynamicTextureDependencyTracker();
+		final AtomicInteger resolverCalls = new AtomicInteger();
+		final AtomicReference<Object> obsoleteValue = new AtomicReference<>();
+		final AtomicReference<Object> acceptedValue = new AtomicReference<>();
+		final AtomicReference<Object> lastFingerprintValue = new AtomicReference<>();
+		final CountDownLatch resolvingFirst = new CountDownLatch(1);
+		final CountDownLatch releaseFirst = new CountDownLatch(1);
+		final ExecutorService executor = Executors.newSingleThreadExecutor();
+		try {
+			final java.util.concurrent.Future<DynamicTextureDependencyTracker.Resolution<Object>> evaluation = executor.submit(() -> tracker.evaluateResolved("key", () -> {
+				final Object value = new Object();
+				if (resolverCalls.incrementAndGet() == 1) {
+					obsoleteValue.set(value);
+					resolvingFirst.countDown();
+					try {
+						if (!releaseFirst.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("timeout");
+					} catch (InterruptedException exception) {
+						Thread.currentThread().interrupt();
+						throw new IllegalStateException(exception);
+					}
+				} else {
+					acceptedValue.set(value);
+				}
+				return value;
+			}, value -> {
+				lastFingerprintValue.set(value);
+				return "stable";
+			}));
+
+			Assertions.assertTrue(resolvingFirst.await(5, TimeUnit.SECONDS));
+			Assertions.assertEquals(1, tracker.onRouteDataChanged(), "epoch invalidation must not wait for the resolver");
+			releaseFirst.countDown();
+
+			final DynamicTextureDependencyTracker.Resolution<Object> resolution = evaluation.get(5, TimeUnit.SECONDS);
+			Assertions.assertEquals(2, resolverCalls.get(), "the value resolved against the obsolete epoch must be discarded and recomputed");
+			Assertions.assertNotSame(obsoleteValue.get(), resolution.getValue());
+			Assertions.assertSame(acceptedValue.get(), resolution.getValue());
+			Assertions.assertSame(resolution.getValue(), lastFingerprintValue.get(), "fingerprinting and rendering must use the same accepted immutable object");
+
+			final DynamicTextureDependencyTracker.Resolution<Object> current = tracker.currentResolved("key", Object.class);
+			Assertions.assertNotNull(current);
+			Assertions.assertSame(resolution.getToken(), current.getToken());
+			Assertions.assertSame(resolution.getValue(), current.getValue());
+		} finally {
+			releaseFirst.countDown();
+			executor.shutdownNow();
+		}
+	}
+
+	@Test
+	public void routeEpochWithEqualFingerprintReusesTokenAndReplacesResolvedValue() {
+		final DynamicTextureDependencyTracker tracker = new DynamicTextureDependencyTracker();
+		final Object firstValue = new Object();
+		final Object secondValue = new Object();
+		final AtomicInteger resolverCalls = new AtomicInteger();
+		final DynamicTextureDependencyTracker.Resolution<Object> first = tracker.evaluateResolved("key", () -> {
+			resolverCalls.incrementAndGet();
+			return firstValue;
+		}, ignored -> "stable");
+
+		tracker.onRouteDataChanged();
+		final DynamicTextureDependencyTracker.Resolution<Object> second = tracker.evaluateResolved("key", () -> {
+			resolverCalls.incrementAndGet();
+			return secondValue;
+		}, ignored -> "stable");
+
+		Assertions.assertEquals(2, resolverCalls.get());
+		Assertions.assertSame(first.getToken(), second.getToken(), "route-only revalidation with equal content must preserve the resident token");
+		Assertions.assertNotSame(first.getValue(), second.getValue());
+		Assertions.assertSame(secondValue, second.getValue(), "the accepted immutable snapshot must still be replaced");
+		Assertions.assertSame(secondValue, tracker.currentResolved("key", Object.class).getValue());
+	}
+
+	@Test
+	public void resourceAndVariantEpochsSupersedeEqualResolvedFingerprints() {
+		final DynamicTextureDependencyTracker tracker = new DynamicTextureDependencyTracker();
+		final DynamicTextureDependencyTracker.Resolution<Object> initial = tracker.evaluateResolved("key", Object::new, ignored -> "stable");
+
+		tracker.onResourceReload();
+		final DynamicTextureDependencyTracker.Resolution<Object> afterResource = tracker.evaluateResolved("key", Object::new, ignored -> "stable");
+		Assertions.assertNotSame(initial.getToken(), afterResource.getToken());
+		Assertions.assertNotSame(initial.getValue(), afterResource.getValue());
+
+		tracker.onVariantChanged();
+		final DynamicTextureDependencyTracker.Resolution<Object> afterVariant = tracker.evaluateResolved("key", Object::new, ignored -> "stable");
+		Assertions.assertNotSame(afterResource.getToken(), afterVariant.getToken());
+		Assertions.assertNotSame(afterResource.getValue(), afterVariant.getValue());
+	}
+
+	@Test
+	public void fingerprintOnlyEvaluationDoesNotExposeAResolvedValue() {
+		final DynamicTextureDependencyTracker tracker = new DynamicTextureDependencyTracker();
+		final DynamicTextureDependencyTracker.Token token = tracker.evaluate("key", () -> "stable");
+
+		Assertions.assertSame(token, tracker.current("key"));
+		Assertions.assertNull(tracker.currentResolved("key", Object.class));
+	}
+
 	private static String fingerprint(String value, AtomicInteger evaluations) {
 		evaluations.incrementAndGet();
 		return value;

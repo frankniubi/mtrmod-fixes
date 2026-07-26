@@ -3,6 +3,7 @@ package org.mtr.mod.client.asset;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -44,8 +45,49 @@ public final class DynamicTextureDependencyTracker {
 				final Entry basis = current == null ? existing : current;
 				final boolean forceSupersession = basis == null || basis.resourceEpoch != checkedResourceEpoch || basis.variantEpoch != checkedVariantEpoch;
 				final Token token = forceSupersession || !basis.token.fingerprint.equals(fingerprint) ? new Token(this, checkedKey, nextSequence(), fingerprint) : basis.token;
-				entries.put(checkedKey, new Entry(checkedRouteEpoch, checkedResourceEpoch, checkedVariantEpoch, token));
+				entries.put(checkedKey, new Entry(checkedRouteEpoch, checkedResourceEpoch, checkedVariantEpoch, token, null));
 				return token;
+			}
+		}
+	}
+
+	/**
+	 * Resolves one immutable dependency value and publishes it atomically with its token.
+	 */
+	public <T> Resolution<T> evaluateResolved(String key, Supplier<T> resolver, Function<T, String> fingerprint) {
+		final String checkedKey = Objects.requireNonNull(key, "key");
+		final Supplier<T> checkedResolver = Objects.requireNonNull(resolver, "resolver");
+		final Function<T, String> checkedFingerprint = Objects.requireNonNull(fingerprint, "fingerprint");
+		while (true) {
+			final Entry existing;
+			final long checkedRouteEpoch;
+			final long checkedResourceEpoch;
+			final long checkedVariantEpoch;
+			synchronized (this) {
+				existing = entries.get(checkedKey);
+				if (existing != null && existing.resolvedValue != null && existing.matchesEpochs(routeEpoch, resourceEpoch, variantEpoch)) {
+					@SuppressWarnings("unchecked") final T value = (T) existing.resolvedValue;
+					return new Resolution<>(existing.token, value);
+				}
+				checkedRouteEpoch = routeEpoch;
+				checkedResourceEpoch = resourceEpoch;
+				checkedVariantEpoch = variantEpoch;
+			}
+
+			final T value = Objects.requireNonNull(checkedResolver.get(), "resolver returned null");
+			final String resolvedFingerprint = Objects.requireNonNull(checkedFingerprint.apply(value), "fingerprint returned null");
+			synchronized (this) {
+				if (routeEpoch != checkedRouteEpoch || resourceEpoch != checkedResourceEpoch || variantEpoch != checkedVariantEpoch) continue;
+				final Entry current = entries.get(checkedKey);
+				if (current != null && current.resolvedValue != null && current.matchesEpochs(routeEpoch, resourceEpoch, variantEpoch)) {
+					@SuppressWarnings("unchecked") final T currentValue = (T) current.resolvedValue;
+					return new Resolution<>(current.token, currentValue);
+				}
+				final Entry basis = current == null ? existing : current;
+				final boolean forceSupersession = basis == null || basis.resourceEpoch != checkedResourceEpoch || basis.variantEpoch != checkedVariantEpoch;
+				final Token token = forceSupersession || !basis.token.fingerprint.equals(resolvedFingerprint) ? new Token(this, checkedKey, nextSequence(), resolvedFingerprint) : basis.token;
+				entries.put(checkedKey, new Entry(checkedRouteEpoch, checkedResourceEpoch, checkedVariantEpoch, token, value));
+				return new Resolution<>(token, value);
 			}
 		}
 	}
@@ -54,6 +96,14 @@ public final class DynamicTextureDependencyTracker {
 	public synchronized Token current(String key) {
 		final Entry entry = entries.get(Objects.requireNonNull(key, "key"));
 		return entry != null && entry.matchesEpochs(routeEpoch, resourceEpoch, variantEpoch) ? entry.token : null;
+	}
+
+	/** Returns a resolved value only when it was published against every current epoch. */
+	public synchronized <T> Resolution<T> currentResolved(String key, Class<T> valueClass) {
+		final Entry entry = entries.get(Objects.requireNonNull(key, "key"));
+		final Class<T> checkedValueClass = Objects.requireNonNull(valueClass, "valueClass");
+		if (entry == null || !entry.matchesEpochs(routeEpoch, resourceEpoch, variantEpoch) || !checkedValueClass.isInstance(entry.resolvedValue)) return null;
+		return new Resolution<>(entry.token, checkedValueClass.cast(entry.resolvedValue));
 	}
 
 	public synchronized boolean isCurrent(String key, Token token) {
@@ -90,6 +140,25 @@ public final class DynamicTextureDependencyTracker {
 	private static long incrementEpoch(long epoch, String name) {
 		if (epoch == Long.MAX_VALUE) throw new IllegalStateException("Dynamic texture " + name + " epoch exhausted");
 		return epoch + 1;
+	}
+
+	public static final class Resolution<T> {
+
+		private final Token token;
+		private final T value;
+
+		private Resolution(Token token, T value) {
+			this.token = token;
+			this.value = value;
+		}
+
+		public Token getToken() {
+			return token;
+		}
+
+		public T getValue() {
+			return value;
+		}
 	}
 
 	public static final class Token {
@@ -138,12 +207,14 @@ public final class DynamicTextureDependencyTracker {
 		private final long resourceEpoch;
 		private final long variantEpoch;
 		private final Token token;
+		private final Object resolvedValue;
 
-		private Entry(long routeEpoch, long resourceEpoch, long variantEpoch, Token token) {
+		private Entry(long routeEpoch, long resourceEpoch, long variantEpoch, Token token, Object resolvedValue) {
 			this.routeEpoch = routeEpoch;
 			this.resourceEpoch = resourceEpoch;
 			this.variantEpoch = variantEpoch;
 			this.token = token;
+			this.resolvedValue = resolvedValue;
 		}
 
 		private boolean matchesEpochs(long routeEpoch, long resourceEpoch, long variantEpoch) {
