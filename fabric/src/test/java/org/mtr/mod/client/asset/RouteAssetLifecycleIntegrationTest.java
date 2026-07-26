@@ -85,6 +85,30 @@ public final class RouteAssetLifecycleIntegrationTest {
 	}
 
 	@Test
+	public void snapshotPromotesPriorRendererPngWithoutRequestingIt() throws Exception {
+		final String hash = RouteAssetHash.sha256(PNG);
+		final RouteAssetManifest manifest = RouteAssetManifest.builder().put(key(13, 2, "NORMAL"), hash, "prior-renderer").build();
+		final byte[] document = RouteAssetManifestCodec.encode(manifest);
+		final Path prior = temporaryDirectory.resolve("cas").resolve(Integer.toString(RouteAssetProtocol.RENDERER_VERSION - 1)).resolve("sha256").resolve(hash.substring(0, 2)).resolve(hash + ".png");
+		Files.createDirectories(prior.getParent());
+		Files.write(prior, PNG);
+		final List<String> requestedPaths = new java.util.concurrent.CopyOnWriteArrayList<>();
+		startServer(requestedPaths, Map.of(documentPath(document), document));
+		final ClientRouteAssetDiskCache cache = cache();
+		final List<org.mtr.mod.route.RouteAssetHello> hellos = new ArrayList<>();
+		final ClientRouteAssetManager manager = manager(cache, new AtomicLong(), hellos);
+
+		manager.onJoin("127.0.0.1");
+		manager.handleManifest(payload(RouteAssetNegotiation.Mode.SNAPSHOT, UUID.randomUUID().toString(), manifest.getRevision(), document, hellos.get(0).getRequestNonce()));
+		awaitState(manager, ClientRouteAssetSession.State.READY);
+
+		Assertions.assertEquals(List.of(routePath(documentPath(document))), requestedPaths);
+		Assertions.assertTrue(cache.findPng(hash).isPresent());
+		Assertions.assertEquals(0, manager.getProgress().getCompletedObjects());
+		Assertions.assertEquals(0, manager.getProgress().getTotalObjects());
+	}
+
+	@Test
 	public void diffRepairsEveryMissingActiveHashAndPublishesAtomically() throws Exception {
 		final String unchangedHash = RouteAssetHash.sha256(PNG);
 		final String introducedHash = RouteAssetHash.sha256(PNG_2);

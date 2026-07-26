@@ -5,18 +5,32 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mtr.mod.packet.PacketRouteAssetManifest;
 import org.mtr.mod.route.RouteAssetHash;
+import org.mtr.mod.route.RouteAssetKey;
+import org.mtr.mod.route.RouteAssetManifest;
+import org.mtr.mod.route.RouteAssetManifestCodec;
+import org.mtr.mod.route.RouteAssetNegotiation;
 import org.mtr.mod.route.RouteAssetProtocol;
+import org.mtr.mod.route.RouteAssetType;
+import org.mtr.mod.route.RouteAssetVariant;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Constructor;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -26,6 +40,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class ClientRouteAssetDownloaderTest {
+	private static final String FINGERPRINT = "f".repeat(64);
 
 	@TempDir
 	Path temporaryDirectory;
@@ -278,6 +293,84 @@ public final class ClientRouteAssetDownloaderTest {
 		Assertions.assertTrue(cache().findPng(RouteAssetHash.sha256(invalidPng)).isEmpty());
 	}
 
+	@Test
+	public void validPriorRendererPngSkipsTheNetworkAndSurvivesZeroBytePruneBudget() throws Exception {
+		final byte[] png = png(0xFF123456);
+		final String hash = RouteAssetHash.sha256(png);
+		writePriorPng(hash, png);
+		final RouteAssetManifest manifest = activeManifest(hash);
+		final byte[] document = RouteAssetManifestCodec.encode(manifest);
+		final AtomicInteger documentRequests = new AtomicInteger();
+		final AtomicInteger pngRequests = new AtomicInteger();
+		final AtomicInteger planned = new AtomicInteger(-1);
+		final ClientRouteAssetDiskCache cache = cache();
+		executor = Executors.newSingleThreadExecutor();
+		final ClientRouteAssetDownloader downloader = new ClientRouteAssetDownloader(cache, executor, target -> {
+			if (target.getUri().getPath().endsWith(".json")) {
+				documentRequests.incrementAndGet();
+				return response(200, document.length, document);
+			}
+			pngRequests.incrementAndGet();
+			return response(200, png.length, png);
+		});
+
+		final ClientRouteAssetDownloader.SyncResult result = downloader.synchronize(
+				documentRequest(manifest, document),
+				2,
+				"NORMAL",
+				RouteAssetProtocol.MAX_REVISION_DOWNLOAD_BYTES,
+				0,
+				cache.getSessionEpoch(),
+				() -> true,
+				progress(planned)
+		).get(5, TimeUnit.SECONDS);
+
+		Assertions.assertEquals(1, documentRequests.get());
+		Assertions.assertEquals(0, pngRequests.get());
+		Assertions.assertEquals(0, planned.get());
+		Assertions.assertEquals(0, result.getDownloadedObjects());
+		Assertions.assertTrue(cache.findPng(hash).isPresent(), "the promoted active hash must be pinned during prune");
+	}
+
+	@Test
+	public void corruptPriorRendererPngProducesExactlyOneNormalPngRequest() throws Exception {
+		final byte[] png = png(0xFF654321);
+		final String hash = RouteAssetHash.sha256(png);
+		writePriorPng(hash, new byte[]{1, 2, 3});
+		final RouteAssetManifest manifest = activeManifest(hash);
+		final byte[] document = RouteAssetManifestCodec.encode(manifest);
+		final AtomicInteger documentRequests = new AtomicInteger();
+		final AtomicInteger pngRequests = new AtomicInteger();
+		final AtomicInteger planned = new AtomicInteger(-1);
+		final ClientRouteAssetDiskCache cache = cache();
+		executor = Executors.newSingleThreadExecutor();
+		final ClientRouteAssetDownloader downloader = new ClientRouteAssetDownloader(cache, executor, target -> {
+			if (target.getUri().getPath().endsWith(".json")) {
+				documentRequests.incrementAndGet();
+				return response(200, document.length, document);
+			}
+			pngRequests.incrementAndGet();
+			return response(200, png.length, png);
+		});
+
+		final ClientRouteAssetDownloader.SyncResult result = downloader.synchronize(
+				documentRequest(manifest, document),
+				2,
+				"NORMAL",
+				RouteAssetProtocol.MAX_REVISION_DOWNLOAD_BYTES,
+				1024 * 1024,
+				cache.getSessionEpoch(),
+				() -> true,
+				progress(planned)
+		).get(5, TimeUnit.SECONDS);
+
+		Assertions.assertEquals(1, documentRequests.get());
+		Assertions.assertEquals(1, pngRequests.get());
+		Assertions.assertEquals(1, planned.get());
+		Assertions.assertEquals(1, result.getDownloadedObjects());
+		Assertions.assertTrue(cache.findPng(hash).isPresent());
+	}
+
 	private ClientRouteAssetDownloader downloader() {
 		return new ClientRouteAssetDownloader(cache(), executor);
 	}
@@ -304,6 +397,59 @@ public final class ClientRouteAssetDownloaderTest {
 
 	private static ClientRouteAssetDownloader.TransportResponse response(int code, long length, byte[] body) {
 		return new ClientRouteAssetDownloader.TransportResponse(code, length, null, new ByteArrayInputStream(body));
+	}
+
+	private void writePriorPng(String hash, byte[] bytes) throws Exception {
+		final Path path = temporaryDirectory.toAbsolutePath().normalize().resolve("cas").resolve(Integer.toString(RouteAssetProtocol.RENDERER_VERSION - 1)).resolve("sha256").resolve(hash.substring(0, 2)).resolve(hash + ".png");
+		Files.createDirectories(path.getParent());
+		Files.write(path, bytes);
+	}
+
+	private static RouteAssetManifest activeManifest(String hash) {
+		return RouteAssetManifest.builder().put(new RouteAssetKey("minecraft:overworld", RouteAssetType.ROUTE_MAP, 1, new RouteAssetVariant(2, "NORMAL", Map.of("style", "normal"))), hash, "fixture").build();
+	}
+
+	private static ClientRouteAssetManager.DocumentRequest documentRequest(RouteAssetManifest manifest, byte[] document) throws Exception {
+		final String documentHash = RouteAssetHash.sha256(document);
+		final String documentPath = "v" + RouteAssetProtocol.RENDERER_VERSION + '/' + documentHash.substring(0, 2) + '/' + documentHash + ".json";
+		final PacketRouteAssetManifest.ManifestPayload payload = new PacketRouteAssetManifest.ManifestPayload(
+				RouteAssetNegotiation.Mode.SNAPSHOT,
+				UUID.randomUUID().toString(),
+				25565,
+				"",
+				manifest.getRevision(),
+				documentHash,
+				document.length,
+				documentPath,
+				RouteAssetProtocol.RENDERER_VERSION,
+				FINGERPRINT,
+				"",
+				1
+		);
+		final Constructor<ClientRouteAssetManager.DocumentRequest> constructor = ClientRouteAssetManager.DocumentRequest.class.getDeclaredConstructor(long.class, PacketRouteAssetManifest.ManifestPayload.class, String.class);
+		constructor.setAccessible(true);
+		return constructor.newInstance(1L, payload, "127.0.0.1");
+	}
+
+	private static ClientRouteAssetDownloader.ProgressListener progress(AtomicInteger planned) {
+		return new ClientRouteAssetDownloader.ProgressListener() {
+			@Override
+			public void planned(int totalObjects) {
+				planned.set(totalObjects);
+			}
+
+			@Override
+			public void completed(int completedObjects, int totalObjects) {
+			}
+		};
+	}
+
+	private static byte[] png(int argb) throws Exception {
+		final BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+		image.setRGB(0, 0, argb);
+		final ByteArrayOutputStream output = new ByteArrayOutputStream();
+		Assertions.assertTrue(ImageIO.write(image, "png", output));
+		return output.toByteArray();
 	}
 
 	private void assertDownloadFailure(ClientRouteAssetUrlPolicy policy, byte[] expected, long expectedLength, long maximumBytes, ClientRouteAssetDownloader.Transport transport, String message) {

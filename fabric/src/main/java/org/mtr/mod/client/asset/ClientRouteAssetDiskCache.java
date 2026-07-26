@@ -15,13 +15,17 @@ import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -83,13 +87,28 @@ public final class ClientRouteAssetDiskCache {
 				try {
 					Files.write(temporary, bytes, StandardOpenOption.TRUNCATE_EXISTING);
 					force(temporary);
-					validatePng(Files.readAllBytes(temporary), hash);
+					validatePng(readBounded(temporary, RouteAssetProtocol.MAX_PNG_BYTES), hash);
 					moveAtomically(temporary, target);
-					validatePng(Files.readAllBytes(target), hash);
+					validatePng(readBounded(target, RouteAssetProtocol.MAX_PNG_BYTES), hash);
 					return hash;
 				} finally {
 					Files.deleteIfExists(temporary);
 				}
+			}
+		} finally {
+			ADMISSION_LOCKS.remove(target, lock);
+		}
+	}
+
+	public Optional<Path> promotePngFromPriorVersions(String expectedHash) throws IOException {
+		final String hash = RouteAssetHash.requireValid(expectedHash);
+		final Path target = pathForPng(hash);
+		final Object lock = ADMISSION_LOCKS.computeIfAbsent(target, ignored -> new Object());
+		try {
+			synchronized (lock) {
+				final Optional<Path> current = findPng(hash);
+				if (current.isPresent()) return current;
+				return promotePngFromPriorVersionsLocked(hash, target);
 			}
 		} finally {
 			ADMISSION_LOCKS.remove(target, lock);
@@ -311,11 +330,68 @@ public final class ClientRouteAssetDiskCache {
 		writeAtomic(associationsPath, object.toString().getBytes(StandardCharsets.UTF_8));
 	}
 
+	private Optional<Path> promotePngFromPriorVersionsLocked(String hash, Path target) throws IOException {
+		for (int version = rendererVersion - 1; version >= RouteAssetProtocol.MIN_REUSABLE_PNG_RENDERER_VERSION; version--) {
+			final Path prior = pathForPng(version, hash);
+			if (promoteVerifiedPng(prior, target, hash)) return Optional.of(target);
+		}
+		return Optional.empty();
+	}
+
+	private boolean promoteVerifiedPng(Path prior, Path target, String hash) throws IOException {
+		try {
+			validatePng(readBounded(prior, RouteAssetProtocol.MAX_PNG_BYTES), hash);
+		} catch (IOException | RuntimeException exception) {
+			return false;
+		}
+		Files.createDirectories(target.getParent());
+		final Path temporary = promotionTemporaryPath(target, hash);
+		boolean moved = false;
+		try {
+			try {
+				Files.createLink(temporary, prior);
+			} catch (IOException | UnsupportedOperationException | SecurityException exception) {
+				Files.copy(prior, temporary, LinkOption.NOFOLLOW_LINKS);
+			}
+			force(temporary);
+			validatePng(readBounded(temporary, RouteAssetProtocol.MAX_PNG_BYTES), hash);
+			moveAtomically(temporary, target);
+			moved = true;
+			validatePng(readBounded(target, RouteAssetProtocol.MAX_PNG_BYTES), hash);
+			return true;
+		} catch (IOException | RuntimeException exception) {
+			if (moved) Files.deleteIfExists(target);
+			return false;
+		} finally {
+			Files.deleteIfExists(temporary);
+		}
+	}
+
+	private Path pathForPng(int version, String hash) {
+		final String validHash = RouteAssetHash.requireValid(hash);
+		return root.resolve("cas").resolve(Integer.toString(version)).resolve("sha256").resolve(validHash.substring(0, 2)).resolve(validHash + ".png");
+	}
+
+	private static Path promotionTemporaryPath(Path target, String hash) {
+		final String validHash = RouteAssetHash.requireValid(hash);
+		final Path directory = target.toAbsolutePath().normalize().getParent();
+		if (directory == null) throw new IllegalArgumentException("Route asset promotion target has no parent");
+		while (true) {
+			final Path temporary = directory.resolve('.' + validHash + '-' + UUID.randomUUID().toString() + ".tmp");
+			if (!Files.exists(temporary, LinkOption.NOFOLLOW_LINKS)) return temporary;
+		}
+	}
+
 	private static void validatePng(byte[] bytes, String expectedHash) throws IOException {
 		validateStoredPng(bytes, expectedHash);
 		final java.awt.image.BufferedImage image = ImageIO.read(new ByteArrayInputStream(bytes));
-		if (image == null || image.getWidth() <= 0 || image.getHeight() <= 0 || image.getWidth() > RouteAssetProtocol.MAX_PNG_AXIS || image.getHeight() > RouteAssetProtocol.MAX_PNG_AXIS || (long) image.getWidth() * image.getHeight() > RouteAssetProtocol.MAX_PNG_PIXELS) {
-			throw new IOException("Invalid route asset PNG dimensions");
+		if (image == null) throw new IOException("Invalid route asset PNG dimensions");
+		try {
+			if (image.getWidth() <= 0 || image.getHeight() <= 0 || image.getWidth() > RouteAssetProtocol.MAX_PNG_AXIS || image.getHeight() > RouteAssetProtocol.MAX_PNG_AXIS || (long) image.getWidth() * image.getHeight() > RouteAssetProtocol.MAX_PNG_PIXELS) {
+				throw new IOException("Invalid route asset PNG dimensions");
+			}
+		} finally {
+			image.flush();
 		}
 	}
 
@@ -326,11 +402,30 @@ public final class ClientRouteAssetDiskCache {
 	}
 
 	private static byte[] readBounded(Path path, long maximumBytes) throws IOException {
-		final long size = Files.size(path);
-		if (size <= 0 || size > maximumBytes) throw new IOException("Route asset cache file exceeds its size limit");
-		final byte[] bytes = Files.readAllBytes(path);
-		if (bytes.length > maximumBytes) throw new IOException("Route asset cache file grew beyond its size limit");
-		return bytes;
+		final FileStamp before = readStamp(path);
+		if (before.size <= 0 || before.size > maximumBytes || before.size > Integer.MAX_VALUE) throw new IOException("Route asset cache file exceeds its size limit");
+		final ByteBuffer buffer = ByteBuffer.allocate((int) before.size);
+		try (final FileChannel channel = FileChannel.open(path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
+			if (channel.size() != before.size) throw new IOException("Route asset cache file changed before reading");
+			while (buffer.hasRemaining()) {
+				if (channel.read(buffer) < 0) throw new IOException("Route asset cache file was truncated while reading");
+			}
+			final ByteBuffer extra = ByteBuffer.allocate(1);
+			int extraBytes;
+			do {
+				extraBytes = channel.read(extra);
+			} while (extraBytes == 0);
+			if (extraBytes >= 0) throw new IOException("Route asset cache file grew while reading");
+		}
+		final FileStamp after = readStamp(path);
+		if (!before.equals(after)) throw new IOException("Route asset cache file changed during reading");
+		return buffer.array();
+	}
+
+	private static FileStamp readStamp(Path path) throws IOException {
+		final BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+		if (!attributes.isRegularFile()) throw new IOException("Route asset cache object is not a regular file");
+		return new FileStamp(attributes.size(), attributes.lastModifiedTime(), attributes.fileKey());
 	}
 
 	private static void writeAtomic(Path target, byte[] bytes) throws IOException {
@@ -357,7 +452,7 @@ public final class ClientRouteAssetDiskCache {
 	}
 
 	private static void force(Path path) throws IOException {
-		try (final FileChannel channel = FileChannel.open(path, StandardOpenOption.WRITE)) {
+		try (final FileChannel channel = FileChannel.open(path, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
 			channel.force(true);
 		}
 	}
@@ -385,6 +480,31 @@ public final class ClientRouteAssetDiskCache {
 			return Files.getLastModifiedTime(path).toMillis();
 		} catch (IOException exception) {
 			return Long.MIN_VALUE;
+		}
+	}
+
+	private static final class FileStamp {
+		private final long size;
+		private final FileTime modified;
+		private final Object fileKey;
+
+		private FileStamp(long size, FileTime modified, Object fileKey) {
+			this.size = size;
+			this.modified = modified;
+			this.fileKey = fileKey;
+		}
+
+		@Override
+		public boolean equals(Object object) {
+			if (this == object) return true;
+			if (!(object instanceof FileStamp)) return false;
+			final FileStamp stamp = (FileStamp) object;
+			return size == stamp.size && modified.equals(stamp.modified) && java.util.Objects.equals(fileKey, stamp.fileKey);
+		}
+
+		@Override
+		public int hashCode() {
+			return java.util.Objects.hash(size, modified, fileKey);
 		}
 	}
 

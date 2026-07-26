@@ -257,17 +257,29 @@ public final class ClientRouteAssetDownloader {
 			throw new IOException("Route asset manifest metadata mismatch");
 		}
 
-		final Set<String> previousHashes = new HashSet<>();
-		if (previous != null) previous.getEntries().values().forEach(entry -> previousHashes.add(entry.getHash()));
 		final Set<String> activeHashes = activeHashes(next, resolution, language);
 		if (activeHashes.isEmpty()) throw new IOException("Route asset manifest has no entries for the active variant");
+		checkCurrent(documentRequest, expectedCancellationEpoch);
+		if (diskCache.getSessionEpoch() != expectedCacheEpoch) throw new IOException("Route asset cache session changed before promotion");
+		diskCache.initialize();
+		for (final String hash : activeHashes) {
+			checkCurrent(documentRequest, expectedCancellationEpoch);
+			if (diskCache.getSessionEpoch() != expectedCacheEpoch) throw new IOException("Route asset cache session changed during promotion");
+			diskCache.promotePngFromPriorVersions(hash);
+		}
+		checkCurrent(documentRequest, expectedCancellationEpoch);
+		if (diskCache.getSessionEpoch() != expectedCacheEpoch) throw new IOException("Route asset cache session changed during promotion");
+		final Set<String> previousActivePins = previous == null ? Collections.emptySet() : activeHashes(previous, resolution, language);
+		final Set<String> pins = new HashSet<>(previousActivePins);
+		pins.addAll(activeHashes);
+		final ClientRouteAssetDiskCache.PruneResult pruneResult = diskCache.prune(cacheMaximumBytes, pins, expectedCacheEpoch);
+		checkCurrent(documentRequest, expectedCancellationEpoch);
+		if (diskCache.getSessionEpoch() != expectedCacheEpoch) throw new IOException("Route asset cache session changed during synchronization");
+		final Set<String> previousHashes = new HashSet<>();
+		if (previous != null) previous.getEntries().values().forEach(entry -> previousHashes.add(entry.getHash()));
 		final Set<String> introducedActiveHashes = new LinkedHashSet<>(activeHashes);
 		if (request.getPayload().getMode() == RouteAssetNegotiation.Mode.DIFF) introducedActiveHashes.removeAll(previousHashes);
 		for (final String hash : activeHashes) if (diskCache.findPng(hash).isEmpty()) introducedActiveHashes.add(hash);
-		diskCache.initialize();
-		final Set<String> previousActivePins = previous == null ? Collections.emptySet() : activeHashes(previous, resolution, language);
-		final ClientRouteAssetDiskCache.PruneResult pruneResult = diskCache.prune(cacheMaximumBytes, previousActivePins, expectedCacheEpoch);
-		if (diskCache.getSessionEpoch() != expectedCacheEpoch) throw new IOException("Route asset cache session changed during synchronization");
 		final long remainingCacheBytes = Math.max(0, cacheMaximumBytes - pruneResult.getRemainingBytes());
 		final DownloadBudget admissionBudget = new DownloadBudget(Math.min(RouteAssetProtocol.MAX_REVISION_DOWNLOAD_BYTES, remainingCacheBytes));
 		final List<String> missingIntroducedHashes = new ArrayList<>();
@@ -420,8 +432,10 @@ public final class ClientRouteAssetDownloader {
 		return output.toByteArray();
 	}
 
-	private void checkCurrent(DownloadRequest request, long expectedCancellationEpoch) throws IOException {
-		if (cancellationEpoch.get() != expectedCancellationEpoch || !request.generationCurrent.getAsBoolean() || Thread.currentThread().isInterrupted()) throw new IOException("Route asset download generation was cancelled");
+	private void checkCurrent(DownloadRequest request, long expectedCancellationEpoch) {
+		if (cancellationEpoch.get() != expectedCancellationEpoch || !request.generationCurrent.getAsBoolean() || Thread.currentThread().isInterrupted()) {
+			throw new CancellationException("Route asset download generation was cancelled");
+		}
 	}
 
 	private static boolean isRedirect(int code) {

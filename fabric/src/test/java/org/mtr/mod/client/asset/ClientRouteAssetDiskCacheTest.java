@@ -11,10 +11,14 @@ import org.mtr.mod.route.RouteAssetProtocol;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.FileTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -37,7 +41,7 @@ public final class ClientRouteAssetDiskCacheTest {
 		Assertions.assertFalse(Files.exists(root));
 		cache.initialize();
 		cache.initialize();
-		Assertions.assertTrue(Files.isDirectory(root.resolve("cas").resolve("1").resolve("sha256")));
+		Assertions.assertTrue(Files.isDirectory(root.resolve("cas").resolve(Integer.toString(RouteAssetProtocol.RENDERER_VERSION)).resolve("sha256")));
 		Assertions.assertTrue(Files.isDirectory(root.resolve("servers")));
 	}
 
@@ -96,11 +100,153 @@ public final class ClientRouteAssetDiskCacheTest {
 		Assertions.assertEquals(hash, one.get());
 		Assertions.assertEquals(hash, two.get());
 
-		final Path expected = temporaryDirectory.resolve("cas").resolve("1").resolve("sha256").resolve(hash.substring(0, 2)).resolve(hash + ".png");
+		final Path expected = rendererPngPath(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION, hash);
 		Assertions.assertEquals(expected, first.pathForPng(hash));
 		Assertions.assertArrayEquals(png, Files.readAllBytes(expected));
 		try (final java.util.stream.Stream<Path> files = Files.list(expected.getParent())) {
 			Assertions.assertEquals(1, files.filter(Files::isRegularFile).count());
+		}
+	}
+
+	@Test
+	public void ordinaryLookupStaysCurrentOnlyAndValidPriorPngPromotes() throws Exception {
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		final byte[] bytes = png(0xFF102030);
+		final String hash = RouteAssetHash.sha256(bytes);
+		final Path prior = rendererPngPath(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION - 1, hash);
+		Files.createDirectories(prior.getParent());
+		Files.write(prior, bytes);
+
+		Assertions.assertTrue(cache.findPng(hash).isEmpty(), "ordinary lookup must not search prior renderer namespaces");
+		final Path promoted = cache.promotePngFromPriorVersions(hash).orElseThrow();
+
+		Assertions.assertEquals(cache.pathForPng(hash), promoted);
+		Assertions.assertArrayEquals(bytes, Files.readAllBytes(promoted));
+		Assertions.assertArrayEquals(bytes, Files.readAllBytes(prior));
+		Assertions.assertEquals(promoted, cache.promotePngFromPriorVersions(hash).orElseThrow(), "promotion is idempotent");
+	}
+
+	@Test
+	public void corruptPriorPngIsIgnored() throws Exception {
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		final byte[] expected = png(0xFF203040);
+		final String hash = RouteAssetHash.sha256(expected);
+		writeRendererPng(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION - 1, hash, new byte[]{1, 2, 3});
+
+		Assertions.assertTrue(cache.promotePngFromPriorVersions(hash).isEmpty());
+		Assertions.assertFalse(Files.exists(cache.pathForPng(hash)));
+	}
+
+	@Test
+	public void priorPngStoredUnderTheWrongHashIsIgnored() throws Exception {
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		final byte[] expected = png(0xFF304050);
+		final byte[] wrong = png(0xFF405060);
+		final String hash = RouteAssetHash.sha256(expected);
+		writeRendererPng(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION - 1, hash, wrong);
+
+		Assertions.assertTrue(cache.promotePngFromPriorVersions(hash).isEmpty());
+		Assertions.assertFalse(Files.exists(cache.pathForPng(hash)));
+	}
+
+	@Test
+	public void oversizedPriorPngDimensionsAreIgnored() throws Exception {
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		final byte[] oversized = png(RouteAssetProtocol.MAX_PNG_AXIS + 1, 1, 0xFF506070);
+		final String hash = RouteAssetHash.sha256(oversized);
+		writeRendererPng(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION - 1, hash, oversized);
+
+		Assertions.assertTrue(cache.promotePngFromPriorVersions(hash).isEmpty());
+		Assertions.assertFalse(Files.exists(cache.pathForPng(hash)));
+	}
+
+	@Test
+	public void oversizedPriorFileIsRejectedBeforeItIsRead() throws Exception {
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		final String hash = RouteAssetHash.sha256(png(0xFF516171));
+		final Path prior = rendererPngPath(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION - 1, hash);
+		Files.createDirectories(prior.getParent());
+		try (final FileChannel channel = FileChannel.open(prior, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
+			channel.position(RouteAssetProtocol.MAX_PNG_BYTES);
+			channel.write(ByteBuffer.wrap(new byte[]{1}));
+		}
+
+		Assertions.assertEquals(RouteAssetProtocol.MAX_PNG_BYTES + 1L, Files.size(prior));
+		Assertions.assertTrue(cache.promotePngFromPriorVersions(hash).isEmpty());
+		Assertions.assertFalse(Files.exists(cache.pathForPng(hash)));
+	}
+
+	@Test
+	public void unsupportedRendererNamespaceIsNeverSearched() throws Exception {
+		Assertions.assertTrue(RouteAssetProtocol.MIN_REUSABLE_PNG_RENDERER_VERSION > 0);
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		final byte[] bytes = png(0xFF607080);
+		final String hash = RouteAssetHash.sha256(bytes);
+		writeRendererPng(temporaryDirectory, RouteAssetProtocol.MIN_REUSABLE_PNG_RENDERER_VERSION - 1, hash, bytes);
+
+		Assertions.assertTrue(cache.promotePngFromPriorVersions(hash).isEmpty());
+		Assertions.assertFalse(Files.exists(cache.pathForPng(hash)));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> cache.promotePngFromPriorVersions("../" + hash));
+	}
+
+	@Test
+	public void concurrentPromotionDeduplicatesTheCurrentObjectAndCleansStagingFiles() throws Exception {
+		final ClientRouteAssetDiskCache first = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		final ClientRouteAssetDiskCache second = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		final byte[] bytes = png(0xFF708090);
+		final String hash = RouteAssetHash.sha256(bytes);
+		writeRendererPng(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION - 1, hash, bytes);
+		final CountDownLatch start = new CountDownLatch(1);
+		final ExecutorService executor = Executors.newFixedThreadPool(2);
+		try {
+			final Future<Optional<Path>> one = executor.submit(() -> {
+				await(start);
+				return first.promotePngFromPriorVersions(hash);
+			});
+			final Future<Optional<Path>> two = executor.submit(() -> {
+				await(start);
+				return second.promotePngFromPriorVersions(hash);
+			});
+			start.countDown();
+
+			Assertions.assertEquals(first.pathForPng(hash), one.get(5, TimeUnit.SECONDS).orElseThrow());
+			Assertions.assertEquals(first.pathForPng(hash), two.get(5, TimeUnit.SECONDS).orElseThrow());
+			try (final java.util.stream.Stream<Path> files = Files.list(first.pathForPng(hash).getParent())) {
+				final List<String> names = files.filter(Files::isRegularFile).map(path -> path.getFileName().toString()).sorted().collect(java.util.stream.Collectors.toList());
+				Assertions.assertEquals(List.of(hash + ".png"), names);
+			}
+		} finally {
+			start.countDown();
+			executor.shutdownNow();
+		}
+	}
+
+	@Test
+	public void pinnedPruneRacingPromotionCannotDeleteThePromotedObject() throws Exception {
+		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
+		cache.initialize();
+		final byte[] bytes = png(0xFF8090A0);
+		final String hash = RouteAssetHash.sha256(bytes);
+		writeRendererPng(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION - 1, hash, bytes);
+		final CountDownLatch start = new CountDownLatch(1);
+		final ExecutorService executor = Executors.newFixedThreadPool(2);
+		try {
+			final Future<Optional<Path>> promotion = executor.submit(() -> {
+				await(start);
+				return cache.promotePngFromPriorVersions(hash);
+			});
+			final Future<ClientRouteAssetDiskCache.PruneResult> prune = executor.submit(() -> {
+				await(start);
+				return cache.prune(0, Set.of(hash));
+			});
+			start.countDown();
+
+			Assertions.assertTrue(promotion.get(5, TimeUnit.SECONDS).isPresent());
+			prune.get(5, TimeUnit.SECONDS);
+			Assertions.assertTrue(cache.findPng(hash).isPresent());
+		} finally {
+			start.countDown();
+			executor.shutdownNow();
 		}
 	}
 
@@ -198,11 +344,25 @@ public final class ClientRouteAssetDiskCacheTest {
 	}
 
 	private static byte[] png(int argb) throws Exception {
-		final BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+		return png(1, 1, argb);
+	}
+
+	private static byte[] png(int width, int height, int argb) throws Exception {
+		final BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
 		image.setRGB(0, 0, argb);
 		final ByteArrayOutputStream output = new ByteArrayOutputStream();
 		Assertions.assertTrue(ImageIO.write(image, "png", output));
 		return output.toByteArray();
+	}
+
+	private static void writeRendererPng(Path root, int rendererVersion, String hash, byte[] bytes) throws Exception {
+		final Path path = rendererPngPath(root, rendererVersion, hash);
+		Files.createDirectories(path.getParent());
+		Files.write(path, bytes);
+	}
+
+	private static Path rendererPngPath(Path root, int rendererVersion, String hash) {
+		return root.toAbsolutePath().normalize().resolve("cas").resolve(Integer.toString(rendererVersion)).resolve("sha256").resolve(hash.substring(0, 2)).resolve(hash + ".png");
 	}
 
 	private static void await(CountDownLatch latch) {
