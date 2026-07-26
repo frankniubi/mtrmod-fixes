@@ -153,12 +153,48 @@ public final class RouteAssetServerManagerTest {
 		}
 	}
 
+	@Test
+	public void configuredRouteSignsPublishAllStaticVariantsWithoutClientObservation() throws Exception {
+		final AtomicInteger renderCalls = new AtomicInteger();
+		try (final RouteAssetServerManager manager = manager(1, (key, snapshot) -> {
+			renderCalls.incrementAndGet();
+			return image(key.toString().hashCode());
+		})) {
+			final ConfiguredSignAssetIndex index = new ConfiguredSignAssetIndex();
+			index.configureRouteSign(1, 20, RouteSignStyleMode.RAILWAY);
+			index.configureRouteSign(2, 20, RouteSignStyleMode.RAILWAY);
+			manager.submitSnapshot(snapshot("Configured"), index.snapshot("minecraft/overworld"), "configured-add");
+			Assertions.assertTrue(manager.awaitIdle(10_000));
+
+			final RouteAssetManifest configured = manager.getRepository().loadManifest(manager.getRepository().loadHead().getRevision());
+			final Set<RouteAssetKey> explicit = configured.getEntries().keySet().stream()
+					.filter(RouteAssetServerManagerTest::isExplicitRailwayRouteSign)
+					.collect(java.util.stream.Collectors.toSet());
+			Assertions.assertEquals(12, explicit.size());
+			Assertions.assertEquals(Set.of("NORMAL", "CJK", "LATIN"), explicit.stream().map(key -> key.getVariant().getLanguage()).collect(java.util.stream.Collectors.toSet()));
+			Assertions.assertEquals(Set.of(0, 1, 2, 3), explicit.stream().map(key -> key.getVariant().getResolution()).collect(java.util.stream.Collectors.toSet()));
+			Assertions.assertEquals(48, renderCalls.get());
+
+			manager.submitSnapshot(snapshot("Configured"), List.of(), "configured-remove");
+			Assertions.assertTrue(manager.awaitIdle(10_000));
+			final RouteAssetManifest removed = manager.getRepository().loadManifest(manager.getRepository().loadHead().getRevision());
+			Assertions.assertTrue(removed.getEntries().keySet().stream().noneMatch(RouteAssetServerManagerTest::isExplicitRailwayRouteSign));
+			Assertions.assertEquals(12, manager.getMetrics().getLastSummary().getDelete());
+		}
+	}
+
 	private RouteAssetServerManager manager(int threads, RouteAssetServerManager.RenderFunction renderer) throws Exception {
 		return new RouteAssetServerManager(new RouteAssetRepository(root.resolve("manager-" + System.nanoTime()), RouteAssetProtocol.RENDERER_VERSION, 32), new RouteAssetDataMirror(), new RouteAssetDependencyCatalog(), renderer, threads, "f".repeat(64), new RouteAssetMetrics());
 	}
 
 	private static RouteAssetHello hello(int rendererVersion) {
 		return new RouteAssetHello(RouteAssetProtocol.PROTOCOL_VERSION, rendererVersion, 2, "NORMAL", "f".repeat(64), "", true, false, RouteAssetProtocol.MAX_REVISION_DOWNLOAD_BYTES, 1);
+	}
+
+	private static boolean isExplicitRailwayRouteSign(RouteAssetKey key) {
+		return key.getType() == RouteAssetType.ROUTE_MAP
+				&& RouteMapPurpose.ROUTE_SIGN.name().equals(key.getVariant().getParameters().get("p"))
+				&& RouteSignStyleMode.RAILWAY.name().equals(key.getVariant().getParameters().get("s"));
 	}
 
 	private static long diffCount(RouteAssetServerManager manager) throws IOException {

@@ -7,11 +7,14 @@ import org.mtr.mapping.holder.MinecraftServer;
 import org.mtr.mapping.holder.ServerPlayerEntity;
 import org.mtr.mapping.holder.World;
 import org.mtr.mapping.registry.PacketHandler;
+import org.mtr.mapping.mapper.PersistenceStateExtension;
 import org.mtr.mapping.tool.PacketBufferReceiver;
 import org.mtr.mapping.tool.PacketBufferSender;
 import org.mtr.mod.Init;
 import org.mtr.mod.block.BlockRouteSignBase;
 import org.mtr.mod.block.IBlock;
+import org.mtr.mod.data.PersistentStateData;
+import org.mtr.mod.route.RouteAssetServerManager;
 import org.mtr.mod.route.RouteSignStyleMode;
 
 import java.util.Objects;
@@ -63,6 +66,12 @@ public final class PacketUpdateRouteSignConfig extends PacketHandler {
 		final BlockEntity upper = world.getBlockEntity(anchor.up());
 		if (upper != null && upper.data instanceof BlockRouteSignBase.BlockEntityBase) {
 			((BlockRouteSignBase.BlockEntityBase) upper.data).setData(platformId, styleMode);
+		}
+
+		final PersistentStateData persistentState = (PersistentStateData) PersistenceStateExtension.register(serverPlayerEntity.getServerWorld(), PersistentStateData::new, Init.MOD_ID);
+		if (persistentState.configureRouteSign(anchor.asLong(), platformId, styleMode)) {
+			final RouteAssetServerManager manager = Init.getRouteAssetServerManager();
+			if (manager != null) manager.configuredSignsChanged(minecraftServer, "route-sign-config");
 		}
 	}
 }

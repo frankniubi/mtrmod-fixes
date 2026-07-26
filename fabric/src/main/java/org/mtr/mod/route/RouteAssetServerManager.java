@@ -11,7 +11,9 @@ import org.mtr.mapping.holder.MinecraftServer;
 import org.mtr.mapping.holder.ServerPlayerEntity;
 import org.mtr.mapping.holder.World;
 import org.mtr.mapping.mapper.MinecraftServerHelper;
+import org.mtr.mapping.mapper.PersistenceStateExtension;
 import org.mtr.mod.Init;
+import org.mtr.mod.data.PersistentStateData;
 import org.mtr.mod.packet.PacketRouteAssetChunk;
 import org.mtr.mod.packet.PacketRouteAssetChunkRequest;
 import org.mtr.mod.packet.PacketRouteAssetRefresh;
@@ -63,13 +65,14 @@ public final class RouteAssetServerManager implements AutoCloseable {
 	private final Map<UUID, RateWindow> observedRateWindows = new HashMap<>();
 	private final Map<UUID, PacketFallbackAuthorization> packetFallbackAuthorizations = new HashMap<>();
 	private final Map<UUID, PacketFallbackConnection> packetFallbackConnections = new HashMap<>();
+	private final Map<Long, FullRefreshContext> fullRefreshContexts = new HashMap<>();
 	private volatile int originPort;
 	private volatile MinecraftServer activeServer;
 	private volatile boolean closed;
 	private boolean coordinatorScheduled;
 	private long desiredGeneration;
 	private GenerationRequest pending;
-	private String fullRefreshCause = "refresh";
+	private List<ConfiguredSignAssetIndex.Entry> configuredSignEntries = Collections.emptyList();
 	private long nextPeriodicRefreshMillis;
 
 	private static final AtomicInteger THREAD_COUNTER = new AtomicInteger();
@@ -129,7 +132,7 @@ public final class RouteAssetServerManager implements AutoCloseable {
 	public void requestRefresh(MinecraftServer server, String cause) {
 		final Set<String> worlds = new HashSet<>();
 		MinecraftServerHelper.iterateWorlds(server, serverWorld -> worlds.add(Init.getWorldId(new World(serverWorld.data))));
-		final long generation = beginFullRefresh(worlds, cause);
+		final long generation = beginFullRefresh(worlds, cause, captureConfiguredSigns(server));
 		MinecraftServerHelper.iterateWorlds(server, serverWorld -> {
 			final World world = new World(serverWorld.data);
 			final String worldId = Init.getWorldId(world);
@@ -138,13 +141,22 @@ public final class RouteAssetServerManager implements AutoCloseable {
 	}
 
 	public long beginFullRefresh(Set<String> worldIds, String cause) {
-		fullRefreshCause = boundedCause(cause);
-		return mirror.beginGeneration(worldIds);
+		final List<ConfiguredSignAssetIndex.Entry> configured;
+		synchronized (stateLock) {
+			configured = configuredSignEntries;
+		}
+		return beginFullRefresh(worldIds, cause, configured);
 	}
 
 	public void acceptFullData(String worldId, long generation, JsonObject json) {
 		if (mirror.acceptListJson(generation, worldId, json)) {
-			mirror.snapshot(generation).ifPresent(snapshot -> submitSnapshot(snapshot, fullRefreshCause));
+			mirror.snapshot(generation).ifPresent(snapshot -> {
+				final FullRefreshContext context;
+				synchronized (stateLock) {
+					context = fullRefreshContexts.remove(generation);
+				}
+				submitSnapshot(snapshot, context == null ? Collections.emptyList() : context.configuredSignEntries, context == null ? "refresh" : context.cause);
+			});
 		}
 	}
 
@@ -204,10 +216,20 @@ public final class RouteAssetServerManager implements AutoCloseable {
 	}
 
 	public long submitSnapshot(RouteAssetDataMirror.Snapshot snapshot, String cause) {
+		final List<ConfiguredSignAssetIndex.Entry> configured;
+		synchronized (stateLock) {
+			configured = configuredSignEntries;
+		}
+		return submitSnapshot(snapshot, configured, cause);
+	}
+
+	public long submitSnapshot(RouteAssetDataMirror.Snapshot snapshot, List<ConfiguredSignAssetIndex.Entry> configuredSigns, String cause) {
+		final List<ConfiguredSignAssetIndex.Entry> checkedConfiguredSigns = immutableConfiguredSigns(configuredSigns);
 		synchronized (stateLock) {
 			if (closed) return -1;
 			final long generation = ++desiredGeneration;
-			pending = new GenerationRequest(generation, snapshot, Collections.singletonList(boundedCause(cause)));
+			configuredSignEntries = checkedConfiguredSigns;
+			pending = new GenerationRequest(generation, snapshot, checkedConfiguredSigns, Collections.singletonList(boundedCause(cause)));
 			metrics.queued();
 			if (!coordinatorScheduled) {
 				coordinatorScheduled = true;
@@ -215,6 +237,23 @@ public final class RouteAssetServerManager implements AutoCloseable {
 			}
 			stateLock.notifyAll();
 			return generation;
+		}
+	}
+
+	public RouteAssetDataMirror.Snapshot getCurrentSnapshot() {
+		return mirror.currentSnapshot();
+	}
+
+	public void configuredSignsChanged(MinecraftServer server, String cause) {
+		final List<ConfiguredSignAssetIndex.Entry> configured = captureConfiguredSigns(Objects.requireNonNull(server, "server"));
+		final RouteAssetDataMirror.Snapshot snapshot = mirror.currentSnapshot();
+		if (snapshot.getDimensions().isEmpty()) {
+			synchronized (stateLock) {
+				configuredSignEntries = configured;
+			}
+			requestRefresh(server, cause);
+		} else {
+			submitSnapshot(snapshot, configured, cause);
 		}
 	}
 
@@ -319,6 +358,7 @@ public final class RouteAssetServerManager implements AutoCloseable {
 			pending = null;
 			playerCapabilities.clear();
 			connectedPlayers.clear();
+			fullRefreshContexts.clear();
 			stateLock.notifyAll();
 		}
 		coordinator.shutdownNow();
@@ -380,9 +420,23 @@ public final class RouteAssetServerManager implements AutoCloseable {
 				languages = new HashSet<>(generatedLanguages);
 			}
 			for (final String language : languages) entries.putAll(catalog.enumerateFixed(request.snapshot, resourceFingerprint, language));
+			final Set<String> configuredRouteSignIdentities = new HashSet<>();
+			for (final ConfiguredSignAssetIndex.Entry configured : request.configuredSignEntries) {
+				configuredRouteSignIdentities.add(configured.canonicalAssetIdentity());
+				for (final String language : List.of("NORMAL", "CJK", "LATIN")) {
+					for (int resolution = 0; resolution <= 3; resolution++) {
+						catalog.resolveConfiguredRouteSign(configured, resolution, language, request.snapshot, resourceFingerprint)
+								.ifPresent(entry -> entries.put(entry.getKey(), entry));
+					}
+				}
+			}
 			final Set<RouteAssetKey> observed;
 			synchronized (stateLock) { observed = new TreeSet<>(observedKeys); }
-			for (final RouteAssetKey key : observed) catalog.resolveObserved(key, request.snapshot, resourceFingerprint).ifPresent(entry -> entries.put(key, entry));
+			for (final RouteAssetKey key : observed) {
+				if (!isInactiveExplicitRouteSign(key, configuredRouteSignIdentities)) {
+					catalog.resolveObserved(key, request.snapshot, resourceFingerprint).ifPresent(entry -> entries.put(key, entry));
+				}
+			}
 
 			final RouteAssetRepository.RouteAssetHead head = repository.loadHead();
 			final RouteAssetManifest previous = head.getRevision().isEmpty() ? RouteAssetManifest.builder().build() : repository.loadManifest(head.getRevision());
@@ -539,6 +593,41 @@ public final class RouteAssetServerManager implements AutoCloseable {
 		return value;
 	}
 
+	private long beginFullRefresh(Set<String> worldIds, String cause, List<ConfiguredSignAssetIndex.Entry> configuredSigns) {
+		final long generation = mirror.beginGeneration(worldIds);
+		final FullRefreshContext context = new FullRefreshContext(boundedCause(cause), immutableConfiguredSigns(configuredSigns));
+		synchronized (stateLock) {
+			configuredSignEntries = context.configuredSignEntries;
+			fullRefreshContexts.entrySet().removeIf(entry -> entry.getKey() < generation - 8);
+			fullRefreshContexts.put(generation, context);
+		}
+		return generation;
+	}
+
+	private List<ConfiguredSignAssetIndex.Entry> captureConfiguredSigns(MinecraftServer server) {
+		final List<ConfiguredSignAssetIndex.Entry> configured = new ArrayList<>();
+		MinecraftServerHelper.iterateWorlds(server, serverWorld -> {
+			final PersistentStateData persistentState = (PersistentStateData) PersistenceStateExtension.register(serverWorld, PersistentStateData::new, Init.MOD_ID);
+			final String dimension = Init.getWorldId(new World(serverWorld.data));
+			configured.addAll(persistentState.getConfiguredSignAssetIndex().snapshot(dimension));
+		});
+		return immutableConfiguredSigns(configured);
+	}
+
+	private static List<ConfiguredSignAssetIndex.Entry> immutableConfiguredSigns(List<ConfiguredSignAssetIndex.Entry> configuredSigns) {
+		final List<ConfiguredSignAssetIndex.Entry> result = new ArrayList<>(Objects.requireNonNull(configuredSigns, "configuredSigns"));
+		result.forEach(entry -> Objects.requireNonNull(entry, "configuredSign"));
+		Collections.sort(result);
+		return Collections.unmodifiableList(result);
+	}
+
+	private static boolean isInactiveExplicitRouteSign(RouteAssetKey key, Set<String> configuredIdentities) {
+		if (key.getType() != RouteAssetType.ROUTE_MAP || !RouteMapPurpose.ROUTE_SIGN.name().equals(key.getVariant().getParameters().get("p"))) return false;
+		final RouteSignStyleMode styleMode = RouteSignStyleMode.fromPersisted(key.getVariant().getParameters().get("s"));
+		if (!styleMode.isExplicit()) return false;
+		return !configuredIdentities.contains(key.getDimension() + "|ROUTE_SIGN|" + key.getPrimaryId() + "|" + styleMode.name());
+	}
+
 	private static RenderFunction defaultRenderer() throws IOException {
 		final RouteAssetSourceImages sources = new RouteAssetSourceImages(RouteAssetServerManager::readAsset);
 		final RouteAssetTextRasterizer text = RouteAssetTextRasterizer.fromFonts(readAsset("font/noto-sans-semibold.ttf"), readAsset("font/noto-serif-cjk-tc-semibold.ttf"));
@@ -584,12 +673,24 @@ public final class RouteAssetServerManager implements AutoCloseable {
 	private static final class GenerationRequest {
 		private final long generation;
 		private final RouteAssetDataMirror.Snapshot snapshot;
+		private final List<ConfiguredSignAssetIndex.Entry> configuredSignEntries;
 		private final List<String> causes;
 
-		private GenerationRequest(long generation, RouteAssetDataMirror.Snapshot snapshot, List<String> causes) {
+		private GenerationRequest(long generation, RouteAssetDataMirror.Snapshot snapshot, List<ConfiguredSignAssetIndex.Entry> configuredSignEntries, List<String> causes) {
 			this.generation = generation;
 			this.snapshot = snapshot;
+			this.configuredSignEntries = configuredSignEntries;
 			this.causes = causes;
+		}
+	}
+
+	private static final class FullRefreshContext {
+		private final String cause;
+		private final List<ConfiguredSignAssetIndex.Entry> configuredSignEntries;
+
+		private FullRefreshContext(String cause, List<ConfiguredSignAssetIndex.Entry> configuredSignEntries) {
+			this.cause = cause;
+			this.configuredSignEntries = configuredSignEntries;
 		}
 	}
 

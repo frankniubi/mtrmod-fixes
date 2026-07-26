@@ -3,10 +3,13 @@ package org.mtr.mod.block;
 import org.mtr.mapping.holder.*;
 import org.mtr.mapping.mapper.BlockEntityExtension;
 import org.mtr.mapping.mapper.BlockWithEntity;
+import org.mtr.mapping.mapper.PersistenceStateExtension;
 import org.mtr.mapping.tool.HolderBase;
 import org.mtr.mod.Blocks;
 import org.mtr.mod.Init;
+import org.mtr.mod.data.PersistentStateData;
 import org.mtr.mod.packet.PacketOpenBlockEntityScreen;
+import org.mtr.mod.route.RouteAssetServerManager;
 import org.mtr.mod.route.RouteSignStyleMode;
 
 import javax.annotation.Nonnull;
@@ -40,6 +43,20 @@ public abstract class BlockRouteSignBase extends BlockDirectionalDoubleBlockBase
 	}
 
 	@Override
+	public void onBreak2(World world, BlockPos pos, BlockState state, PlayerEntity player) {
+		if (!world.isClient()) {
+			final boolean isUpper = IBlock.getStatePropertySafe(state, HALF) == DoubleBlockHalf.UPPER;
+			final BlockPos anchor = pos.down(isUpper ? 1 : 0);
+			final PersistentStateData persistentState = (PersistentStateData) PersistenceStateExtension.register(ServerWorld.cast(world), PersistentStateData::new, Init.MOD_ID);
+			if (persistentState.removeConfiguredSign(anchor.asLong())) {
+				final RouteAssetServerManager manager = Init.getRouteAssetServerManager();
+				if (manager != null) manager.configuredSignsChanged(world.getServer(), "route-sign-break");
+			}
+		}
+		super.onBreak2(world, pos, state, player);
+	}
+
+	@Override
 	public void addBlockProperties(List<HolderBase<?>> properties) {
 		properties.add(FACING);
 		properties.add(HALF);
@@ -50,6 +67,7 @@ public abstract class BlockRouteSignBase extends BlockDirectionalDoubleBlockBase
 
 		private long platformId;
 		private RouteSignStyleMode styleMode = RouteSignStyleMode.AUTO;
+		private boolean configuredIndexReconciled;
 		private static final String KEY_PLATFORM_ID = "platform_id";
 		private static final String KEY_STYLE_OVERRIDE = "route_sign_style";
 
@@ -70,6 +88,20 @@ public abstract class BlockRouteSignBase extends BlockDirectionalDoubleBlockBase
 				compoundTag.putString(KEY_STYLE_OVERRIDE, styleMode.name());
 			} else {
 				compoundTag.remove(KEY_STYLE_OVERRIDE);
+			}
+		}
+
+		@Override
+		public void blockEntityTick() {
+			if (configuredIndexReconciled) return;
+			final World world = getWorld2();
+			if (world == null || world.isClient()) return;
+			configuredIndexReconciled = true;
+			if (IBlock.getStatePropertySafe(getCachedState2(), HALF) == DoubleBlockHalf.UPPER) return;
+			final PersistentStateData persistentState = (PersistentStateData) PersistenceStateExtension.register(ServerWorld.cast(world), PersistentStateData::new, Init.MOD_ID);
+			if (persistentState.configureRouteSign(getPos2().asLong(), platformId, styleMode)) {
+				final RouteAssetServerManager manager = Init.getRouteAssetServerManager();
+				if (manager != null) manager.configuredSignsChanged(world.getServer(), "route-sign-reconcile");
 			}
 		}
 

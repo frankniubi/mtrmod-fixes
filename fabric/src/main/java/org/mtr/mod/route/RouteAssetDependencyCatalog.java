@@ -116,6 +116,16 @@ public final class RouteAssetDependencyCatalog {
 		return Optional.of(entry(key, snapshot, platform, fingerprint));
 	}
 
+	public Optional<Entry> resolveConfiguredRouteSign(ConfiguredSignAssetIndex.Entry configured, int resolution, String language, RouteAssetDataMirror.Snapshot data, String resourceFingerprint) {
+		Objects.requireNonNull(configured, "configured");
+		if (!configured.getRouteSignStyleMode().isExplicit()) return Optional.empty();
+		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.routeMap(
+				configured.getDimension(), configured.getPrimaryId(), resolution, requireLanguage(language),
+				RouteMapPurpose.ROUTE_SIGN, configured.getRouteSignStyleMode(), true, false, 37F / 22, false
+		);
+		return resolveObserved(key, data, resourceFingerprint);
+	}
+
 	public String resolveLocalGenericFingerprint(String descriptor, RouteAssetDataMirror.PlatformSnapshot platform, String resourceFingerprint) {
 		final String checkedDescriptor = Objects.requireNonNull(descriptor, "descriptor");
 		if (checkedDescriptor.isEmpty()) throw new IllegalArgumentException("Local route map descriptor is empty");

@@ -23,6 +23,9 @@ public final class RouteSignStyleConfigIntegrationTest {
 		Assertions.assertTrue(packet.contains("RouteSignStyleMode.fromNetworkOrdinal(styleOrdinal)"));
 		Assertions.assertTrue(packet.contains("setData(platformId, styleMode)"));
 		Assertions.assertTrue(packet.contains("blockPos.down(isUpper ? 1 : 0)"));
+		Assertions.assertTrue(packet.contains("persistentState.configureRouteSign(anchor.asLong(), platformId, styleMode)"));
+		Assertions.assertTrue(block.contains("removeConfiguredSign(anchor.asLong())"));
+		Assertions.assertTrue(block.contains("configuredSignsChanged(world.getServer(), \"route-sign-reconcile\")"));
 		Assertions.assertTrue(clientPackets.indexOf("new RouteSignConfigScreen") < clientPackets.indexOf("new RailwaySignScreen"));
 		Assertions.assertTrue(init.contains("PacketUpdateRouteSignConfig.class"));
 	}
