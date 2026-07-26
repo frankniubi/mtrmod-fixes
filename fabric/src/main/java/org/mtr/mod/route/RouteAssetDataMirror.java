@@ -89,7 +89,7 @@ public final class RouteAssetDataMirror {
 		if (mutableDimension == null) return false;
 		final TreeMap<Long, PlatformSnapshot> platforms = new TreeMap<>(mutableDimension.snapshot.platforms);
 		platforms.put(platform.id, platform);
-		mutableDimension.snapshot = new DimensionSnapshot(dimension, ++epoch, platforms);
+		mutableDimension.snapshot = new DimensionSnapshot(dimension, ++epoch, platforms, mutableDimension.snapshot.destinationSignTopology);
 		return true;
 	}
 
@@ -98,7 +98,7 @@ public final class RouteAssetDataMirror {
 		if (mutableDimension == null) return false;
 		final TreeMap<Long, PlatformSnapshot> platforms = new TreeMap<>(mutableDimension.snapshot.platforms);
 		if (platforms.remove(platformId) == null) return false;
-		mutableDimension.snapshot = new DimensionSnapshot(dimension, ++epoch, platforms);
+		mutableDimension.snapshot = new DimensionSnapshot(dimension, ++epoch, platforms, mutableDimension.snapshot.destinationSignTopology);
 		return true;
 	}
 
@@ -135,12 +135,13 @@ public final class RouteAssetDataMirror {
 		Objects.requireNonNull(stationResolver, "stationResolver");
 		Objects.requireNonNull(platformResolver, "platformResolver");
 		final ObjectArrayList<SimplifiedRoute> simplifiedRoutes = materializeSimplifiedRoutes(data, true);
+		final DestinationSignTopology destinationSignTopology = DestinationSignTopology.materialize(simplifiedRoutes, platformResolver, stationResolver);
 		final Set<Long> platformIds = new java.util.TreeSet<>();
 		for (final Platform platform : data.platforms) platformIds.add(platform.getId());
 		for (final SimplifiedRoute route : simplifiedRoutes) for (final SimplifiedRoutePlatform routePlatform : route.getPlatforms()) platformIds.add(routePlatform.getPlatformId());
 		final TreeMap<Long, PlatformSnapshot> platforms = new TreeMap<>();
 		for (final long platformId : platformIds) platforms.put(platformId, materializePlatform(data, simplifiedRoutes, platformId, stationResolver, data.routeIdMap::get, platformResolver));
-		return new DimensionSnapshot(dimension, epoch, platforms);
+		return new DimensionSnapshot(dimension, epoch, platforms, destinationSignTopology);
 	}
 
 	public static PlatformSnapshot materializePlatform(ClientData data, long platformId, Function<Long, Station> stationResolver) {
@@ -254,21 +255,28 @@ public final class RouteAssetDataMirror {
 		private final String dimension;
 		private final long epoch;
 		private final Map<Long, PlatformSnapshot> platforms;
+		private final DestinationSignTopology destinationSignTopology;
 
 		public DimensionSnapshot(String dimension, long epoch, Map<Long, PlatformSnapshot> platforms) {
+			this(dimension, epoch, platforms, DestinationSignTopology.empty());
+		}
+
+		public DimensionSnapshot(String dimension, long epoch, Map<Long, PlatformSnapshot> platforms, DestinationSignTopology destinationSignTopology) {
 			this.dimension = validateDimension(dimension);
 			if (epoch < 0) throw new IllegalArgumentException("Dimension epoch cannot be negative");
 			this.epoch = epoch;
 			this.platforms = Collections.unmodifiableMap(new TreeMap<>(platforms));
+			this.destinationSignTopology = Objects.requireNonNull(destinationSignTopology, "destinationSignTopology");
 		}
 
 		private DimensionSnapshot copyWithEpoch(long newEpoch) {
-			return new DimensionSnapshot(dimension, newEpoch, platforms);
+			return new DimensionSnapshot(dimension, newEpoch, platforms, destinationSignTopology);
 		}
 
 		public String getDimension() { return dimension; }
 		public long getEpoch() { return epoch; }
 		public Map<Long, PlatformSnapshot> getPlatforms() { return platforms; }
+		public DestinationSignTopology getDestinationSignTopology() { return destinationSignTopology; }
 	}
 
 	public static final class PlatformSnapshot {

@@ -100,6 +100,10 @@ public final class RouteAssetDataMirrorTest {
 		Assertions.assertEquals("R1", next.getPlatformDisplayName());
 		Assertions.assertEquals(secondStation.getId(), next.getOwningStationId());
 		Assertions.assertEquals(next.getStationId(), next.getOwningStationId());
+		final DestinationSignDirectServiceModel.Model direct = DestinationSignDirectServiceModel.project(
+				dimension.getDestinationSignTopology(), firstStation.getId(), secondStation.getId());
+		Assertions.assertEquals(1, direct.getOptions().size());
+		Assertions.assertEquals(first.getId(), direct.getOptions().get(0).getKey().getSourcePlatformId());
 	}
 
 	@Test
@@ -111,8 +115,10 @@ public final class RouteAssetDataMirrorTest {
 
 		final RouteAssetDataMirror.DimensionSnapshot dimension = RouteAssetDataMirror.materializeDimension("minecraft/overworld", fixture.data, 1, fixture.data.stationIdMap::get);
 		final Set<Long> renderedRouteIds = dimension.getPlatforms().get(fixture.firstPlatform.getId()).getRoutes().stream().map(RouteAssetRenderSnapshot.Route::getId).collect(Collectors.toSet());
+		final Set<Long> topologyRouteIds = dimension.getDestinationSignTopology().getRoutes().stream().map(DestinationSignTopology.ServiceRoute::getRouteId).collect(Collectors.toSet());
 
 		Assertions.assertEquals(fixture.routes.stream().map(Route::getId).collect(Collectors.toSet()), renderedRouteIds);
+		Assertions.assertEquals(renderedRouteIds, topologyRouteIds);
 	}
 
 	@Test
