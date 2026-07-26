@@ -24,7 +24,9 @@ public final class RouteAssetDependencyCatalog {
 		final TreeMap<RouteAssetKey, Entry> result = new TreeMap<>();
 		data.getDimensions().forEach((dimension, dimensionSnapshot) -> dimensionSnapshot.getPlatforms().values().forEach(platform -> {
 			for (int resolution = 0; resolution <= 3; resolution++) {
-				add(result, RouteAssetCanonicalKeyFactory.routeMap(dimension, platform.getId(), resolution, languageMode, RouteMapPurpose.GENERIC, true, false, 37F / 22, false), buildSnapshot(platform, null, true, 37F / 22), platform, fingerprint);
+				for (final RouteMapPurpose purpose : RouteMapPurpose.values()) {
+					add(result, RouteAssetCanonicalKeyFactory.routeMap(dimension, platform.getId(), resolution, languageMode, purpose, true, false, 37F / 22, false), buildSnapshotBuilder(platform, null, true, 37F / 22).routeMapPurpose(purpose).build(), platform, fingerprint);
+				}
 				for (int direction = 0; direction <= 3; direction++) {
 					final boolean hasLeft = (direction & 1) != 0;
 					final boolean hasRight = (direction & 2) != 0;
@@ -131,49 +133,91 @@ public final class RouteAssetDependencyCatalog {
 			if (key.getType() == RouteAssetType.ROUTE_MAP) canonical.writeInt(RouteAssetProtocol.ROUTE_MAP_RENDERER_VERSION);
 			writeString(canonical, resourceFingerprint);
 			writeString(canonical, key.toString());
-			writeString(canonical, snapshot.getPlatformDisplayName());
-			canonical.writeInt(snapshot.getRouteColor());
-			writeString(canonical, snapshot.getRouteName());
-			writeString(canonical, snapshot.getDestination());
-			canonical.writeInt(snapshot.getBackgroundColor());
-			canonical.writeInt(snapshot.getTextColor());
-			canonical.writeInt(snapshot.getTransparentColor());
-			canonical.writeInt(Float.floatToIntBits(snapshot.getAspectRatio()));
-			canonical.writeInt(Float.floatToIntBits(snapshot.getPaddingScale()));
-			canonical.writeBoolean(snapshot.isVertical());
-			canonical.writeBoolean(snapshot.isFlip());
-			canonical.writeBoolean(snapshot.hasLeft());
-			canonical.writeBoolean(snapshot.hasRight());
-			canonical.writeBoolean(snapshot.isShowToString());
-			canonical.writeInt(snapshot.getRouteColors().size());
-			for (final int color : snapshot.getRouteColors()) canonical.writeInt(color);
-			canonical.writeInt(snapshot.getRoutes().size());
-			for (final RouteAssetRenderSnapshot.Route route : snapshot.getRoutes()) {
-				canonical.writeLong(route.getId());
-				writeString(canonical, route.getName());
-				canonical.writeInt(route.getColor());
-				canonical.writeInt(route.getCircularState().ordinal());
-				canonical.writeInt(route.getRouteKind().ordinal());
-				canonical.writeInt(route.getCurrentStationIndex());
-				canonical.writeInt(route.getStations().size());
-				for (final RouteAssetRenderSnapshot.Station station : route.getStations()) {
-					canonical.writeLong(station.getPlatformId());
-					canonical.writeLong(station.getStationId());
-					writeString(canonical, station.getName());
-					writeString(canonical, station.getDestination());
-					canonical.writeInt(station.getInterchange().getColors().size());
-					for (int index = 0; index < station.getInterchange().getColors().size(); index++) {
-						canonical.writeInt(station.getInterchange().getColors().get(index));
-						writeString(canonical, station.getInterchange().getNames().get(index));
-					}
-					canonical.writeBoolean(station.getInterchange().hasRailway());
-					canonical.writeBoolean(station.getInterchange().hasAirport());
-				}
+			switch (key.getType()) {
+				case ROUTE_MAP:
+					final RouteAssetCanonicalKeyFactory.RouteMapParameters parameters = Objects.requireNonNull(RouteAssetCanonicalKeyFactory.decodeRouteMap(key));
+					writeRouteMapDependencies(canonical, snapshot, parameters.purpose);
+					break;
+				case DIRECTION_ARROW:
+					writeDirectionArrowDependencies(canonical, snapshot);
+					break;
+				case ROUTE_COLOR_STRIP:
+					writeColorStripDependencies(canonical, snapshot);
+					break;
+				case ROUTE_SQUARE:
+					writeRouteSquareDependencies(canonical, snapshot);
+					break;
+				default:
+					throw new IllegalArgumentException("Unsupported route asset dependency family");
 			}
 			canonical.flush();
 			return new Entry(key, snapshot, RouteAssetHash.sha256(bytes.toByteArray()));
 		} catch (IOException exception) {
 			throw new IllegalStateException("Unable to fingerprint route asset dependencies", exception);
+		}
+	}
+
+	private static void writeRouteMapDependencies(DataOutputStream canonical, RouteAssetRenderSnapshot snapshot, RouteMapPurpose purpose) throws IOException {
+		canonical.writeInt(purpose.ordinal());
+		if (purpose == RouteMapPurpose.ROUTE_SIGN) {
+			canonical.writeInt(RouteAssetProtocol.CORRIDOR_SCHEMA_VERSION);
+			canonical.writeLong(snapshot.getSelectedPlatformId());
+			canonical.writeLong(snapshot.getSelectedStationId());
+			writeString(canonical, snapshot.getPlatformDisplayName());
+		}
+		writeRoutes(canonical, snapshot.getRoutes(), purpose == RouteMapPurpose.ROUTE_SIGN);
+	}
+
+	private static void writeDirectionArrowDependencies(DataOutputStream canonical, RouteAssetRenderSnapshot snapshot) throws IOException {
+		writeString(canonical, snapshot.getPlatformDisplayName());
+		writeString(canonical, snapshot.getDestination());
+		canonical.writeInt(snapshot.getRoutes().size());
+		for (final RouteAssetRenderSnapshot.Route route : snapshot.getRoutes()) {
+			canonical.writeInt(route.getColor());
+			canonical.writeInt(route.getCircularState().ordinal());
+			canonical.writeBoolean(route.isTerminating());
+			writeString(canonical, route.getCurrentStation().getDestination());
+		}
+	}
+
+	private static void writeColorStripDependencies(DataOutputStream canonical, RouteAssetRenderSnapshot snapshot) throws IOException {
+		final List<Integer> colors = snapshot.getColorStripColors();
+		canonical.writeInt(colors.size());
+		for (final int color : colors) canonical.writeInt(color);
+	}
+
+	private static void writeRouteSquareDependencies(DataOutputStream canonical, RouteAssetRenderSnapshot snapshot) throws IOException {
+		canonical.writeInt(snapshot.getRouteColor());
+		writeString(canonical, snapshot.getRouteName());
+	}
+
+	private static void writeRoutes(DataOutputStream canonical, List<RouteAssetRenderSnapshot.Route> routes, boolean includePlatformMetadata) throws IOException {
+		canonical.writeInt(routes.size());
+		for (final RouteAssetRenderSnapshot.Route route : routes) {
+			canonical.writeLong(route.getId());
+			writeString(canonical, route.getName());
+			canonical.writeInt(route.getColor());
+			canonical.writeInt(route.getCircularState().ordinal());
+			canonical.writeInt(route.getRouteKind().ordinal());
+			canonical.writeInt(route.getCurrentStationIndex());
+			canonical.writeInt(route.getStations().size());
+			for (final RouteAssetRenderSnapshot.Station station : route.getStations()) {
+				canonical.writeLong(station.getPlatformId());
+				canonical.writeLong(station.getStationId());
+				if (includePlatformMetadata) {
+					writeString(canonical, station.getPlatformDisplayName());
+					canonical.writeLong(station.getOwningStationId());
+				}
+				writeString(canonical, station.getName());
+				writeString(canonical, station.getDestination());
+				canonical.writeInt(station.getInterchange().getColors().size());
+				for (int index = 0; index < station.getInterchange().getColors().size(); index++) {
+					canonical.writeInt(station.getInterchange().getColors().get(index));
+					writeString(canonical, station.getInterchange().getNames().get(index));
+				}
+				canonical.writeBoolean(station.getInterchange().hasRailway());
+				canonical.writeBoolean(station.getInterchange().hasAirport());
+			}
 		}
 	}
 

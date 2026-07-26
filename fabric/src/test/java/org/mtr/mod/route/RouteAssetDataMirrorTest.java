@@ -143,12 +143,13 @@ public final class RouteAssetDataMirrorTest {
 		final String resourceFingerprint = "f".repeat(64);
 		final Map<RouteAssetKey, RouteAssetDependencyCatalog.Entry> first = catalog.enumerateFixed(snapshot, resourceFingerprint, "NORMAL");
 		final Map<RouteAssetKey, RouteAssetDependencyCatalog.Entry> second = catalog.enumerateFixed(snapshot, resourceFingerprint, "NORMAL");
-		Assertions.assertEquals(32, first.size());
+		Assertions.assertEquals(36, first.size());
 		Assertions.assertEquals(Set.of(0, 1, 2, 3), first.keySet().stream().map(key -> key.getVariant().getResolution()).collect(Collectors.toSet()));
 		Assertions.assertEquals(first, second);
 		Assertions.assertEquals(Set.of(RouteAssetType.ROUTE_MAP, RouteAssetType.DIRECTION_ARROW, RouteAssetType.ROUTE_COLOR_STRIP, RouteAssetType.ROUTE_SQUARE), first.keySet().stream().map(RouteAssetKey::getType).collect(Collectors.toSet()));
 		for (int resolution = 0; resolution <= 3; resolution++) {
 			Assertions.assertTrue(first.containsKey(RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, resolution, "NORMAL", RouteMapPurpose.GENERIC, true, false, 37F / 22, false)));
+			Assertions.assertTrue(first.containsKey(RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, resolution, "NORMAL", RouteMapPurpose.ROUTE_SIGN, true, false, 37F / 22, false)));
 			for (int direction = 0; direction <= 3; direction++) {
 				Assertions.assertTrue(first.containsKey(RouteAssetCanonicalKeyFactory.directionArrow("minecraft/overworld", 7, resolution, "NORMAL", (direction & 1) != 0, (direction & 2) != 0, RouteAssetTextRasterizer.Alignment.CENTER, true, 0.2F, 22F / 5, 0xFF000000, 0xFFFFFFFF, 0)));
 			}

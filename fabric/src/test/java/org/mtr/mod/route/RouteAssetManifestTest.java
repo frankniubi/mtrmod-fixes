@@ -55,6 +55,19 @@ public final class RouteAssetManifestTest {
 	}
 
 	@Test
+	public void dependencyOnlyChangesRemainExplicitWhileIdenticalManifestsAreEmpty() {
+		final RouteAssetKey key = RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|10|2|NORMAL|a=4:9,f=0,p=GENERIC,t=0,v=1");
+		final RouteAssetManifest before = RouteAssetManifest.builder().put(key, HASH_A, "dependency-a").build();
+		final RouteAssetManifest after = RouteAssetManifest.builder().put(key, HASH_A, "dependency-b").build();
+
+		final RouteAssetManifestDiff changed = RouteAssetManifestDiff.between(before.getRevision(), before, after);
+		Assertions.assertEquals(1, changed.getChanges().size());
+		Assertions.assertEquals(RouteAssetManifestDiff.Operation.MODIFY, changed.getChanges().get(0).getOperation());
+		Assertions.assertEquals(after, changed.apply(before));
+		Assertions.assertTrue(RouteAssetManifestDiff.between(after.getRevision(), after, after).getChanges().isEmpty());
+	}
+
+	@Test
 	public void addAndDeleteRetainTheirExpectedHashes() {
 		final RouteAssetKey deleted = RouteAssetKey.parse("minecraft/overworld|DIRECTION_ARROW|1|0|NORMAL|direction=LEFT");
 		final RouteAssetKey added = RouteAssetKey.parse("minecraft/the_nether|ROUTE_COLOR_STRIP|2|3|NORMAL|color=123456");
