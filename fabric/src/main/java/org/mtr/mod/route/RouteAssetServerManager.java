@@ -24,6 +24,7 @@ import java.io.InputStream;
 import java.nio.file.Path;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -66,6 +67,7 @@ public final class RouteAssetServerManager implements AutoCloseable {
 	private final Map<UUID, PacketFallbackAuthorization> packetFallbackAuthorizations = new HashMap<>();
 	private final Map<UUID, PacketFallbackConnection> packetFallbackConnections = new HashMap<>();
 	private final Map<Long, FullRefreshContext> fullRefreshContexts = new HashMap<>();
+	private final ArrayDeque<String> configuredAssetDiagnostics = new ArrayDeque<>();
 	private volatile int originPort;
 	private volatile MinecraftServer activeServer;
 	private volatile boolean closed;
@@ -77,6 +79,8 @@ public final class RouteAssetServerManager implements AutoCloseable {
 
 	private static final AtomicInteger THREAD_COUNTER = new AtomicInteger();
 	private static final int MAX_TRACKED_PACKET_FALLBACK_TRANSFERS = 1024;
+	private static final int MAX_CONFIGURED_ASSET_DIAGNOSTICS = 64;
+	private static final Set<String> FIXED_ASSET_LANGUAGES = Set.of("NORMAL", "CJK", "LATIN");
 	private static final long PERIODIC_REFRESH_MILLIS = 60_000;
 	private static final SerializedDataBase EMPTY_REQUEST = new SerializedDataBase() {
 		@Override public void updateData(ReaderBase readerBase) { }
@@ -106,7 +110,9 @@ public final class RouteAssetServerManager implements AutoCloseable {
 		try {
 			dependencyFingerprints.putAll(repository.loadDependencyFingerprints());
 			final RouteAssetRepository.RouteAssetHead head = repository.loadHead();
-			if (!head.getRevision().isEmpty()) repository.loadManifest(head.getRevision()).getEntries().keySet().forEach(key -> publishedLanguages.add(key.getVariant().getLanguage()));
+			if (!head.getRevision().isEmpty()) repository.loadManifest(head.getRevision()).getEntries().keySet().forEach(key -> {
+				if (FIXED_ASSET_LANGUAGES.contains(key.getVariant().getLanguage())) publishedLanguages.add(key.getVariant().getLanguage());
+			});
 			generatedLanguages.addAll(publishedLanguages);
 		} catch (IOException exception) {
 			Init.LOGGER.warn("Unable to load persisted route texture dependency fingerprints", exception);
@@ -347,6 +353,11 @@ public final class RouteAssetServerManager implements AutoCloseable {
 	public RouteAssetMetrics getMetrics() { return metrics; }
 	public int getGenerationThreads() { return generationThreads; }
 	public String getResourceFingerprint() { return resourceFingerprint; }
+	public List<String> getConfiguredAssetDiagnostics() {
+		synchronized (stateLock) {
+			return List.copyOf(configuredAssetDiagnostics);
+		}
+	}
 
 	@Override
 	public void close() {
@@ -421,12 +432,27 @@ public final class RouteAssetServerManager implements AutoCloseable {
 			}
 			for (final String language : languages) entries.putAll(catalog.enumerateFixed(request.snapshot, resourceFingerprint, language));
 			final Set<String> configuredRouteSignIdentities = new HashSet<>();
+			final Set<RouteAssetKey> configuredAssetKeys = new HashSet<>();
 			for (final ConfiguredSignAssetIndex.Entry configured : request.configuredSignEntries) {
-				configuredRouteSignIdentities.add(configured.canonicalAssetIdentity());
-				for (final String language : List.of("NORMAL", "CJK", "LATIN")) {
+				if (configured.isRouteSign()) {
+					configuredRouteSignIdentities.add(configured.canonicalAssetIdentity());
+					for (final String language : FIXED_ASSET_LANGUAGES) {
+						for (int resolution = 0; resolution <= 3; resolution++) {
+							catalog.resolveConfiguredRouteSign(configured, resolution, language, request.snapshot, resourceFingerprint).ifPresent(entry -> {
+								entries.put(entry.getKey(), entry);
+								configuredAssetKeys.add(entry.getKey());
+							});
+						}
+					}
+				} else {
+					final DestinationSignConfiguredEntry destination = configured.getDestinationSign();
 					for (int resolution = 0; resolution <= 3; resolution++) {
-						catalog.resolveConfiguredRouteSign(configured, resolution, language, request.snapshot, resourceFingerprint)
-								.ifPresent(entry -> entries.put(entry.getKey(), entry));
+						final RouteAssetKey key = RouteAssetCanonicalKeyFactory.destinationSign(configured.getDimension(), destination.getSourceStationId(), destination.getDestinationStationId(),
+								resolution, destination.getStyle(), destination.getWidthBlocks(), destination.getHeightBlocks(), destination.isShowEta());
+						catalog.resolveDestinationSign(key, request.snapshot, resourceFingerprint).ifPresent(entry -> {
+							entries.put(entry.getKey(), entry);
+							configuredAssetKeys.add(entry.getKey());
+						});
 					}
 				}
 			}
@@ -442,7 +468,7 @@ public final class RouteAssetServerManager implements AutoCloseable {
 			final RouteAssetManifest previous = head.getRevision().isEmpty() ? RouteAssetManifest.builder().build() : repository.loadManifest(head.getRevision());
 			final TreeMap<RouteAssetKey, RouteAssetManifest.Entry> nextEntries = new TreeMap<>();
 			final TreeMap<RouteAssetKey, String> nextDependencies = new TreeMap<>();
-			final List<Future<RenderedEntry>> futures = new ArrayList<>();
+			final List<RenderJob> renderJobs = new ArrayList<>();
 			long reused = 0;
 			for (final RouteAssetDependencyCatalog.Entry entry : entries.values()) {
 				final RouteAssetManifest.Entry oldEntry = previous.getEntries().get(entry.getKey());
@@ -453,27 +479,40 @@ public final class RouteAssetServerManager implements AutoCloseable {
 					reused++;
 					metrics.reused();
 				} else {
-					futures.add(workers.submit(() -> {
+					final Future<RenderedEntry> future = workers.submit(() -> {
 						if (isStale(request.generation)) throw new CancellationException("Stale route asset generation");
 						return render(entry);
-					}));
+					});
+					renderJobs.add(new RenderJob(entry, future, configuredAssetKeys.contains(entry.getKey())));
 				}
 			}
 			long bytes = 0;
-			for (final Future<RenderedEntry> future : futures) {
+			for (final RenderJob job : renderJobs) {
 				if (isStale(request.generation)) {
-					futures.forEach(pendingFuture -> pendingFuture.cancel(true));
+					renderJobs.forEach(pendingJob -> pendingJob.future.cancel(true));
 					metrics.cancelled();
 					return;
 				}
 				final RenderedEntry rendered;
 				try {
-					rendered = future.get();
+					rendered = job.future.get();
 				} catch (ExecutionException exception) {
 					if (exception.getCause() instanceof CancellationException) {
-						futures.forEach(pendingFuture -> pendingFuture.cancel(true));
+						renderJobs.forEach(pendingJob -> pendingJob.future.cancel(true));
 						metrics.cancelled();
 						return;
+					}
+					if (job.configuredAsset) {
+						final RouteAssetManifest.Entry oldEntry = previous.getEntries().get(job.entry.getKey());
+						if (oldEntry != null && repository.getCas().find(oldEntry.getHash(), RouteAssetCas.MediaType.PNG).isPresent()) {
+							nextEntries.put(job.entry.getKey(), oldEntry);
+							nextDependencies.put(job.entry.getKey(), oldEntry.getDependencyFingerprint());
+							reused++;
+						} else {
+							nextDependencies.remove(job.entry.getKey());
+						}
+						recordConfiguredAssetFailure(job.entry.getKey(), exception.getCause());
+						continue;
 					}
 					throw exception;
 				}
@@ -534,6 +573,15 @@ public final class RouteAssetServerManager implements AutoCloseable {
 		} catch (IOException | RuntimeException exception) {
 			Init.LOGGER.warn("Unable to persist route texture dependency fingerprints", exception);
 		}
+	}
+
+	private void recordConfiguredAssetFailure(RouteAssetKey key, Throwable throwable) {
+		final String message = key + ": " + (throwable == null ? "unknown failure" : throwable.toString());
+		synchronized (stateLock) {
+			while (configuredAssetDiagnostics.size() >= MAX_CONFIGURED_ASSET_DIAGNOSTICS) configuredAssetDiagnostics.removeFirst();
+			configuredAssetDiagnostics.addLast(message);
+		}
+		Init.LOGGER.warn("route_texture side=server event=configured_asset_failed key={} cause={}", key, throwable == null ? "unknown" : throwable.toString());
 	}
 
 	private RenderedEntry render(RouteAssetDependencyCatalog.Entry entry) throws IOException {
@@ -705,6 +753,18 @@ public final class RouteAssetServerManager implements AutoCloseable {
 			this.hash = hash;
 			this.dependencyFingerprint = dependencyFingerprint;
 			this.bytes = bytes;
+		}
+	}
+
+	private static final class RenderJob {
+		private final RouteAssetDependencyCatalog.Entry entry;
+		private final Future<RenderedEntry> future;
+		private final boolean configuredAsset;
+
+		private RenderJob(RouteAssetDependencyCatalog.Entry entry, Future<RenderedEntry> future, boolean configuredAsset) {
+			this.entry = entry;
+			this.future = future;
+			this.configuredAsset = configuredAsset;
 		}
 	}
 

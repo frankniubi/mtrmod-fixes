@@ -42,4 +42,25 @@ public final class ConfiguredSignAssetIndexTest {
 		Assertions.assertTrue(entries.stream().allMatch(entry -> entry.getDimension().equals("minecraft/the_nether")));
 		Assertions.assertEquals(entries.get(0).canonicalAssetIdentity(), entries.get(1).canonicalAssetIdentity());
 	}
+
+	@Test
+	public void routeAndDestinationEntriesShareOneTaggedPersistentIndex() {
+		final ConfiguredSignAssetIndex index = new ConfiguredSignAssetIndex();
+		final DestinationSignConfiguredEntry destination = new DestinationSignConfiguredEntry(-10, -30, 3, 2, DestinationSignStyle.PLATFORM_GROUPS, true);
+		index.configureRouteSign(1, 20, RouteSignStyleMode.RAILWAY);
+		index.configureDestinationSign(2, destination);
+		index.configureDestinationSign(3, destination);
+		final CompoundTag tag = new CompoundTag();
+		index.write(tag);
+
+		final ConfiguredSignAssetIndex restored = new ConfiguredSignAssetIndex();
+		restored.read(tag);
+		final List<ConfiguredSignAssetIndex.Entry> entries = restored.snapshot("minecraft/overworld");
+		Assertions.assertEquals(List.of(ConfiguredSignAssetIndex.SignType.ROUTE_SIGN, ConfiguredSignAssetIndex.SignType.DESTINATION_SIGN, ConfiguredSignAssetIndex.SignType.DESTINATION_SIGN), entries.stream().map(ConfiguredSignAssetIndex.Entry::getType).toList());
+		Assertions.assertEquals(destination, entries.get(1).getDestinationSign());
+		Assertions.assertEquals(entries.get(1).canonicalAssetIdentity(), entries.get(2).canonicalAssetIdentity());
+
+		Assertions.assertTrue(restored.configureDestinationSign(1, destination), "an anchor may atomically change sign type");
+		Assertions.assertTrue(restored.snapshot("minecraft/overworld").get(0).isDestinationSign());
+	}
 }

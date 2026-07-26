@@ -183,6 +183,53 @@ public final class RouteAssetServerManagerTest {
 		}
 	}
 
+	@Test
+	public void duplicateConfiguredDestinationSignsPublishFourCanonicalAtlases() throws Exception {
+		final AtomicInteger renderCalls = new AtomicInteger();
+		try (final RouteAssetServerManager manager = manager(1, (key, snapshot) -> {
+			renderCalls.incrementAndGet();
+			return image(key.toString().hashCode());
+		})) {
+			final ConfiguredSignAssetIndex index = destinationIndex();
+			index.configureDestinationSign(2, destinationConfig());
+			manager.submitSnapshot(destinationSnapshot("Destination"), index.snapshot("minecraft/overworld"), "destination-add");
+			Assertions.assertTrue(manager.awaitIdle(10_000));
+			final RouteAssetManifest manifest = manager.getRepository().loadManifest(manager.getRepository().loadHead().getRevision());
+			final List<RouteAssetKey> atlases = manifest.getEntries().keySet().stream().filter(key -> key.getType() == RouteAssetType.DESTINATION_SIGN_ATLAS).toList();
+			Assertions.assertEquals(4, atlases.size());
+			Assertions.assertEquals(Set.of(0, 1, 2, 3), atlases.stream().map(key -> key.getVariant().getResolution()).collect(java.util.stream.Collectors.toSet()));
+			Assertions.assertTrue(atlases.stream().allMatch(key -> key.getVariant().getLanguage().equals("MULTI")));
+			Assertions.assertEquals(40, renderCalls.get());
+		}
+	}
+
+	@Test
+	public void failedConfiguredAtlasRetainsPriorEntriesWhileOtherChangesPublish() throws Exception {
+		final AtomicBoolean failDestination = new AtomicBoolean();
+		try (final RouteAssetServerManager manager = manager(1, (key, snapshot) -> {
+			if (key.getType() == RouteAssetType.DESTINATION_SIGN_ATLAS && failDestination.get()) throw new IOException("destination failure");
+			return image(key.getType() == RouteAssetType.DESTINATION_SIGN_ATLAS ? 99 : snapshot.getRouteName().hashCode());
+		})) {
+			final List<ConfiguredSignAssetIndex.Entry> configured = destinationIndex().snapshot("minecraft/overworld");
+			manager.submitSnapshot(destinationSnapshot("Before"), configured, "before");
+			Assertions.assertTrue(manager.awaitIdle(10_000));
+			final String firstRevision = manager.getRepository().loadHead().getRevision();
+			final RouteAssetManifest first = manager.getRepository().loadManifest(firstRevision);
+
+			failDestination.set(true);
+			manager.submitSnapshot(destinationSnapshot("After"), configured, "after");
+			Assertions.assertTrue(manager.awaitIdle(10_000));
+			final String secondRevision = manager.getRepository().loadHead().getRevision();
+			final RouteAssetManifest second = manager.getRepository().loadManifest(secondRevision);
+			Assertions.assertNotEquals(firstRevision, secondRevision);
+			first.getEntries().forEach((key, entry) -> {
+				if (key.getType() == RouteAssetType.DESTINATION_SIGN_ATLAS) Assertions.assertEquals(entry, second.getEntries().get(key));
+			});
+			Assertions.assertEquals(4, manager.getConfiguredAssetDiagnostics().size());
+			Assertions.assertEquals(0, manager.getMetrics().getFailedGenerations());
+		}
+	}
+
 	private RouteAssetServerManager manager(int threads, RouteAssetServerManager.RenderFunction renderer) throws Exception {
 		return new RouteAssetServerManager(new RouteAssetRepository(root.resolve("manager-" + System.nanoTime()), RouteAssetProtocol.RENDERER_VERSION, 32), new RouteAssetDataMirror(), new RouteAssetDependencyCatalog(), renderer, threads, "f".repeat(64), new RouteAssetMetrics());
 	}
@@ -195,6 +242,16 @@ public final class RouteAssetServerManagerTest {
 		return key.getType() == RouteAssetType.ROUTE_MAP
 				&& RouteMapPurpose.ROUTE_SIGN.name().equals(key.getVariant().getParameters().get("p"))
 				&& RouteSignStyleMode.RAILWAY.name().equals(key.getVariant().getParameters().get("s"));
+	}
+
+	private static ConfiguredSignAssetIndex destinationIndex() {
+		final ConfiguredSignAssetIndex index = new ConfiguredSignAssetIndex();
+		index.configureDestinationSign(1, destinationConfig());
+		return index;
+	}
+
+	private static DestinationSignConfiguredEntry destinationConfig() {
+		return new DestinationSignConfiguredEntry(1, 2, 3, 2, DestinationSignStyle.ARRIVAL_ORDER, true);
 	}
 
 	private static long diffCount(RouteAssetServerManager manager) throws IOException {
@@ -213,6 +270,18 @@ public final class RouteAssetServerManagerTest {
 		final RouteAssetDataMirror.PlatformSnapshot platform = new RouteAssetDataMirror.PlatformSnapshot(20, "Platform", List.of(route));
 		final RouteAssetDataMirror.DimensionSnapshot dimension = new RouteAssetDataMirror.DimensionSnapshot("minecraft/overworld", 1, Map.of(20L, platform));
 		return new RouteAssetDataMirror.Snapshot(1, Map.of("minecraft/overworld", dimension));
+	}
+
+	private static RouteAssetDataMirror.Snapshot destinationSnapshot(String routeName) {
+		final RouteAssetDataMirror.Snapshot base = snapshot(routeName);
+		final DestinationSignTopology topology = new DestinationSignTopology(List.of(
+				new DestinationSignTopology.ServiceRoute(10, 0, routeName, 0x14755E, List.of(
+						new DestinationSignTopology.StopOccurrence(20, 1, "U1", "Source", "Target"),
+						new DestinationSignTopology.StopOccurrence(21, 2, "D1", "Target", "")))
+		), List.of(new DestinationSignTopology.StationZone(1, "Source"), new DestinationSignTopology.StationZone(2, "Target")));
+		final RouteAssetDataMirror.DimensionSnapshot oldDimension = base.getDimensions().get("minecraft/overworld");
+		return new RouteAssetDataMirror.Snapshot(1, Map.of("minecraft/overworld", new RouteAssetDataMirror.DimensionSnapshot(
+				"minecraft/overworld", 1, oldDimension.getPlatforms(), topology)));
 	}
 
 	private static RouteAssetImage image(int value) {

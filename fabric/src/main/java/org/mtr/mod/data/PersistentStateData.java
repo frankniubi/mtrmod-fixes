@@ -5,6 +5,7 @@ import org.mtr.mapping.holder.CompoundTag;
 import org.mtr.mapping.mapper.PersistenceStateExtension;
 import org.mtr.mod.Init;
 import org.mtr.mod.route.ConfiguredSignAssetIndex;
+import org.mtr.mod.route.DestinationSignConfiguredEntry;
 import org.mtr.mod.route.RouteSignStyleMode;
 
 import javax.annotation.Nonnull;
@@ -66,6 +67,12 @@ public final class PersistentStateData extends PersistenceStateExtension {
 
 	public boolean removeConfiguredSign(long anchorPosition) {
 		final boolean changed = configuredSignAssetIndex.remove(anchorPosition);
+		if (changed) markDirty2();
+		return changed;
+	}
+
+	public boolean configureDestinationSign(long anchorPosition, DestinationSignConfiguredEntry destinationSign) {
+		final boolean changed = configuredSignAssetIndex.configureDestinationSign(anchorPosition, destinationSign);
 		if (changed) markDirty2();
 		return changed;
 	}
