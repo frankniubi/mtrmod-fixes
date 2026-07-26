@@ -1,12 +1,22 @@
 package org.mtr.mod.route;
 
+import org.mtr.mapping.holder.BlockEntity;
+import org.mtr.mapping.holder.BlockPos;
+import org.mtr.mapping.holder.BlockState;
+import org.mtr.mapping.holder.ChunkPos;
 import org.mtr.mapping.holder.CompoundTag;
+import org.mtr.mapping.holder.WorldChunk;
+import org.mtr.mod.block.BlockDestinationSign;
+import org.mtr.mod.block.BlockRouteSignBase;
+import org.mtr.mod.block.DestinationSignConfig;
+import org.mtr.mod.block.IBlock;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 /** World-scoped identities for signs which require proactive server assets. */
 public final class ConfiguredSignAssetIndex {
@@ -16,6 +26,7 @@ public final class ConfiguredSignAssetIndex {
 	private static final String KEY_COUNT = "configured_sign_asset_count";
 	private static final String KEY_PREFIX = "configured_sign_asset_";
 	private final TreeMap<Long, StoredEntry> entries = new TreeMap<>();
+	private final TreeMap<Long, TreeSet<Long>> anchorsByChunk = new TreeMap<>();
 	private long revision;
 
 	public synchronized boolean configureRouteSign(long anchorPosition, long platformId, RouteSignStyleMode styleMode) {
@@ -31,8 +42,10 @@ public final class ConfiguredSignAssetIndex {
 
 	private boolean put(long anchorPosition, StoredEntry replacement) {
 		final StoredEntry previous = entries.put(anchorPosition, replacement);
+		if (previous == null) addChunkAnchor(anchorPosition);
 		if (previous == null && entries.size() > MAX_ENTRIES) {
 			entries.remove(anchorPosition);
+			removeChunkAnchor(anchorPosition);
 			throw new IllegalStateException("Too many configured sign assets");
 		}
 		final boolean changed = !replacement.equals(previous);
@@ -41,7 +54,7 @@ public final class ConfiguredSignAssetIndex {
 	}
 
 	public synchronized boolean remove(long anchorPosition) {
-		final boolean changed = entries.remove(anchorPosition) != null;
+		final boolean changed = removeStored(anchorPosition) != null;
 		if (changed) revision++;
 		return changed;
 	}
@@ -58,6 +71,7 @@ public final class ConfiguredSignAssetIndex {
 
 	public synchronized void read(CompoundTag compoundTag) {
 		entries.clear();
+		anchorsByChunk.clear();
 		revision++;
 		final int count = (int) Math.min(Math.max(0, compoundTag.getLong(KEY_COUNT)), MAX_ENTRIES);
 		for (int index = 0; index < count; index++) {
@@ -69,18 +83,103 @@ public final class ConfiguredSignAssetIndex {
 				if (type == SignType.ROUTE_SIGN) {
 					final long platformId = compoundTag.getLong(prefix + "primary_id");
 					final RouteSignStyleMode style = RouteSignStyleMode.fromPersisted(compoundTag.getString(prefix + "style"));
-					if (platformId != 0 && style.isExplicit()) entries.put(anchor, StoredEntry.routeSign(anchor, platformId, style));
+					if (platformId != 0 && style.isExplicit()) load(StoredEntry.routeSign(anchor, platformId, style));
 				} else {
 					final DestinationSignConfiguredEntry destination = new DestinationSignConfiguredEntry(
 							compoundTag.getLong(prefix + "source_id"), compoundTag.getLong(prefix + "destination_id"),
 							Math.toIntExact(compoundTag.getLong(prefix + "width")), Math.toIntExact(compoundTag.getLong(prefix + "height")),
 							DestinationSignStyle.valueOf(compoundTag.getString(prefix + "style")), compoundTag.getLong(prefix + "eta") == 1);
-					entries.put(anchor, StoredEntry.destinationSign(anchor, destination));
+					load(StoredEntry.destinationSign(anchor, destination));
 				}
 			} catch (IllegalArgumentException | ArithmeticException ignored) {
 				// A malformed entry is skipped without discarding other valid anchors.
 			}
 		}
+	}
+
+	/** Reconciles only persistent anchors belonging to an already loaded chunk. */
+	public synchronized boolean reconcileChunk(WorldChunk chunk) {
+		Objects.requireNonNull(chunk, "chunk");
+		final TreeSet<Long> indexedAnchors = anchorsByChunk.get(chunk.getPos().toLong());
+		if (indexedAnchors == null || indexedAnchors.isEmpty()) return false;
+		boolean changed = false;
+		for (final long anchor : new ArrayList<>(indexedAnchors)) {
+			final StoredEntry previous = entries.get(anchor);
+			if (previous == null) continue;
+			final BlockPos position = BlockPos.fromLong(anchor);
+			final BlockState state = chunk.getBlockState(position);
+			final BlockEntity blockEntity = chunk.getBlockEntity(position);
+			if (blockEntity == null && isSignAnchorBlock(state)) continue;
+			final boolean recognizedEntity = blockEntity != null && (
+					blockEntity.data instanceof BlockDestinationSign.BlockEntity && isDestinationAnchorBlock(state)
+							|| blockEntity.data instanceof BlockRouteSignBase.BlockEntityBase && isRouteSignAnchorBlock(state));
+			final StoredEntry replacement = recognizedEntity ? fromBlockEntity(anchor, blockEntity) : null;
+			if (replacement == null) {
+				removeStored(anchor);
+				revision++;
+				changed = true;
+			} else if (!replacement.equals(previous)) {
+				entries.put(anchor, replacement);
+				revision++;
+				changed = true;
+			}
+		}
+		return changed;
+	}
+
+	private void load(StoredEntry entry) {
+		entries.put(entry.anchorPosition, entry);
+		addChunkAnchor(entry.anchorPosition);
+	}
+
+	private StoredEntry removeStored(long anchorPosition) {
+		final StoredEntry removed = entries.remove(anchorPosition);
+		if (removed != null) removeChunkAnchor(anchorPosition);
+		return removed;
+	}
+
+	private void addChunkAnchor(long anchorPosition) {
+		anchorsByChunk.computeIfAbsent(chunkPosition(anchorPosition), ignored -> new TreeSet<>()).add(anchorPosition);
+	}
+
+	private void removeChunkAnchor(long anchorPosition) {
+		final long chunkPosition = chunkPosition(anchorPosition);
+		final TreeSet<Long> anchors = anchorsByChunk.get(chunkPosition);
+		if (anchors != null && anchors.remove(anchorPosition) && anchors.isEmpty()) anchorsByChunk.remove(chunkPosition);
+	}
+
+	private static long chunkPosition(long anchorPosition) {
+		return new ChunkPos(BlockPos.fromLong(anchorPosition)).toLong();
+	}
+
+	private static boolean isSignAnchorBlock(BlockState state) {
+		return isDestinationAnchorBlock(state) || isRouteSignAnchorBlock(state);
+	}
+
+	private static boolean isDestinationAnchorBlock(BlockState state) {
+		return state.getBlock().data instanceof BlockDestinationSign
+					&& IBlock.getStatePropertySafe(state, BlockDestinationSign.HORIZONTAL_OFFSET) == 0
+					&& IBlock.getStatePropertySafe(state, BlockDestinationSign.VERTICAL_OFFSET) == 0;
+	}
+
+	private static boolean isRouteSignAnchorBlock(BlockState state) {
+		return state.getBlock().data instanceof BlockRouteSignBase
+				&& IBlock.getStatePropertySafe(state, IBlock.HALF) == IBlock.DoubleBlockHalf.LOWER;
+	}
+
+	private static StoredEntry fromBlockEntity(long anchorPosition, BlockEntity blockEntity) {
+		if (blockEntity.data instanceof BlockDestinationSign.BlockEntity) {
+			final DestinationSignConfig config = ((BlockDestinationSign.BlockEntity) blockEntity.data).getConfig();
+			if (!config.isConfigured()) return null;
+			return StoredEntry.destinationSign(anchorPosition, new DestinationSignConfiguredEntry(
+					config.getSourceStationId(), config.getDestinationStationId(), config.getWidth(), config.getHeight(), config.getStyle(), config.isShowEta()));
+		}
+		if (blockEntity.data instanceof BlockRouteSignBase.BlockEntityBase) {
+			final BlockRouteSignBase.BlockEntityBase routeSign = (BlockRouteSignBase.BlockEntityBase) blockEntity.data;
+			return routeSign.getPlatformId() != 0 && routeSign.getStyleMode().isExplicit()
+					? StoredEntry.routeSign(anchorPosition, routeSign.getPlatformId(), routeSign.getStyleMode()) : null;
+		}
+		return null;
 	}
 
 	public synchronized void write(CompoundTag compoundTag) {

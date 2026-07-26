@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import org.mtr.mapping.holder.BlockPos;
 import org.mtr.mapping.holder.Direction;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -74,5 +76,14 @@ public final class DestinationSignFootprintTest {
 		Assertions.assertEquals("first-old", values.get(first));
 		Assertions.assertEquals("second-old", values.get(second));
 		Assertions.assertEquals("third-old", values.get(third));
+	}
+
+	@Test
+	public void resizeUsesMappedReplaceabilityInsteadOfLoaderSpecificRawStateMethods() throws Exception {
+		Path source = Path.of("src", "main", "java", "org", "mtr", "mod", "block", "BlockDestinationSign.java");
+		if (!Files.exists(source)) source = Path.of("fabric").resolve(source);
+		final String block = Files.readString(source);
+		Assertions.assertFalse(block.contains("current.data.isReplaceable()"));
+		Assertions.assertTrue(block.contains("state.canReplace(context)"));
 	}
 }

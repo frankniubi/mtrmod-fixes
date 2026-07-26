@@ -80,6 +80,44 @@ public final class DestinationSignArrivalsServerCacheTest {
 	}
 
 	@Test
+	public void globallyTruncatedBatchNeverClaimsNoServiceForAStarvedPlatform() {
+		final AtomicLong now = new AtomicLong();
+		final MultiQuery query = new MultiQuery();
+		final DestinationSignArrivalsServerCache cache = new DestinationSignArrivalsServerCache(now::get, query);
+		final DestinationSignArrivalKey noisy = new DestinationSignArrivalKey(-1, -10);
+		final DestinationSignArrivalKey starved = new DestinationSignArrivalKey(-2, -20);
+		final List<DestinationSignArrivalsServerCache.Response> responses = new ArrayList<>();
+		cache.request(List.of(noisy, starved), responses::add);
+		final List<DestinationSignArrivalsServerCache.Candidate> globallyFull = new ArrayList<>();
+		for (int index = 0; index < DestinationSignArrivalsServerCache.MAX_CANDIDATES_PER_PLATFORM * 2; index++) {
+			globallyFull.add(candidate(-99, -10, index, "Noisy"));
+		}
+		query.callbacks.get(0).accept(new DestinationSignArrivalsServerCache.QueryResponse(0, globallyFull));
+		Assertions.assertFalse(responses.get(0).getResults().containsKey(starved));
+
+		now.addAndGet(1_000);
+		cache.request(List.of(noisy, starved), responses::add);
+		Assertions.assertEquals(3, query.callbacks.size(), "globally truncated platforms must retry independently");
+		Assertions.assertTrue(query.platforms.subList(1, 3).contains(List.of(-20L)));
+		Assertions.assertTrue(query.platforms.subList(1, 3).contains(List.of(-10L)));
+	}
+
+	@Test
+	public void waiterReferencesAreBoundedWhileAQueryIsInFlight() {
+		final MultiQuery query = new MultiQuery();
+		final DestinationSignArrivalsServerCache cache = new DestinationSignArrivalsServerCache(() -> 0, query);
+		final DestinationSignArrivalKey key = new DestinationSignArrivalKey(-1, -10);
+		final AtomicInteger completions = new AtomicInteger();
+		for (int index = 0; index <= DestinationSignArrivalsServerCache.MAX_WAITERS_PER_KEY; index++) {
+			cache.request(List.of(key), ignored -> completions.incrementAndGet());
+		}
+		Assertions.assertEquals(1, query.callbacks.size());
+		Assertions.assertEquals(1, completions.get(), "overflow waiter should receive an immediate transient response");
+		query.callbacks.get(0).accept(new DestinationSignArrivalsServerCache.QueryResponse(0, List.of(candidate(-1, -10, 1, "A"))));
+		Assertions.assertEquals(DestinationSignArrivalsServerCache.MAX_WAITERS_PER_KEY + 1, completions.get());
+	}
+
+	@Test
 	public void timedOutQueryReleasesWaitersAndCanBeRetried() {
 		final AtomicLong now = new AtomicLong();
 		final MultiQuery query = new MultiQuery();
@@ -97,6 +135,41 @@ public final class DestinationSignArrivalsServerCacheTest {
 		Assertions.assertEquals(1, completions.get(), "late generation must not complete the retry");
 		query.callbacks.get(1).accept(new DestinationSignArrivalsServerCache.QueryResponse(now.get(), List.of(candidate(-1, -10, 2, "fresh"))));
 		Assertions.assertEquals(2, completions.get());
+	}
+
+	@Test
+	public void throwingQueryReleasesWaitersAndCanBeRetriedAfterBackoff() {
+		final AtomicLong now = new AtomicLong();
+		final AtomicInteger queries = new AtomicInteger();
+		final DestinationSignArrivalsServerCache cache = new DestinationSignArrivalsServerCache(now::get, (platformIds, maximumCandidatesPerPlatform, callback) -> {
+			queries.incrementAndGet();
+			throw new IllegalStateException("test");
+		});
+		final DestinationSignArrivalKey key = new DestinationSignArrivalKey(-1, -10);
+		final AtomicInteger completions = new AtomicInteger();
+		cache.request(List.of(key), ignored -> completions.incrementAndGet());
+		Assertions.assertEquals(1, queries.get());
+		Assertions.assertEquals(1, completions.get());
+		now.addAndGet(1_000);
+		cache.request(List.of(key), ignored -> completions.incrementAndGet());
+		Assertions.assertEquals(2, queries.get());
+		Assertions.assertEquals(2, completions.get());
+	}
+
+	@Test
+	public void closeReleasesWaitersAndIgnoresLateCallbacks() {
+		final MultiQuery query = new MultiQuery();
+		final DestinationSignArrivalsServerCache cache = new DestinationSignArrivalsServerCache(() -> 0, query);
+		final DestinationSignArrivalKey key = new DestinationSignArrivalKey(-1, -10);
+		final AtomicInteger completions = new AtomicInteger();
+		cache.request(List.of(key), ignored -> completions.incrementAndGet());
+		cache.close();
+		Assertions.assertEquals(1, completions.get());
+		query.callbacks.get(0).accept(new DestinationSignArrivalsServerCache.QueryResponse(0, List.of(candidate(-1, -10, 1, "late"))));
+		Assertions.assertEquals(1, completions.get());
+		cache.request(List.of(key), ignored -> completions.incrementAndGet());
+		Assertions.assertEquals(2, completions.get());
+		Assertions.assertEquals(1, query.callbacks.size());
 	}
 
 	@Test
@@ -154,6 +227,10 @@ public final class DestinationSignArrivalsServerCacheTest {
 
 	private static final class MultiQuery implements DestinationSignArrivalsServerCache.Query {
 		private final List<Consumer<DestinationSignArrivalsServerCache.QueryResponse>> callbacks = new ArrayList<>();
-		@Override public void query(List<Long> platformIds, int maximumCandidatesPerPlatform, Consumer<DestinationSignArrivalsServerCache.QueryResponse> callback) { callbacks.add(callback); }
+		private final List<List<Long>> platforms = new ArrayList<>();
+		@Override public void query(List<Long> platformIds, int maximumCandidatesPerPlatform, Consumer<DestinationSignArrivalsServerCache.QueryResponse> callback) {
+			platforms.add(List.copyOf(platformIds));
+			callbacks.add(callback);
+		}
 	}
 }

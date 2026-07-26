@@ -141,7 +141,7 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 		}
 		for (final DestinationSignFootprint.Cell cell : newCells) {
 			final BlockState current = world.getBlockState(cell.getPosition());
-			if (!isOwnedBy(world, cell.getPosition(), anchor) && !current.data.isReplaceable()) return false;
+			if (!isOwnedBy(world, cell.getPosition(), anchor) && !isReplaceable(current, world, cell.getPosition(), player)) return false;
 			finalStates.put(cell.getPosition(), state(facing, cell.getHorizontalOffset(), cell.getVerticalOffset()));
 		}
 
@@ -189,6 +189,15 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 			world.updateNeighbors(position, org.mtr.mod.Blocks.DESTINATION_STATION_SIGN.get());
 		}
 		return true;
+	}
+
+	private static boolean isReplaceable(BlockState state, World world, BlockPos position, @Nullable PlayerEntity player) {
+		if (state.isAir()) return true;
+		if (player == null) return false;
+		final Hand hand = Hand.MAIN_HAND;
+		final ItemPlacementContext context = new ItemPlacementContext(world, player, hand, player.getStackInHand(hand),
+				new BlockHitResult(new Vector3d(position.getX() + 0.5, position.getY() + 0.5, position.getZ() + 0.5), Direction.UP, position, false));
+		return state.canReplace(context);
 	}
 
 	@Nullable

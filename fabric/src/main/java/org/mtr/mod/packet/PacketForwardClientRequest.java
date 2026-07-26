@@ -7,6 +7,7 @@ import org.mtr.mapping.registry.PacketHandler;
 import org.mtr.mapping.tool.PacketBufferReceiver;
 import org.mtr.mapping.tool.PacketBufferSender;
 import org.mtr.mod.Init;
+import org.mtr.mod.route.DestinationSignServerTopology;
 
 import javax.annotation.Nullable;
 import java.util.Random;
@@ -58,8 +59,9 @@ public final class PacketForwardClientRequest extends PacketHandler {
 				String.format("http://localhost:%s%s", Init.getServerPort(), endpoint),
 				content.isEmpty() ? null : content,
 				(response, path, statusCode) -> minecraftServer.execute(() -> {
-					if (mutation && statusCode >= 200 && statusCode < 300 && Init.getRouteAssetServerManager() != null) {
-						Init.getRouteAssetServerManager().requestRefresh(minecraftServer, "forwarded-dashboard-update");
+					if (mutation && statusCode >= 200 && statusCode < 300) {
+						DestinationSignServerTopology.clearServerState();
+						if (Init.getRouteAssetServerManager() != null) Init.getRouteAssetServerManager().requestRefresh(minecraftServer, "forwarded-dashboard-update");
 					}
 					Init.REGISTRY.sendPacketToClient(serverPlayerEntity, new PacketForwardClientRequest(response, path, callbackId));
 				})

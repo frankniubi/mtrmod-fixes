@@ -21,4 +21,13 @@ public final class DestinationSignDynamicTextCacheTest {
 		Assertions.assertTrue(cache.get("A|B").isEmpty());
 		Assertions.assertEquals(List.of("value-512"), cache.get("value-512"));
 	}
+
+	@Test
+	public void clearDropsEveryDynamicDestinationReference() {
+		final DestinationSignDynamicTextCache cache = new DestinationSignDynamicTextCache(ignored -> { });
+		cache.prepare("Destination|Terminal");
+		Assertions.assertFalse(cache.get("Destination|Terminal").isEmpty());
+		cache.clear();
+		Assertions.assertTrue(cache.get("Destination|Terminal").isEmpty());
+	}
 }

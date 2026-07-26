@@ -2,6 +2,7 @@ package org.mtr.mod.data;
 
 import org.mtr.libraries.it.unimi.dsi.fastutil.longs.LongAVLTreeSet;
 import org.mtr.mapping.holder.CompoundTag;
+import org.mtr.mapping.holder.WorldChunk;
 import org.mtr.mapping.mapper.PersistenceStateExtension;
 import org.mtr.mod.Init;
 import org.mtr.mod.route.ConfiguredSignAssetIndex;
@@ -73,6 +74,12 @@ public final class PersistentStateData extends PersistenceStateExtension {
 
 	public boolean configureDestinationSign(long anchorPosition, DestinationSignConfiguredEntry destinationSign) {
 		final boolean changed = configuredSignAssetIndex.configureDestinationSign(anchorPosition, destinationSign);
+		if (changed) markDirty2();
+		return changed;
+	}
+
+	public boolean reconcileConfiguredSigns(WorldChunk chunk) {
+		final boolean changed = configuredSignAssetIndex.reconcileChunk(chunk);
 		if (changed) markDirty2();
 		return changed;
 	}

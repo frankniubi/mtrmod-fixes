@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mtr.mapping.holder.CompoundTag;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 public final class ConfiguredSignAssetIndexTest {
@@ -62,5 +64,29 @@ public final class ConfiguredSignAssetIndexTest {
 
 		Assertions.assertTrue(restored.configureDestinationSign(1, destination), "an anchor may atomically change sign type");
 		Assertions.assertTrue(restored.snapshot("minecraft/overworld").get(0).isDestinationSign());
+	}
+
+	@Test
+	public void serverChunkLoadReconcilesOnlyIndexedAnchors() throws Exception {
+		final String index = Files.readString(sourcePath("route", "ConfiguredSignAssetIndex.java"));
+		Assertions.assertTrue(index.contains("anchorsByChunk"));
+		Assertions.assertTrue(index.contains("reconcileChunk(WorldChunk chunk)"));
+		Assertions.assertTrue(index.contains("anchorsByChunk.get(chunk.getPos().toLong())"));
+
+		final String init = Files.readString(sourcePath("", "Init.java"));
+		Assertions.assertTrue(init.contains("eventRegistry.registerChunkLoad("));
+		Assertions.assertTrue(init.contains("persistentState.reconcileConfiguredSigns(worldChunk)"));
+		Assertions.assertTrue(init.contains("configured-sign-chunk-reconcile"));
+		final String persistentState = Files.readString(sourcePath("data", "PersistentStateData.java"));
+		Assertions.assertTrue(persistentState.contains("configuredSignAssetIndex.reconcileChunk(chunk)"));
+		Assertions.assertTrue(persistentState.contains("if (changed) markDirty2();"));
+	}
+
+	private static Path sourcePath(String packageName, String fileName) {
+		Path path = Path.of("src", "main", "java", "org", "mtr", "mod");
+		if (!packageName.isEmpty()) path = path.resolve(packageName);
+		path = path.resolve(fileName);
+		if (!Files.exists(path)) path = Path.of("fabric").resolve(path);
+		return path;
 	}
 }

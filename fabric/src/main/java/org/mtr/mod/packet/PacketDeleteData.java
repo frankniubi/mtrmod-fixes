@@ -15,6 +15,7 @@ import org.mtr.mod.Init;
 import org.mtr.mod.block.BlockNode;
 import org.mtr.mod.client.DynamicTextureCache;
 import org.mtr.mod.client.MinecraftClientData;
+import org.mtr.mod.route.DestinationSignServerTopology;
 import org.mtr.mod.route.RouteAssetServerManager;
 
 import javax.annotation.Nonnull;
@@ -37,6 +38,7 @@ public final class PacketDeleteData extends PacketRequestResponseBase {
 	protected void runServerInbound(ServerWorld serverWorld, JsonObject jsonObject) {
 		// Check if there are any rail nodes that need to be reset
 		new DeleteDataResponse(new JsonReader(jsonObject)).iterateRailNodePosition(railNodePosition -> BlockNode.resetRailNode(serverWorld, Init.positionToBlockPos(railNodePosition)));
+		DestinationSignServerTopology.invalidate(new World(serverWorld.data));
 		final RouteAssetServerManager manager = Init.getRouteAssetServerManager();
 		if (manager != null) manager.acceptDelete(Init.getWorldId(new World(serverWorld.data)), jsonObject);
 	}

@@ -25,6 +25,8 @@ public final class DestinationSignServerTopology {
 	private static final long CACHE_MILLIS = 5_000;
 	private static final Map<CacheKey, CacheEntry> CACHE = new HashMap<>();
 	private static final Map<CacheKey, List<java.util.function.Consumer<DestinationSignTopology>>> PENDING = new HashMap<>();
+	private static final Map<CacheKey, Long> GENERATIONS = new HashMap<>();
+	private static long lifecycleEpoch;
 	private static final SerializedDataBase EMPTY_REQUEST = new SerializedDataBase() {
 		@Override public void updateData(ReaderBase readerBase) { }
 		@Override public void serializeData(WriterBase writerBase) { }
@@ -54,6 +56,7 @@ public final class DestinationSignServerTopology {
 		}
 
 		final CacheKey key = new CacheKey(world.getServer().data, dimension);
+		final CallbackEpoch callbackEpoch;
 		synchronized (DestinationSignServerTopology.class) {
 			final CacheEntry cached = CACHE.get(key);
 			if (cached != null && System.currentTimeMillis() - cached.createdMillis < CACHE_MILLIS) {
@@ -68,26 +71,56 @@ public final class DestinationSignServerTopology {
 			final List<java.util.function.Consumer<DestinationSignTopology>> first = new ArrayList<>();
 			first.add(callback);
 			PENDING.put(key, first);
+			callbackEpoch = new CallbackEpoch(lifecycleEpoch, GENERATIONS.getOrDefault(key, 0L));
 		}
 
-		Init.sendMessageC2S(OperationProcessor.LIST_DATA, world.getServer(), world, EMPTY_REQUEST, response -> {
-			DestinationSignTopology topology = DestinationSignTopology.empty();
-			try {
-				final RouteAssetDataMirror mirror = new RouteAssetDataMirror();
-				final long generation = mirror.beginGeneration(Set.of(dimension));
-				if (mirror.acceptListJson(generation, dimension, Utilities.getJsonObjectFromData(response))) {
-					topology = mirror.snapshot(generation).map(snapshot -> snapshot.getDimensions().get(dimension).getDestinationSignTopology()).orElse(DestinationSignTopology.empty());
+		try {
+			Init.sendMessageC2S(OperationProcessor.LIST_DATA, world.getServer(), world, EMPTY_REQUEST, response -> {
+				DestinationSignTopology topology = DestinationSignTopology.empty();
+				try {
+					final RouteAssetDataMirror mirror = new RouteAssetDataMirror();
+					final long generation = mirror.beginGeneration(Set.of(dimension));
+					if (mirror.acceptListJson(generation, dimension, Utilities.getJsonObjectFromData(response))) {
+						topology = mirror.snapshot(generation).map(snapshot -> snapshot.getDimensions().get(dimension).getDestinationSignTopology()).orElse(DestinationSignTopology.empty());
+					}
+				} catch (RuntimeException ignored) {
 				}
-			} catch (RuntimeException ignored) {
-			}
-			final DestinationSignTopology resolvedTopology = topology;
-			final List<java.util.function.Consumer<DestinationSignTopology>> callbacks;
+				final DestinationSignTopology resolvedTopology = topology;
+				final List<java.util.function.Consumer<DestinationSignTopology>> callbacks;
+				synchronized (DestinationSignServerTopology.class) {
+					if (!isCurrent(key, callbackEpoch)) return;
+					CACHE.put(key, new CacheEntry(System.currentTimeMillis(), resolvedTopology));
+					callbacks = PENDING.remove(key);
+				}
+				if (callbacks != null) callbacks.forEach(consumer -> {
+					try { consumer.accept(resolvedTopology); } catch (RuntimeException ignored) { }
+				});
+			}, ListDataResponse.class);
+		} catch (RuntimeException ignored) {
 			synchronized (DestinationSignServerTopology.class) {
-				CACHE.put(key, new CacheEntry(System.currentTimeMillis(), resolvedTopology));
-				callbacks = PENDING.remove(key);
+				if (isCurrent(key, callbackEpoch)) PENDING.remove(key);
 			}
-			if (callbacks != null) callbacks.forEach(consumer -> consumer.accept(resolvedTopology));
-		}, ListDataResponse.class);
+		}
+	}
+
+	public static void invalidate(World world) {
+		final CacheKey key = new CacheKey(world.getServer().data, Init.getWorldId(world));
+		synchronized (DestinationSignServerTopology.class) {
+			GENERATIONS.put(key, GENERATIONS.getOrDefault(key, 0L) + 1);
+			CACHE.remove(key);
+			PENDING.remove(key);
+		}
+	}
+
+	public static synchronized void clearServerState() {
+		lifecycleEpoch++;
+		CACHE.clear();
+		PENDING.clear();
+		GENERATIONS.clear();
+	}
+
+	private static boolean isCurrent(CacheKey key, CallbackEpoch callbackEpoch) {
+		return lifecycleEpoch == callbackEpoch.lifecycleEpoch && GENERATIONS.getOrDefault(key, 0L) == callbackEpoch.generation;
 	}
 
 	private static final class CacheKey {
@@ -102,5 +135,11 @@ public final class DestinationSignServerTopology {
 		private final long createdMillis;
 		private final DestinationSignTopology topology;
 		private CacheEntry(long createdMillis, DestinationSignTopology topology) { this.createdMillis = createdMillis; this.topology = topology; }
+	}
+
+	private static final class CallbackEpoch {
+		private final long lifecycleEpoch;
+		private final long generation;
+		private CallbackEpoch(long lifecycleEpoch, long generation) { this.lifecycleEpoch = lifecycleEpoch; this.generation = generation; }
 	}
 }

@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +30,7 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 	public static final int MAX_CANDIDATES_PER_PLATFORM = 128;
 	public static final long CACHE_MILLIS = 1_000;
 	public static final long QUERY_TIMEOUT_MILLIS = 5_000;
+	static final int MAX_WAITERS_PER_KEY = 256;
 
 	private static final int MAX_ADAPTIVE_CANDIDATES_PER_PLATFORM = 512;
 	private static final int MAX_PLATFORMS_PER_CORE_QUERY = 16;
@@ -37,6 +38,7 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 	private static final int MAX_CACHE_ENTRIES = 8_192;
 	private static final int MAX_IN_FLIGHT_KEYS = 2_048;
 	private static final int MAX_IN_FLIGHT_PLATFORMS = 256;
+	private static final int MAX_PENDING_WAITER_REFERENCES = 32_768;
 	private static final long TRANSIENT_BACKOFF_MILLIS = 1_000;
 
 	private static final Map<String, DestinationSignArrivalsServerCache> INSTANCES = new HashMap<>();
@@ -47,9 +49,11 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 	private final Map<DestinationSignArrivalKey, List<Pending>> waitersByKey = new HashMap<>();
 	private final Map<Long, PlatformFlight> flightsByPlatform = new HashMap<>();
 	private final Map<Long, Integer> nextLimitByPlatform = new HashMap<>();
+	private final Set<Long> isolatedPlatforms = new HashSet<>();
 	private final Map<DestinationSignArrivalKey, Long> unavailableUntil = new HashMap<>();
 	private long serverMillisOffset;
 	private long flightSequence;
+	private int pendingWaiterReferences;
 	private boolean closed;
 
 	public DestinationSignArrivalsServerCache(LongSupplier clock, Query query) {
@@ -62,10 +66,12 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 		final Pending pending = new Pending(callback);
 		final List<QueryBatch> launches = new ArrayList<>();
 		final long now = clock.getAsLong();
+		final Response immediateResponse;
 		synchronized (this) {
 			expireCache(now);
 			if (!closed) {
 				final Map<Integer, List<Long>> platformsByLimit = new TreeMap<>();
+				final Map<Integer, List<Long>> isolatedPlatformsByLimit = new TreeMap<>();
 				for (final DestinationSignArrivalKey key : keys) {
 					final CacheEntry entry = cached.get(key);
 					if (entry != null) {
@@ -74,6 +80,7 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 					}
 					if (unavailableUntil.getOrDefault(key, Long.MIN_VALUE) > now) continue;
 					List<Pending> keyWaiters = waitersByKey.get(key);
+					if (pendingWaiterReferences >= MAX_PENDING_WAITER_REFERENCES || (keyWaiters != null && keyWaiters.size() >= MAX_WAITERS_PER_KEY)) continue;
 					if (keyWaiters == null) {
 						if (waitersByKey.size() >= MAX_IN_FLIGHT_KEYS) continue;
 						PlatformFlight flight = flightsByPlatform.get(key.getPlatformId());
@@ -82,25 +89,22 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 							final int limit = nextLimitByPlatform.getOrDefault(key.getPlatformId(), MAX_CANDIDATES_PER_PLATFORM);
 							flight = new PlatformFlight(++flightSequence, now, limit);
 							flightsByPlatform.put(key.getPlatformId(), flight);
-							platformsByLimit.computeIfAbsent(limit, ignored -> new ArrayList<>()).add(key.getPlatformId());
+							final Map<Integer, List<Long>> launchGroup = isolatedPlatforms.contains(key.getPlatformId()) ? isolatedPlatformsByLimit : platformsByLimit;
+							launchGroup.computeIfAbsent(limit, ignored -> new ArrayList<>()).add(key.getPlatformId());
 						}
 						keyWaiters = new ArrayList<>();
 						waitersByKey.put(key, keyWaiters);
 					}
 					pending.remaining++;
 					keyWaiters.add(pending);
+					pendingWaiterReferences++;
 				}
-				platformsByLimit.forEach((limit, platforms) -> {
-					for (int start = 0; start < platforms.size(); start += MAX_PLATFORMS_PER_CORE_QUERY) {
-						final List<Long> batchPlatforms = List.copyOf(platforms.subList(start, Math.min(platforms.size(), start + MAX_PLATFORMS_PER_CORE_QUERY)));
-						final Map<Long, Long> generations = new HashMap<>();
-						batchPlatforms.forEach(platform -> generations.put(platform, flightsByPlatform.get(platform).generation));
-						launches.add(new QueryBatch(batchPlatforms, generations, limit));
-					}
-				});
+				collectLaunches(platformsByLimit, MAX_PLATFORMS_PER_CORE_QUERY, launches);
+				collectLaunches(isolatedPlatformsByLimit, 1, launches);
 			}
+			immediateResponse = pending.remaining == 0 ? new Response(saturatingAdd(now, serverMillisOffset), pending.results) : null;
 		}
-		if (pending.remaining == 0) deliverSafely(pending.callback, new Response(saturatingAdd(now, serverMillisOffset), pending.results));
+		if (immediateResponse != null) deliverSafely(pending.callback, immediateResponse);
 		for (final QueryBatch batch : launches) {
 			try {
 				query.query(batch.platforms, batch.limit, response -> complete(batch, response));
@@ -108,6 +112,17 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 				fail(batch, clock.getAsLong());
 			}
 		}
+	}
+
+	private void collectLaunches(Map<Integer, List<Long>> platformsByLimit, int maximumPlatformsPerQuery, List<QueryBatch> launches) {
+		platformsByLimit.forEach((limit, platforms) -> {
+			for (int start = 0; start < platforms.size(); start += maximumPlatformsPerQuery) {
+				final List<Long> batchPlatforms = List.copyOf(platforms.subList(start, Math.min(platforms.size(), start + maximumPlatformsPerQuery)));
+				final Map<Long, Long> generations = new HashMap<>();
+				batchPlatforms.forEach(platform -> generations.put(platform, flightsByPlatform.get(platform).generation));
+				launches.add(new QueryBatch(batchPlatforms, generations, limit));
+			}
+		});
 	}
 
 	public void tick() {
@@ -135,6 +150,7 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 			waitersByKey.keySet().forEach(key -> { if (validPlatforms.contains(key.getPlatformId())) requested.add(key); });
 			final Map<Long, Integer> candidateCounts = new HashMap<>();
 			final Map<DestinationSignArrivalKey, Candidate> earliest = new HashMap<>();
+			final boolean globallyExhausted = response.candidates.size() >= batch.maximumTotalCandidates;
 			for (final Candidate candidate : response.candidates) {
 				if (!validPlatforms.contains(candidate.platformId)) continue;
 				candidateCounts.merge(candidate.platformId, 1, Integer::sum);
@@ -146,9 +162,11 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 			serverMillisOffset = response.responseTimeMillis - now;
 			for (final long platform : validPlatforms) {
 				final int candidateCount = candidateCounts.getOrDefault(platform, 0);
-				final boolean exhausted = candidateCount >= batch.limit;
+				final boolean exhausted = globallyExhausted || candidateCount >= batch.limit;
 				if (exhausted) nextLimitByPlatform.put(platform, Math.min(MAX_ADAPTIVE_CANDIDATES_PER_PLATFORM, batch.limit * 2));
 				else nextLimitByPlatform.remove(platform);
+				if (globallyExhausted) isolatedPlatforms.add(platform);
+				else if (!exhausted) isolatedPlatforms.remove(platform);
 				final List<DestinationSignArrivalKey> platformKeys = new ArrayList<>();
 				requested.forEach(key -> { if (key.getPlatformId() == platform) platformKeys.add(key); });
 				for (final DestinationSignArrivalKey key : platformKeys) {
@@ -195,7 +213,10 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 
 	private void collectKeyCompletion(DestinationSignArrivalKey key, DestinationSignArrivalResult result, long responseTime, List<Completion> completions) {
 		final List<Pending> waiters = waitersByKey.remove(key);
-		if (waiters != null) waiters.forEach(waiter -> completions.add(new Completion(waiter, key, result, responseTime)));
+		if (waiters != null) {
+			pendingWaiterReferences -= waiters.size();
+			waiters.forEach(waiter -> completions.add(new Completion(waiter, key, result, responseTime)));
+		}
 	}
 
 	private void putCache(DestinationSignArrivalKey key, CacheEntry entry) {
@@ -218,7 +239,9 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 			final List<QueryBatch> flights = new ArrayList<>();
 			flightsByPlatform.forEach((platform, flight) -> flights.add(new QueryBatch(List.of(platform), Map.of(platform, flight.generation), flight.limit)));
 			flights.forEach(batch -> collectFailure(batch, now, completions));
-			cached.clear(); unavailableUntil.clear(); nextLimitByPlatform.clear();
+			new ArrayList<>(waitersByKey.keySet()).forEach(key -> collectKeyCompletion(key, null, saturatingAdd(now, serverMillisOffset), completions));
+			flightsByPlatform.clear(); pendingWaiterReferences = 0;
+			cached.clear(); unavailableUntil.clear(); nextLimitByPlatform.clear(); isolatedPlatforms.clear();
 		}
 		deliverAll(completions);
 	}
@@ -238,7 +261,7 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 		final String id = MinecraftServerHelper.getWorldId(world).data.toString();
 		return INSTANCES.computeIfAbsent(id, ignored -> new DestinationSignArrivalsServerCache(System::currentTimeMillis, (platformIds, maximum, callback) -> {
 			final LongAVLTreeSet ids = new LongAVLTreeSet(platformIds);
-			final int total = Math.min(MAX_TOTAL_CORE_CANDIDATES, Math.multiplyExact(maximum, platformIds.size()));
+			final int total = maximumTotalCandidates(maximum, platformIds.size());
 			Init.sendMessageC2S(OperationProcessor.ARRIVALS, world.getServer(), world, new ArrivalsRequest(new LongImmutableList(ids), maximum, total), response -> {
 				final List<Candidate> candidates = new ArrayList<>();
 				response.getArrivals().forEach(arrival -> candidates.add(new Candidate(arrival.getRouteId(), arrival.getPlatformId(), arrival.getArrival(), arrival.getDestination(), arrival.getRealtime())));
@@ -291,7 +314,11 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 		private final List<Long> platforms;
 		private final Map<Long, Long> generations;
 		private final int limit;
-		private QueryBatch(List<Long> platforms, Map<Long, Long> generations, int limit) { this.platforms = platforms; this.generations = generations; this.limit = limit; }
+		private final int maximumTotalCandidates;
+		private QueryBatch(List<Long> platforms, Map<Long, Long> generations, int limit) {
+			this.platforms = platforms; this.generations = generations; this.limit = limit;
+			maximumTotalCandidates = DestinationSignArrivalsServerCache.maximumTotalCandidates(limit, platforms.size());
+		}
 	}
 
 	private static final class Pending {
@@ -318,5 +345,6 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 		}
 	}
 
+	private static int maximumTotalCandidates(int maximumPerPlatform, int platformCount) { return Math.min(MAX_TOTAL_CORE_CANDIDATES, Math.multiplyExact(maximumPerPlatform, platformCount)); }
 	private static long saturatingAdd(long first, long second) { try { return Math.addExact(first, second); } catch (ArithmeticException ignored) { return second < 0 ? Long.MIN_VALUE : Long.MAX_VALUE; } }
 }

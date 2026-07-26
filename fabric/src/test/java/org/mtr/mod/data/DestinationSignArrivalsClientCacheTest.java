@@ -79,4 +79,26 @@ public final class DestinationSignArrivalsClientCacheTest {
 		Assertions.assertTrue(expired.getResults().isEmpty());
 		Assertions.assertTrue(expired.getGeneration() > generation);
 	}
+
+	@Test
+	public void clearDropsCallbacksAndLateResponsesCannotRepopulateState() {
+		final AtomicLong now = new AtomicLong();
+		final List<PacketFetchDestinationSignArrivals.RequestPayload> sent = new ArrayList<>();
+		final DestinationSignArrivalsClientCache cache = new DestinationSignArrivalsClientCache(now::get, sent::add);
+		final DestinationSignArrivalKey key = new DestinationSignArrivalKey(-1, -10);
+		cache.request(List.of(key));
+		cache.tick();
+		final long beforeClear = cache.request(List.of()).getGeneration();
+
+		cache.clear();
+		final long afterClear = cache.request(List.of()).getGeneration();
+		cache.accept(new PacketFetchDestinationSignArrivals.ResponsePayload(sent.get(0).getCallbackId(), 5_000,
+				Map.of(key, DestinationSignArrivalResult.present(8_000, "late", true))));
+
+		final DestinationSignArrivalsClientCache.Snapshot snapshot = cache.request(List.of());
+		Assertions.assertTrue(afterClear > beforeClear);
+		Assertions.assertEquals(afterClear, snapshot.getGeneration());
+		Assertions.assertTrue(snapshot.getResults().isEmpty());
+		Assertions.assertTrue(snapshot.getAuthoritativeKeys().isEmpty());
+	}
 }

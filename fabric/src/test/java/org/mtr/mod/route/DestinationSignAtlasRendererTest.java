@@ -28,7 +28,7 @@ public final class DestinationSignAtlasRendererTest {
 	@Test
 	public void northTreetrunkU1AndDAtlasesMatchThreeStyleGoldens() throws Exception {
 		final RouteAssetRenderer renderer = new RouteAssetRenderer();
-		final DestinationSignTopology topology = northTreetrunkTopology();
+		final DestinationSignTopology topology = NorthTreetrunkDestinationSignFixtures.topology();
 		final RouteAssetDataMirror.Snapshot data = new RouteAssetDataMirror.Snapshot(1, Map.of("minecraft/overworld",
 				new RouteAssetDataMirror.DimensionSnapshot("minecraft/overworld", 1, Map.of(), topology)));
 		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
@@ -53,24 +53,6 @@ public final class DestinationSignAtlasRendererTest {
 		} else {
 			Assertions.assertEquals(loadExpected(fixture), actual);
 		}
-	}
-
-	private static DestinationSignTopology northTreetrunkTopology() {
-		final LinkedHashMap<Long, RouteAssetRenderSnapshot.Route> routes = new LinkedHashMap<>();
-		NorthTreetrunkRouteSignFixtures.u1Routes().forEach(route -> routes.putIfAbsent(route.getId(), route));
-		NorthTreetrunkRouteSignFixtures.dRoutes().forEach(route -> routes.putIfAbsent(route.getId(), route));
-		final List<DestinationSignTopology.ServiceRoute> serviceRoutes = new ArrayList<>();
-		final LinkedHashMap<Long, DestinationSignTopology.StationZone> stations = new LinkedHashMap<>();
-		int order = 0;
-		for (final RouteAssetRenderSnapshot.Route route : routes.values()) {
-			final List<DestinationSignTopology.StopOccurrence> stops = new ArrayList<>();
-			for (final RouteAssetRenderSnapshot.Station station : route.getStations()) {
-				stops.add(new DestinationSignTopology.StopOccurrence(station.getPlatformId(), station.getOwningStationId(), station.getPlatformDisplayName(), station.getName(), station.getDestination()));
-				stations.putIfAbsent(station.getOwningStationId(), new DestinationSignTopology.StationZone(station.getOwningStationId(), station.getName()));
-			}
-			serviceRoutes.add(new DestinationSignTopology.ServiceRoute(route.getId(), order++, route.getName(), route.getColor(), stops));
-		}
-		return new DestinationSignTopology(serviceRoutes, new ArrayList<>(stations.values()));
 	}
 
 	private static Map<String, String> loadExpected(Path path) throws IOException {

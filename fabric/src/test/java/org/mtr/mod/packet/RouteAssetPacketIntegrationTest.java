@@ -234,6 +234,61 @@ public final class RouteAssetPacketIntegrationTest {
 	}
 
 	@Test
+	public void destinationArrivalPacketsCannotTriggerStaticAssetGeneration() throws Exception {
+		final String arrivals = Files.readString(sourcePath("packet", "PacketFetchDestinationSignArrivals.java"));
+		final String topology = Files.readString(sourcePath("route", "DestinationSignServerTopology.java"));
+		final String clientCache = Files.readString(sourcePath("data", "DestinationSignArrivalsClientCache.java"));
+		final String combined = arrivals + topology + clientCache;
+		Assertions.assertTrue(arrivals.contains("DestinationSignArrivalsServerCache.getInstance"));
+		Assertions.assertFalse(combined.contains("configuredSignsChanged"));
+		Assertions.assertFalse(combined.contains("requestRefresh"));
+		Assertions.assertFalse(combined.contains("submitSnapshot"));
+		Assertions.assertFalse(combined.contains("handleObservedKeys"));
+		Assertions.assertFalse(combined.contains("PacketRouteAssetObservedKeys"));
+	}
+
+	@Test
+	public void destinationTransientStateFollowsConnectionAndServerLifecycle() throws Exception {
+		final String initClient = Files.readString(sourcePath("", "InitClient.java"));
+		Assertions.assertTrue(initClient.contains("ClientRouteAssetManager.getInstance().onDisconnect();"));
+		Assertions.assertTrue(initClient.contains("DestinationSignClientState.INSTANCE.clear();"));
+		Assertions.assertTrue(initClient.contains("DestinationSignArrivalsClientCache.INSTANCE.clear();"));
+		Assertions.assertTrue(initClient.contains("DestinationSignDynamicTextCache.INSTANCE.clear();"));
+		Assertions.assertTrue(initClient.contains("DynamicTextureCache.instance.onWorldReset();"));
+		final String dynamicTextures = Files.readString(sourcePath("client", "DynamicTextureCache.java"));
+		Assertions.assertTrue(dynamicTextures.contains("public void onWorldReset()"));
+		Assertions.assertTrue(dynamicTextures.contains("DestinationSignClientState.INSTANCE.clear();"));
+
+		final String init = Files.readString(sourcePath("", "Init.java"));
+		Assertions.assertTrue(init.contains("DestinationSignArrivalsServerCache.clearAll();"));
+		Assertions.assertTrue(init.contains("PacketFetchDestinationSignArrivals.clearServerState();"));
+		Assertions.assertTrue(init.contains("DestinationSignServerTopology.clearServerState();"));
+		Assertions.assertFalse(init.contains("getConfiguredSignAssetIndex().clear()"), "server shutdown must leave the world-persistent configured index intact");
+
+		final String topology = Files.readString(sourcePath("route", "DestinationSignServerTopology.java"));
+		Assertions.assertTrue(topology.contains("public static void invalidate(World world)"));
+		Assertions.assertTrue(topology.contains("void clearServerState()"));
+		Assertions.assertTrue(topology.contains("lifecycleEpoch"), "late topology callbacks need a server-lifecycle epoch guard");
+
+		final String update = Files.readString(sourcePath("packet", "PacketUpdateData.java"));
+		final String delete = Files.readString(sourcePath("packet", "PacketDeleteData.java"));
+		Assertions.assertEquals(1, occurrences(update, "DestinationSignServerTopology.invalidate("));
+		Assertions.assertEquals(1, occurrences(delete, "DestinationSignServerTopology.invalidate("));
+		Assertions.assertEquals(1, occurrences(update, "manager.acceptUpdate("));
+		Assertions.assertEquals(1, occurrences(delete, "manager.acceptDelete("));
+		Assertions.assertFalse(update.contains("configuredSignsChanged"));
+		Assertions.assertFalse(delete.contains("configuredSignsChanged"));
+		Assertions.assertFalse(update.contains("requestRefresh"));
+		Assertions.assertFalse(delete.contains("requestRefresh"));
+		final String forwarded = Files.readString(sourcePath("packet", "PacketForwardClientRequest.java"));
+		Assertions.assertEquals(1, occurrences(forwarded, "DestinationSignServerTopology.clearServerState();"));
+		Assertions.assertEquals(1, occurrences(forwarded, "requestRefresh(minecraftServer, \"forwarded-dashboard-update\")"));
+
+		final String clientManager = Files.readString(sourcePath("client/asset", "ClientRouteAssetManager.java"));
+		Assertions.assertTrue(clientManager.contains("key.getType() != RouteAssetType.DESTINATION_SIGN_ATLAS"));
+	}
+
+	@Test
 	public void fallbackPayloadCannotAuthorizeADocument() {
 		final PacketRouteAssetManifest.ManifestPayload payload = PacketRouteAssetManifest.ManifestPayload.fallback("disabled", "f".repeat(64), 7);
 		Assertions.assertEquals(RouteAssetNegotiation.Mode.FALLBACK, payload.getMode());
@@ -262,6 +317,16 @@ public final class RouteAssetPacketIntegrationTest {
 		path = path.resolve(fileName);
 		if (!Files.exists(path)) path = Path.of("fabric").resolve(path);
 		return path;
+	}
+
+	private static int occurrences(String source, String value) {
+		int count = 0;
+		int index = 0;
+		while ((index = source.indexOf(value, index)) >= 0) {
+			count++;
+			index += value.length();
+		}
+		return count;
 	}
 
 	private static PacketRouteAssetChunkRequest.RequestPayload request(long generation, long transferId, byte[] bytes) {

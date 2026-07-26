@@ -17,6 +17,7 @@ import org.mtr.mapping.tool.PacketBufferReceiver;
 import org.mtr.mod.Init;
 import org.mtr.mod.client.DynamicTextureCache;
 import org.mtr.mod.client.MinecraftClientData;
+import org.mtr.mod.route.DestinationSignServerTopology;
 import org.mtr.mod.route.RouteAssetServerManager;
 
 import javax.annotation.Nonnull;
@@ -42,6 +43,7 @@ public final class PacketUpdateData extends PacketRequestResponseBase {
 
 	@Override
 	protected void runServerInbound(ServerWorld serverWorld, JsonObject jsonObject) {
+		DestinationSignServerTopology.invalidate(new World(serverWorld.data));
 		final RouteAssetServerManager manager = Init.getRouteAssetServerManager();
 		if (manager != null) manager.acceptUpdate(Init.getWorldId(new World(serverWorld.data)), jsonObject);
 	}

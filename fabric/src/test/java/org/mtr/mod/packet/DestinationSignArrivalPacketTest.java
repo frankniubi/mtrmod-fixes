@@ -6,7 +6,9 @@ import org.mtr.mod.data.DestinationSignArrivalKey;
 import org.mtr.mod.data.DestinationSignArrivalResult;
 
 import java.nio.charset.StandardCharsets;
+import java.util.AbstractCollection;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -32,6 +34,19 @@ public final class DestinationSignArrivalPacketTest {
 		}));
 		Assertions.assertEquals(0, reads.get());
 		Assertions.assertThrows(IllegalArgumentException.class, () -> PacketFetchDestinationSignArrivals.readKeys(-1, index -> null));
+	}
+
+	@Test
+	public void requestPayloadSnapshotsItsInputOnlyOnce() {
+		final List<DestinationSignArrivalKey> keys = List.of(new DestinationSignArrivalKey(-1, -10), new DestinationSignArrivalKey(-2, -20));
+		final AtomicInteger iterations = new AtomicInteger();
+		final AbstractCollection<DestinationSignArrivalKey> counted = new AbstractCollection<>() {
+			@Override public Iterator<DestinationSignArrivalKey> iterator() { iterations.incrementAndGet(); return keys.iterator(); }
+			@Override public int size() { return keys.size(); }
+		};
+		final PacketFetchDestinationSignArrivals.RequestPayload payload = new PacketFetchDestinationSignArrivals.RequestPayload(1, counted);
+		Assertions.assertEquals(keys, payload.getKeys());
+		Assertions.assertEquals(1, iterations.get());
 	}
 
 	@Test

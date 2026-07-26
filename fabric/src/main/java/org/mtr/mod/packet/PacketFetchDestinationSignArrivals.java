@@ -178,7 +178,8 @@ public final class PacketFetchDestinationSignArrivals extends PacketHandler {
 		private final List<DestinationSignArrivalKey> keys;
 		public RequestPayload(long callbackId, Collection<DestinationSignArrivalKey> keys) {
 			this.callbackId = callbackId;
-			this.keys = readKeys(keys == null ? -1 : keys.size(), index -> new ArrayList<>(keys).get(index));
+			final List<DestinationSignArrivalKey> snapshot = keys == null ? Collections.emptyList() : new ArrayList<>(keys);
+			this.keys = readKeys(keys == null ? -1 : snapshot.size(), snapshot::get);
 		}
 		public long getCallbackId() { return callbackId; }
 		public List<DestinationSignArrivalKey> getKeys() { return keys; }

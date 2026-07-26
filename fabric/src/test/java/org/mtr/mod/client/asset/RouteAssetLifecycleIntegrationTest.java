@@ -90,6 +90,34 @@ public final class RouteAssetLifecycleIntegrationTest {
 	}
 
 	@Test
+	public void destinationAtlasIsDownloadedOnceAndRepeatedLookupsDoNotRequestNewHashes() throws Exception {
+		final RouteAssetKey key = destinationKey(2);
+		final String hash = RouteAssetHash.sha256(PNG);
+		final RouteAssetManifest manifest = RouteAssetManifest.builder().put(key, hash, "destination-static").build();
+		final byte[] document = RouteAssetManifestCodec.encode(manifest);
+		final List<String> requestedPaths = new java.util.concurrent.CopyOnWriteArrayList<>();
+		startServer(requestedPaths, Map.of(documentPath(document), document, pngPath(hash), PNG));
+		final ClientRouteAssetDiskCache cache = cache();
+		final List<org.mtr.mod.route.RouteAssetHello> hellos = new ArrayList<>();
+		final ClientRouteAssetManager manager = manager(cache, new AtomicLong(1_000), hellos);
+
+		manager.onJoin("127.0.0.1");
+		manager.handleManifest(payload(RouteAssetNegotiation.Mode.SNAPSHOT, UUID.randomUUID().toString(), manifest.getRevision(), document, hellos.get(0).getRequestNonce()));
+		awaitState(manager, ClientRouteAssetSession.State.READY);
+		final List<String> initialRequests = List.copyOf(requestedPaths);
+		final String initialRevision = cache.loadManifest(manager.getCurrentServerId()).orElseThrow().getRevision();
+
+		for (int index = 0; index < 120; index++) {
+			Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.PENDING, manager.lookupRouteTexture(key).getState());
+		}
+
+		Assertions.assertEquals(List.of(routePath(documentPath(document)), routePath(pngPath(hash))), initialRequests);
+		Assertions.assertEquals(initialRequests, requestedPaths, "live destination text and ETA frames must not fetch another static object");
+		Assertions.assertEquals(initialRevision, cache.loadManifest(manager.getCurrentServerId()).orElseThrow().getRevision());
+		Assertions.assertTrue(cache.findPng(hash).isPresent());
+	}
+
+	@Test
 	public void snapshotPromotesPriorRendererPngWithoutRequestingIt() throws Exception {
 		final String hash = RouteAssetHash.sha256(PNG);
 		final RouteAssetManifest manifest = RouteAssetManifest.builder().put(destinationKey(2), hash, "prior-renderer-multi").build();

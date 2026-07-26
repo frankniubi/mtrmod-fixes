@@ -22,6 +22,7 @@ import org.mtr.libraries.org.eclipse.jetty.servlet.ServletHolder;
 import org.mtr.mapping.holder.*;
 import org.mtr.mapping.mapper.GameRule;
 import org.mtr.mapping.mapper.MinecraftServerHelper;
+import org.mtr.mapping.mapper.PersistenceStateExtension;
 import org.mtr.mapping.mapper.WorldHelper;
 import org.mtr.mapping.registry.CommandBuilder;
 import org.mtr.mapping.registry.Registry;
@@ -30,12 +31,14 @@ import org.mtr.mixin.PlayerTeleportationStateAccessor;
 import org.mtr.mod.config.Config;
 import org.mtr.mod.data.ArrivalsCacheServer;
 import org.mtr.mod.data.DestinationSignArrivalsServerCache;
+import org.mtr.mod.data.PersistentStateData;
 import org.mtr.mod.data.RailActionModule;
 import org.mtr.mod.generated.lang.TranslationProvider;
 import org.mtr.mod.packet.*;
 import org.mtr.mod.servlet.MinecraftOperationProcessor;
 import org.mtr.mod.servlet.RequestHelper;
 import org.mtr.mod.servlet.RouteAssetServlet;
+import org.mtr.mod.route.DestinationSignServerTopology;
 import org.mtr.mod.route.RouteAssetProtocol;
 import org.mtr.mod.route.RouteAssetServerManager;
 
@@ -188,6 +191,7 @@ public final class Init implements Utilities {
 		// Register events
 		REGISTRY.eventRegistry.registerServerStarted(minecraftServer -> {
 			// Start up the backend
+			DestinationSignServerTopology.clearServerState();
 			RAIL_ACTION_MODULES.clear();
 			WORLD_ID_LIST.clear();
 			MinecraftServerHelper.iterateWorlds(minecraftServer, serverWorld -> {
@@ -262,7 +266,15 @@ public final class Init implements Utilities {
 			serverPort = 0;
 			DestinationSignArrivalsServerCache.clearAll();
 			PacketFetchDestinationSignArrivals.clearServerState();
+			DestinationSignServerTopology.clearServerState();
 			RIDING_PLAYERS.clear();
+		});
+
+		REGISTRY.eventRegistry.registerChunkLoad((serverWorld, worldChunk) -> {
+			final PersistentStateData persistentState = (PersistentStateData) PersistenceStateExtension.register(serverWorld, PersistentStateData::new, MOD_ID);
+			if (persistentState.reconcileConfiguredSigns(worldChunk) && routeAssetServerManager != null) {
+				routeAssetServerManager.configuredSignsChanged(new World(serverWorld.data).getServer(), "configured-sign-chunk-reconcile");
+			}
 		});
 
 		REGISTRY.eventRegistry.registerStartServerTick(() -> {
