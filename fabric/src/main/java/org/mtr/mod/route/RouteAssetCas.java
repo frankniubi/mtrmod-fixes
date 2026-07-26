@@ -6,6 +6,7 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -20,8 +21,10 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -56,14 +59,28 @@ public final class RouteAssetCas {
 		return put(canonicalJson, MediaType.JSON);
 	}
 
+	Optional<Path> promotePngFromPriorVersions(String hash) throws IOException {
+		final String validHash = RouteAssetHash.requireValid(hash);
+		final String lockKey = lockKey(validHash, MediaType.PNG);
+		final Object lock = admissionLocks.computeIfAbsent(lockKey, ignored -> new Object());
+		try {
+			synchronized (lock) {
+				final Optional<Path> current = find(validHash, MediaType.PNG);
+				if (current.isPresent()) return current;
+				return promotePngFromPriorVersionsLocked(validHash, pathFor(validHash, MediaType.PNG));
+			}
+		} finally {
+			admissionLocks.remove(lockKey, lock);
+		}
+	}
+
 	public Optional<Path> find(String hash, MediaType type) {
 		final String validHash = RouteAssetHash.requireValid(hash);
 		final Path path = pathFor(validHash, type);
 		try {
 			final VerifiedStamp before = readStamp(path);
 			if (before.equals(verifiedObjects.get(path))) return Optional.of(path);
-			validateObject(path, validHash, type);
-			final VerifiedStamp after = readStamp(path);
+			final VerifiedStamp after = validateObject(path, validHash, type);
 			if (!before.equals(after)) throw new IOException("Route asset CAS object changed during validation");
 			verifiedObjects.put(path, after);
 			return Optional.of(path);
@@ -143,7 +160,7 @@ public final class RouteAssetCas {
 
 	private String put(byte[] bytes, MediaType type) throws IOException {
 		final String hash = RouteAssetHash.sha256(bytes);
-		final String lockKey = type.extension + ':' + hash;
+		final String lockKey = lockKey(hash, type);
 		final Object lock = admissionLocks.computeIfAbsent(lockKey, ignored -> new Object());
 		try {
 			synchronized (lock) {
@@ -151,6 +168,7 @@ public final class RouteAssetCas {
 				if (find(hash, type).isPresent()) {
 					return hash;
 				}
+				if (type == MediaType.PNG && promotePngFromPriorVersionsLocked(hash, target).isPresent()) return hash;
 				Files.createDirectories(target.getParent());
 				final Path temporary = Files.createTempFile(target.getParent(), "." + hash + '-', ".tmp");
 				try {
@@ -160,8 +178,7 @@ public final class RouteAssetCas {
 					}
 					validateObject(temporary, hash, type);
 					moveAtomically(temporary, target);
-					validateObject(target, hash, type);
-					verifiedObjects.put(target, readStamp(target));
+					verifiedObjects.put(target, validateObject(target, hash, type));
 					return hash;
 				} finally {
 					Files.deleteIfExists(temporary);
@@ -173,11 +190,81 @@ public final class RouteAssetCas {
 	}
 
 	private Path pathFor(String hash, MediaType type) {
-		return resolvePublicObject("v" + rendererVersion, hash.substring(0, 2), hash, type.extension);
+		return objectPath(objectRoot, hash, type);
 	}
 
-	private static void validateObject(Path path, String expectedHash, MediaType type) throws IOException {
-		final byte[] bytes = Files.readAllBytes(path);
+	private static String lockKey(String hash, MediaType type) {
+		return type.extension + ':' + hash;
+	}
+
+	private static Path objectPath(Path root, String hash, MediaType type) {
+		final Path normalizedRoot = Objects.requireNonNull(root, "root").toAbsolutePath().normalize();
+		final String validHash = RouteAssetHash.requireValid(hash);
+		final MediaType validType = Objects.requireNonNull(type, "type");
+		final Path path = normalizedRoot.resolve(validHash.substring(0, 2)).resolve(validHash + '.' + validType.extension).normalize();
+		if (!path.startsWith(normalizedRoot)) throw new IllegalArgumentException("Route asset object path escapes the CAS root");
+		return path;
+	}
+
+	private Optional<Path> promotePngFromPriorVersionsLocked(String hash, Path target) throws IOException {
+		for (int version = rendererVersion - 1; version >= RouteAssetProtocol.MIN_REUSABLE_PNG_RENDERER_VERSION; version--) {
+			final Path prior = objectPath(outputRoot.resolve("v" + version).resolve("objects"), hash, MediaType.PNG);
+			if (promoteVerifiedPng(prior, target, hash)) return Optional.of(target);
+		}
+		return Optional.empty();
+	}
+
+	private boolean promoteVerifiedPng(Path prior, Path target, String hash) throws IOException {
+		try {
+			validateObject(prior, hash, MediaType.PNG);
+		} catch (IOException | RuntimeException exception) {
+			return false;
+		}
+		Files.createDirectories(target.getParent());
+		final Path temporary = promotionTemporaryPath(target, hash);
+		boolean moved = false;
+		try {
+			try {
+				Files.createLink(temporary, prior);
+			} catch (IOException | UnsupportedOperationException | SecurityException exception) {
+				Files.copy(prior, temporary, LinkOption.NOFOLLOW_LINKS);
+			}
+			force(temporary);
+			validateObject(temporary, hash, MediaType.PNG);
+			moveAtomically(temporary, target);
+			moved = true;
+			verifiedObjects.put(target, validateObject(target, hash, MediaType.PNG));
+			return true;
+		} catch (IOException | RuntimeException exception) {
+			verifiedObjects.remove(target);
+			if (moved) Files.deleteIfExists(target);
+			return false;
+		} finally {
+			Files.deleteIfExists(temporary);
+		}
+	}
+
+	static Path promotionTemporaryPath(Path target, String hash) {
+		final String validHash = RouteAssetHash.requireValid(hash);
+		final Path directory = Objects.requireNonNull(target, "target").toAbsolutePath().normalize().getParent();
+		if (directory == null) throw new IllegalArgumentException("Route asset promotion target has no parent");
+		while (true) {
+			final Path temporary = directory.resolve('.' + validHash + '-' + UUID.randomUUID().toString() + ".tmp");
+			if (!Files.exists(temporary, LinkOption.NOFOLLOW_LINKS)) return temporary;
+		}
+	}
+
+	private static void force(Path path) throws IOException {
+		try (final FileChannel channel = FileChannel.open(path, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
+			channel.force(true);
+		}
+	}
+
+	private static VerifiedStamp validateObject(Path path, String expectedHash, MediaType type) throws IOException {
+		final VerifiedStamp before = readStamp(path);
+		final long maximumBytes = type == MediaType.PNG ? RouteAssetProtocol.MAX_PNG_BYTES : RouteAssetProtocol.MAX_MANIFEST_BYTES;
+		if (before.size <= 0 || before.size > maximumBytes || before.size > Integer.MAX_VALUE) throw new IOException("Invalid route asset CAS object size");
+		final byte[] bytes = readBounded(path, before.size);
 		if (!RouteAssetHash.sha256(bytes).equals(expectedHash)) {
 			throw new IOException("Route asset CAS hash mismatch");
 		}
@@ -186,6 +273,26 @@ public final class RouteAssetCas {
 		} else {
 			validateJson(bytes);
 		}
+		final VerifiedStamp after = readStamp(path);
+		if (!before.equals(after)) throw new IOException("Route asset CAS object changed during validation");
+		return after;
+	}
+
+	private static byte[] readBounded(Path path, long expectedSize) throws IOException {
+		final ByteBuffer buffer = ByteBuffer.allocate((int) expectedSize);
+		try (final FileChannel channel = FileChannel.open(path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
+			if (channel.size() != expectedSize) throw new IOException("Route asset CAS object changed before reading");
+			while (buffer.hasRemaining()) {
+				if (channel.read(buffer) < 0) throw new IOException("Route asset CAS object was truncated while reading");
+			}
+			final ByteBuffer extra = ByteBuffer.allocate(1);
+			int extraBytes;
+			do {
+				extraBytes = channel.read(extra);
+			} while (extraBytes == 0);
+			if (extraBytes >= 0) throw new IOException("Route asset CAS object grew while reading");
+		}
+		return buffer.array();
 	}
 
 	private static VerifiedStamp readStamp(Path path) throws IOException {
@@ -199,8 +306,13 @@ public final class RouteAssetCas {
 			throw new IOException("Invalid route asset PNG size");
 		}
 		final BufferedImage image = ImageIO.read(new ByteArrayInputStream(bytes));
-		if (image == null || image.getWidth() <= 0 || image.getHeight() <= 0 || image.getWidth() > RouteAssetProtocol.MAX_PNG_AXIS || image.getHeight() > RouteAssetProtocol.MAX_PNG_AXIS || (long) image.getWidth() * image.getHeight() > RouteAssetProtocol.MAX_PNG_PIXELS) {
-			throw new IOException("Invalid route asset PNG dimensions");
+		if (image == null) throw new IOException("Invalid route asset PNG dimensions");
+		try {
+			if (image.getWidth() <= 0 || image.getHeight() <= 0 || image.getWidth() > RouteAssetProtocol.MAX_PNG_AXIS || image.getHeight() > RouteAssetProtocol.MAX_PNG_AXIS || (long) image.getWidth() * image.getHeight() > RouteAssetProtocol.MAX_PNG_PIXELS) {
+				throw new IOException("Invalid route asset PNG dimensions");
+			}
+		} finally {
+			image.flush();
 		}
 	}
 
