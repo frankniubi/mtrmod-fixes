@@ -20,7 +20,7 @@ public final class RouteAssetRepositoryTest {
 
 	@Test
 	public void failedPublicationNeverMovesHead() throws Exception {
-		final RouteAssetRepository repository = new RouteAssetRepository(root, 1, 32);
+		final RouteAssetRepository repository = new RouteAssetRepository(root, RouteAssetProtocol.RENDERER_VERSION, 32);
 		final RouteAssetManifest first = manifest(repository, 1, 0xFF111111);
 		final String firstRevision = repository.publish(first, Collections.singletonList("initial")).getRevision();
 		Assertions.assertEquals(firstRevision, repository.loadHead().getRevision());
@@ -37,10 +37,10 @@ public final class RouteAssetRepositoryTest {
 
 	@Test
 	public void serverIdentityAndHeadSurviveRestart() throws Exception {
-		final RouteAssetRepository firstRepository = new RouteAssetRepository(root, 1, 32);
+		final RouteAssetRepository firstRepository = new RouteAssetRepository(root, RouteAssetProtocol.RENDERER_VERSION, 32);
 		final String serverId = firstRepository.getServerId();
 		final RouteAssetRepository.RouteAssetPublication publication = firstRepository.publish(manifest(firstRepository, 2, 0xFF333333), Collections.singletonList("initial"));
-		final RouteAssetRepository restarted = new RouteAssetRepository(root, 1, 32);
+		final RouteAssetRepository restarted = new RouteAssetRepository(root, RouteAssetProtocol.RENDERER_VERSION, 32);
 		Assertions.assertEquals(serverId, restarted.getServerId());
 		Assertions.assertEquals(publication.getRevision(), restarted.loadHead().getRevision());
 		Assertions.assertEquals(publication.getRevision(), restarted.loadManifest(publication.getRevision()).getRevision());
@@ -48,7 +48,7 @@ public final class RouteAssetRepositoryTest {
 
 	@Test
 	public void retainedAncestorsUseDiffAndPrunedBasesUseSnapshot() throws Exception {
-		final RouteAssetRepository repository = new RouteAssetRepository(root, 1, 2);
+		final RouteAssetRepository repository = new RouteAssetRepository(root, RouteAssetProtocol.RENDERER_VERSION, 2);
 		final String first = repository.publish(manifest(repository, 3, 0xFF444444), Collections.singletonList("first")).getRevision();
 		final String second = repository.publish(manifest(repository, 3, 0xFF555555), Collections.singletonList("second")).getRevision();
 		final String third = repository.publish(manifest(repository, 3, 0xFF666666), Collections.singletonList("third")).getRevision();
@@ -61,7 +61,7 @@ public final class RouteAssetRepositoryTest {
 
 	@Test
 	public void identicalContentKeepsTheSameRevision() throws Exception {
-		final RouteAssetRepository repository = new RouteAssetRepository(root, 1, 32);
+		final RouteAssetRepository repository = new RouteAssetRepository(root, RouteAssetProtocol.RENDERER_VERSION, 32);
 		final RouteAssetManifest manifest = manifest(repository, 4, 0xFF777777);
 		final String revision = repository.publish(manifest, Collections.singletonList("base-url:http")).getRevision();
 		Assertions.assertEquals(revision, repository.publish(manifest, Collections.singletonList("base-url:https-cdn")).getRevision());
@@ -69,14 +69,14 @@ public final class RouteAssetRepositoryTest {
 
 	@Test
 	public void dependencyFingerprintsPersistAtomicallyWithoutChangingHead() throws Exception {
-		final RouteAssetRepository repository = new RouteAssetRepository(root, 1, 32);
+		final RouteAssetRepository repository = new RouteAssetRepository(root, RouteAssetProtocol.RENDERER_VERSION, 32);
 		final RouteAssetManifest manifest = manifest(repository, 5, 0xFF888888);
 		final String revision = repository.publish(manifest, Collections.singletonList("initial")).getRevision();
 		final RouteAssetKey key = manifest.getEntries().firstKey();
 
 		repository.saveDependencyFingerprints(Map.of(key, "updated-input-same-pixels"));
 
-		final RouteAssetRepository restarted = new RouteAssetRepository(root, 1, 32);
+		final RouteAssetRepository restarted = new RouteAssetRepository(root, RouteAssetProtocol.RENDERER_VERSION, 32);
 		Assertions.assertEquals(Map.of(key, "updated-input-same-pixels"), restarted.loadDependencyFingerprints());
 		Assertions.assertEquals(revision, restarted.loadHead().getRevision());
 	}
