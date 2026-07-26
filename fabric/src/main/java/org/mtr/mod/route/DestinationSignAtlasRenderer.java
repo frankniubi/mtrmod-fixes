@@ -16,21 +16,21 @@ public final class DestinationSignAtlasRenderer {
 		final DestinationSignAssetSnapshot checkedSnapshot = Objects.requireNonNull(snapshot, "snapshot");
 		final RouteAssetTextRasterizer checkedText = Objects.requireNonNull(text, "text");
 		if (resolution < 0 || resolution > 3) throw new IllegalArgumentException("Invalid destination sign resolution");
-		final int width = scaled(checkedSnapshot.getAtlasWidth(), resolution);
-		final int height = scaled(checkedSnapshot.getAtlasHeight(), resolution);
+		final int width = DestinationSignAtlasLayout.scaledSize(checkedSnapshot.getAtlasWidth(), resolution);
+		final int height = DestinationSignAtlasLayout.scaledSize(checkedSnapshot.getAtlasHeight(), resolution);
 		if ((long) width * height > RouteAssetProtocol.MAX_DESTINATION_SIGN_ATLAS_PIXELS) throw new IllegalArgumentException("Destination sign atlas exceeds the pixel limit");
 		final RouteAssetImage image = new RouteAssetImage(width, height);
 		image.fillRect(0, 0, width, height, WHITE);
 		for (final DestinationSignAssetSnapshot.Sprite sprite : checkedSnapshot.getSprites()) {
-			final int y = scaled(sprite.getY(), resolution);
-			final int bottom = scaled(sprite.getY() + sprite.getHeight(), resolution);
+			final int y = DestinationSignAtlasLayout.scaledEdge(sprite.getY(), resolution);
+			final int bottom = DestinationSignAtlasLayout.scaledEdge(sprite.getY() + sprite.getHeight(), resolution);
 			final int spriteHeight = bottom - y;
 			switch (sprite.getKind()) {
 				case HEADER: drawHeader(image, checkedSnapshot, checkedText, sprite.getSegmentIndex(), y, spriteHeight); break;
-				case ROW: drawRow(image, checkedSnapshot, checkedText, sprite, y, spriteHeight); break;
-				case LEAVING: drawLabel(image, checkedText, DestinationSignAssetSnapshot.LEAVING_TEXT, sprite.getSegmentIndex(), y, spriteHeight, 0xFFB42318); break;
-				case NO_DIRECT_SERVICE: drawLabel(image, checkedText, DestinationSignAssetSnapshot.NO_DIRECT_SERVICE_TEXT, sprite.getSegmentIndex(), y, spriteHeight, 0xFF3F464D); break;
-				case NO_SERVICE: drawLabel(image, checkedText, DestinationSignAssetSnapshot.NO_SERVICE_TEXT, sprite.getSegmentIndex(), y, spriteHeight, 0xFF3F464D); break;
+				case ROW: drawRow(image, checkedSnapshot, checkedText, sprite, y, spriteHeight, resolution); break;
+				case LEAVING: drawLabel(image, checkedSnapshot, checkedText, DestinationSignAssetSnapshot.LEAVING_TEXT, sprite.getKind(), sprite.getSegmentIndex(), y, spriteHeight, 0xFFB42318, resolution); break;
+				case NO_DIRECT_SERVICE: drawLabel(image, checkedSnapshot, checkedText, DestinationSignAssetSnapshot.NO_DIRECT_SERVICE_TEXT, sprite.getKind(), sprite.getSegmentIndex(), y, spriteHeight, 0xFF3F464D, resolution); break;
+				case NO_SERVICE: drawLabel(image, checkedSnapshot, checkedText, DestinationSignAssetSnapshot.NO_SERVICE_TEXT, sprite.getKind(), sprite.getSegmentIndex(), y, spriteHeight, 0xFF3F464D, resolution); break;
 			}
 		}
 		return image;
@@ -38,59 +38,67 @@ public final class DestinationSignAtlasRenderer {
 
 	private static void drawHeader(RouteAssetImage image, DestinationSignAssetSnapshot snapshot, RouteAssetTextRasterizer text, int phase, int y, int height) {
 		final int inset = Math.max(4, height / 6);
-		final int arrowWidth = Math.max(20, image.getWidth() / 12);
-		final String source = DestinationSignAtlasLayout.languageSegment(snapshot.getSourceStationName(), phase);
 		final String destination = DestinationSignAtlasLayout.languageSegment(snapshot.getDestinationStationName(), phase);
-		text.draw(image, source, inset, y + inset / 2, Math.max(1, image.getWidth() / 3 - inset * 2), Math.max(1, height - inset), BLACK, RouteAssetTextRasterizer.Alignment.LEFT);
-		text.draw(image, "\u2192", image.getWidth() / 3, y + inset / 2, arrowWidth, Math.max(1, height - inset), GRAY, RouteAssetTextRasterizer.Alignment.CENTER);
-		text.draw(image, destination, image.getWidth() / 3 + arrowWidth, y + inset / 2, Math.max(1, image.getWidth() * 2 / 3 - arrowWidth - inset), Math.max(1, height - inset), BLACK, RouteAssetTextRasterizer.Alignment.LEFT);
+		final int arrowWidth = Math.max(20, image.getWidth() / 12);
+		text.draw(image, destination, inset, y + inset / 2, Math.max(1, image.getWidth() - arrowWidth - inset * 3), Math.max(1, height - inset), BLACK, RouteAssetTextRasterizer.Alignment.LEFT);
+		text.draw(image, "\u2192", image.getWidth() - arrowWidth - inset, y + inset / 2, arrowWidth, Math.max(1, height - inset), GRAY, RouteAssetTextRasterizer.Alignment.CENTER);
 		drawSeparator(image, y + height - 1);
 	}
 
 	private static void drawRow(RouteAssetImage image, DestinationSignAssetSnapshot snapshot, RouteAssetTextRasterizer text,
-			DestinationSignAssetSnapshot.Sprite sprite, int y, int height) {
+			DestinationSignAssetSnapshot.Sprite sprite, int y, int height, int resolution) {
 		final DestinationSignDirectServiceModel.Option option = Objects.requireNonNull(sprite.getOption(), "row option");
 		final int phase = sprite.getSegmentIndex();
-		final int inset = Math.max(4, height / 8);
-		final int etaWidth = snapshot.isShowEta() ? Math.max(44, image.getWidth() / 5) : 0;
-		final int contentRight = image.getWidth() - inset - etaWidth;
+		final DestinationSignAtlasLayout.RowGeometry geometry = DestinationSignAtlasLayout.rowGeometry(snapshot.getStyle(), snapshot.getAtlasWidth(), snapshot.getStyle().getRowHeight(), snapshot.isShowEta());
+		final int inset = DestinationSignAtlasLayout.scaledSpan(0, geometry.getInset(), resolution);
+		final int routeX = DestinationSignAtlasLayout.scaledEdge(geometry.getRouteX(), resolution);
+		final int routeWidth = DestinationSignAtlasLayout.scaledSpan(geometry.getRouteX(), geometry.getRouteWidth(), resolution);
+		final int platformX = DestinationSignAtlasLayout.scaledEdge(geometry.getPlatformX(), resolution);
+		final int platformWidth = DestinationSignAtlasLayout.scaledSpan(geometry.getPlatformX(), geometry.getPlatformWidth(), resolution);
 		final int routeColor = RouteAssetImage.argbToAbgr(0xFF000000 | option.getRoute().getColor());
 		final String route = DestinationSignAtlasLayout.languageSegment(option.getRoute().getDisplayName(), phase);
 		final String platform = DestinationSignAtlasLayout.languageSegment(option.getSource().getPlatformDisplayName(), phase);
-		final String destination = DestinationSignAtlasLayout.languageSegment(option.getDestination().getStationDisplayName(), phase);
 
 		switch (snapshot.getStyle()) {
 			case ARRIVAL_ORDER: {
-				final int badgeWidth = Math.max(54, image.getWidth() / 5);
-				image.fillRect(inset, y + inset, badgeWidth, Math.max(1, height - inset * 2), routeColor);
-				text.draw(image, route, inset + 3, y + inset, badgeWidth - 6, Math.max(1, height - inset * 2), WHITE, RouteAssetTextRasterizer.Alignment.CENTER);
-				final int platformWidth = Math.max(44, image.getWidth() / 6);
-				text.draw(image, platform, inset + badgeWidth + inset, y + inset, platformWidth, Math.max(1, height - inset * 2), BLACK, RouteAssetTextRasterizer.Alignment.LEFT);
-				text.draw(image, destination, inset + badgeWidth + inset + platformWidth, y + inset, Math.max(1, contentRight - inset - badgeWidth - inset - platformWidth), Math.max(1, height - inset * 2), GRAY, RouteAssetTextRasterizer.Alignment.LEFT);
+				image.fillRect(routeX, y + inset, routeWidth, Math.max(1, height - inset * 2), routeColor);
+				text.draw(image, route, routeX + DestinationSignAtlasLayout.scaledSpan(0, 3, resolution), y + inset, Math.max(1, routeWidth - DestinationSignAtlasLayout.scaledSpan(0, 6, resolution)), Math.max(1, height - inset * 2), WHITE, RouteAssetTextRasterizer.Alignment.CENTER);
+				text.draw(image, platform, platformX, y + inset, platformWidth, Math.max(1, height - inset * 2), BLACK, RouteAssetTextRasterizer.Alignment.CENTER);
 				break;
 			}
 			case PLATFORM_GROUPS: {
-				final int platformWidth = Math.max(64, image.getWidth() / 4);
-				image.fillRect(inset, y + inset, Math.max(2, inset / 2), Math.max(1, height - inset * 2), routeColor);
-				text.draw(image, platform, inset * 2, y + inset, platformWidth - inset, Math.max(1, height - inset * 2), BLACK, RouteAssetTextRasterizer.Alignment.LEFT);
-				text.draw(image, route, inset + platformWidth, y + inset, Math.max(1, contentRight - inset - platformWidth), Math.max(1, height - inset * 2), routeColor, RouteAssetTextRasterizer.Alignment.LEFT);
+				image.fillRect(inset, y + inset, Math.max(1, DestinationSignAtlasLayout.scaledSpan(0, Math.max(2, geometry.getInset() / 2), resolution)), Math.max(1, height - inset * 2), routeColor);
+				text.draw(image, platform, platformX, y + inset, platformWidth, Math.max(1, height - inset * 2), BLACK, RouteAssetTextRasterizer.Alignment.LEFT);
+				text.draw(image, route, routeX, y + inset, routeWidth, Math.max(1, height - inset * 2), routeColor, RouteAssetTextRasterizer.Alignment.LEFT);
 				break;
 			}
 			case DESTINATION_FLAG: {
-				final int bandWidth = Math.max(72, image.getWidth() / 3);
-				image.fillRect(inset, y + inset, Math.max(3, inset / 2), Math.max(1, height - inset * 2), routeColor);
-				text.draw(image, destination, inset * 2, y + inset / 2, bandWidth - inset, Math.max(1, height / 2), BLACK, RouteAssetTextRasterizer.Alignment.LEFT);
-				text.draw(image, route + "  " + platform, inset * 2, y + height / 2, Math.max(1, contentRight - inset * 2), Math.max(1, height / 2 - inset), GRAY, RouteAssetTextRasterizer.Alignment.LEFT);
+				image.fillRect(inset, y + inset, Math.max(1, DestinationSignAtlasLayout.scaledSpan(0, Math.max(3, geometry.getInset() / 2), resolution)), Math.max(1, height - inset * 2), routeColor);
+				text.draw(image, route, routeX, y + inset, routeWidth, Math.max(1, height - inset * 2), routeColor, RouteAssetTextRasterizer.Alignment.LEFT);
+				text.draw(image, platform, platformX, y + inset, platformWidth, Math.max(1, height - inset * 2), BLACK, RouteAssetTextRasterizer.Alignment.CENTER);
 				break;
 			}
 		}
-		if (etaWidth > 0) image.fillRect(image.getWidth() - etaWidth, y + inset, Math.max(1, inset / 4), Math.max(1, height - inset * 2), LIGHT_GRAY);
+		if (snapshot.isShowEta()) image.fillRect(DestinationSignAtlasLayout.scaledEdge(geometry.getEtaDividerX(), resolution), y + inset, Math.max(1, DestinationSignAtlasLayout.scaledSpan(0, Math.max(1, geometry.getInset() / 4), resolution)), Math.max(1, height - inset * 2), LIGHT_GRAY);
 		drawSeparator(image, y + height - 1);
 	}
 
-	private static void drawLabel(RouteAssetImage image, RouteAssetTextRasterizer text, String label, int phase, int y, int height, int argb) {
-		final int inset = Math.max(4, height / 8);
-		text.draw(image, DestinationSignAtlasLayout.languageSegment(label, phase), inset, y + inset, image.getWidth() - inset * 2, Math.max(1, height - inset * 2), RouteAssetImage.argbToAbgr(argb), RouteAssetTextRasterizer.Alignment.CENTER);
+	private static void drawLabel(RouteAssetImage image, DestinationSignAssetSnapshot snapshot, RouteAssetTextRasterizer text, String label,
+			DestinationSignAssetSnapshot.SpriteKind kind, int phase, int y, int height, int argb, int resolution) {
+		final int x;
+		final int width;
+		final int inset;
+		if (kind == DestinationSignAssetSnapshot.SpriteKind.NO_DIRECT_SERVICE || !snapshot.isShowEta()) {
+			inset = Math.max(4, height / 8);
+			x = inset;
+			width = image.getWidth() - inset * 2;
+		} else {
+			final DestinationSignAtlasLayout.RowGeometry geometry = DestinationSignAtlasLayout.rowGeometry(snapshot.getStyle(), snapshot.getAtlasWidth(), snapshot.getStyle().getRowHeight(), true);
+			inset = DestinationSignAtlasLayout.scaledSpan(0, geometry.getInset(), resolution);
+			x = DestinationSignAtlasLayout.scaledEdge(geometry.getEtaX(), resolution);
+			width = DestinationSignAtlasLayout.scaledSpan(geometry.getEtaX(), geometry.getEtaWidth(), resolution);
+		}
+		text.draw(image, DestinationSignAtlasLayout.languageSegment(label, phase), x, y + inset, Math.max(1, width), Math.max(1, height - inset * 2), RouteAssetImage.argbToAbgr(argb), RouteAssetTextRasterizer.Alignment.CENTER);
 		drawSeparator(image, y + height - 1);
 	}
 
@@ -98,7 +106,4 @@ public final class DestinationSignAtlasRenderer {
 		if (y >= 0 && y < image.getHeight()) image.fillRect(0, y, image.getWidth(), 1, LIGHT_GRAY);
 	}
 
-	private static int scaled(int logical, int resolution) {
-		return resolution == 0 ? Math.max(1, (logical + 1) / 2) : Math.multiplyExact(logical, 1 << resolution - 1);
-	}
 }

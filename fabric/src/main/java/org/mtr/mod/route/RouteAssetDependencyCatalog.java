@@ -255,7 +255,6 @@ public final class RouteAssetDependencyCatalog {
 
 	private static void writeDestinationSignDependencies(DataOutputStream canonical, DestinationSignAssetSnapshot snapshot) throws IOException {
 		canonical.writeLong(snapshot.getSourceStationId());
-		writeString(canonical, snapshot.getSourceStationName());
 		canonical.writeLong(snapshot.getDestinationStationId());
 		writeString(canonical, snapshot.getDestinationStationName());
 		canonical.writeInt(snapshot.getStyle().ordinal());
@@ -276,7 +275,6 @@ public final class RouteAssetDependencyCatalog {
 			writeString(canonical, option.getRoute().getDisplayName());
 			canonical.writeInt(option.getRoute().getColor());
 			writeString(canonical, option.getSource().getPlatformDisplayName());
-			writeString(canonical, option.getDestination().getStationDisplayName());
 		}
 	}
 

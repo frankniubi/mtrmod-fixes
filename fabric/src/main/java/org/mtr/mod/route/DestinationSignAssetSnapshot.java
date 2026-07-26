@@ -42,7 +42,7 @@ public final class DestinationSignAssetSnapshot {
 		atlasWidth = layout.getSurfaceWidth();
 		final List<Sprite> mutableSprites = new ArrayList<>();
 		int y = 0;
-		final int headerCycles = Math.max(2, Math.max(segmentCount(this.sourceStationName), segmentCount(this.destinationStationName)));
+		final int headerCycles = Math.max(2, segmentCount(this.destinationStationName));
 		for (int phase = 0; phase < headerCycles; phase++) {
 			mutableSprites.add(new Sprite(SpriteKind.HEADER, null, phase, y, DestinationSignAtlasLayout.HEADER_HEIGHT));
 			y = Math.addExact(y, DestinationSignAtlasLayout.HEADER_HEIGHT);
@@ -51,7 +51,7 @@ public final class DestinationSignAssetSnapshot {
 			validateField(option.getRoute().getDisplayName());
 			validateField(option.getSource().getPlatformDisplayName());
 			validateField(option.getDestination().getStationDisplayName());
-			final int cycles = Math.max(segmentCount(option.getRoute().getDisplayName()), Math.max(segmentCount(option.getSource().getPlatformDisplayName()), segmentCount(option.getDestination().getStationDisplayName())));
+			final int cycles = Math.max(segmentCount(option.getRoute().getDisplayName()), segmentCount(option.getSource().getPlatformDisplayName()));
 			for (int phase = 0; phase < cycles; phase++) {
 				mutableSprites.add(new Sprite(SpriteKind.ROW, option, phase, y, style.getRowHeight()));
 				y = Math.addExact(y, style.getRowHeight());

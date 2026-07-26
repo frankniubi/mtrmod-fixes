@@ -42,6 +42,7 @@ public final class DestinationSignArrivalsClientCache {
 	private final AtomicLong callbackSequence = new AtomicLong();
 	private long nextRequestMillis;
 	private long serverMillisOffset;
+	private long generation;
 
 	public DestinationSignArrivalsClientCache(LongSupplier clock, Consumer<PacketFetchDestinationSignArrivals.RequestPayload> sender) {
 		this.clock = clock;
@@ -96,11 +97,12 @@ public final class DestinationSignArrivalsClientCache {
 			authoritativeKeys.add(key);
 			if (result.isPresent()) DestinationSignDynamicTextCache.INSTANCE.prepare(result.getDestination());
 		});
+		generation++;
 	}
 
 	public synchronized void clear() {
 		visibleAges.clear(); unsent.clear(); lastSentMillis.clear(); results.clear(); authoritativeKeys.clear(); callbacks.clear();
-		nextRequestMillis = 0; serverMillisOffset = 0;
+		nextRequestMillis = 0; serverMillisOffset = 0; generation++;
 	}
 
 	private void ageVisible() {
@@ -116,22 +118,26 @@ public final class DestinationSignArrivalsClientCache {
 			results.remove(key);
 			authoritativeKeys.remove(key);
 		});
+		if (!remove.isEmpty()) generation++;
 	}
 
 	private Snapshot snapshot(long now) {
-		return new Snapshot(saturatingAdd(now, serverMillisOffset), results, authoritativeKeys);
+		return new Snapshot(saturatingAdd(now, serverMillisOffset), generation, results, authoritativeKeys);
 	}
 
 	public static final class Snapshot {
 		private final long serverNowMillis;
+		private final long generation;
 		private final Map<DestinationSignArrivalKey, DestinationSignArrivalResult> results;
 		private final Set<DestinationSignArrivalKey> authoritativeKeys;
-		private Snapshot(long serverNowMillis, Map<DestinationSignArrivalKey, DestinationSignArrivalResult> results, Set<DestinationSignArrivalKey> authoritativeKeys) {
+		private Snapshot(long serverNowMillis, long generation, Map<DestinationSignArrivalKey, DestinationSignArrivalResult> results, Set<DestinationSignArrivalKey> authoritativeKeys) {
 			this.serverNowMillis = serverNowMillis;
+			this.generation = generation;
 			this.results = Collections.unmodifiableMap(new TreeMap<>(results));
 			this.authoritativeKeys = Collections.unmodifiableSet(new TreeSet<>(authoritativeKeys));
 		}
 		public long getServerNowMillis() { return serverNowMillis; }
+		public long getGeneration() { return generation; }
 		public Map<DestinationSignArrivalKey, DestinationSignArrivalResult> getResults() { return results; }
 		public Set<DestinationSignArrivalKey> getAuthoritativeKeys() { return authoritativeKeys; }
 	}

@@ -46,7 +46,6 @@ public final class DestinationSignAtlasLayout {
 					rows.add(new Row(option, CONTENT_INSET, HEADER_HEIGHT + rowIndex * checkedStyle.getRowHeight(), surfaceWidth - CONTENT_INSET * 2, checkedStyle.getRowHeight()));
 					languageCycleCount = Math.max(languageCycleCount, pipeSegmentCount(option.getRoute().getDisplayName()));
 					languageCycleCount = Math.max(languageCycleCount, pipeSegmentCount(option.getSource().getPlatformDisplayName()));
-					languageCycleCount = Math.max(languageCycleCount, pipeSegmentCount(option.getDestination().getStationDisplayName()));
 				}
 				pages.add(new Page(pages.size(), rows, languageCycleCount));
 			}
@@ -72,6 +71,71 @@ public final class DestinationSignAtlasLayout {
 	public static String languageSegment(String value, int languagePhase) {
 		final String[] segments = Objects.requireNonNull(value, "value").split("\\|", -1);
 		return segments[Math.floorMod(languagePhase, segments.length)];
+	}
+
+	public static int scaledSize(int logical, int resolution) {
+		validateScale(logical, resolution);
+		return resolution == 0 ? Math.max(1, (logical + 1) / 2) : Math.multiplyExact(logical, 1 << resolution - 1);
+	}
+
+	public static int scaledEdge(int logical, int resolution) {
+		validateScale(logical, resolution);
+		return resolution == 0 ? (logical + 1) / 2 : Math.multiplyExact(logical, 1 << resolution - 1);
+	}
+
+	public static int scaledSpan(int start, int length, int resolution) {
+		if (start < 0 || length <= 0) throw new IllegalArgumentException("Invalid destination sign scaled span");
+		return Math.max(1, scaledEdge(Math.addExact(start, length), resolution) - scaledEdge(start, resolution));
+	}
+
+	private static void validateScale(int logical, int resolution) {
+		if (logical < 0 || resolution < 0 || resolution > 3) throw new IllegalArgumentException("Invalid destination sign scale");
+	}
+
+	/** Shared fixed columns for server row rasterization and client live-text overlays. */
+	public static RowGeometry rowGeometry(DestinationSignStyle style, int surfaceWidth, int rowHeight, boolean showEta) {
+		final DestinationSignStyle checkedStyle = Objects.requireNonNull(style, "style");
+		if (surfaceWidth <= 0 || rowHeight <= 0) throw new IllegalArgumentException("Invalid destination sign row geometry");
+		final int inset = Math.max(4, rowHeight / 8);
+		final int etaWidth = showEta ? Math.max(44, surfaceWidth / 5) : 0;
+		final int etaX = surfaceWidth - etaWidth;
+		final int contentRight = (showEta ? etaX : surfaceWidth) - inset;
+		final int routeX;
+		final int routeWidth;
+		final int platformX;
+		final int platformWidth;
+		switch (checkedStyle) {
+			case ARRIVAL_ORDER:
+				routeX = inset;
+				routeWidth = Math.max(54, surfaceWidth / 5);
+				platformWidth = Math.max(44, surfaceWidth / 6);
+				platformX = contentRight - platformWidth;
+				break;
+			case PLATFORM_GROUPS:
+				platformX = inset * 2;
+				platformWidth = Math.max(64, surfaceWidth / 4) - inset;
+				routeX = platformX + platformWidth + inset;
+				routeWidth = Math.max(54, surfaceWidth / 5);
+				break;
+			case DESTINATION_FLAG:
+			default:
+				routeX = inset * 2;
+				routeWidth = Math.max(54, surfaceWidth / 5);
+				platformX = routeX + routeWidth + inset;
+				platformWidth = Math.max(44, surfaceWidth / 6);
+				break;
+		}
+		final int dynamicX;
+		switch (checkedStyle) {
+			case ARRIVAL_ORDER: dynamicX = routeX + routeWidth + inset; break;
+			case PLATFORM_GROUPS: dynamicX = routeX + routeWidth + inset; break;
+			case DESTINATION_FLAG:
+			default: dynamicX = platformX + platformWidth + inset; break;
+		}
+		final int dynamicRight = checkedStyle == DestinationSignStyle.ARRIVAL_ORDER ? platformX - inset : contentRight;
+		return new RowGeometry(inset, routeX, Math.max(1, routeWidth), platformX, Math.max(1, platformWidth),
+				dynamicX, Math.max(1, dynamicRight - dynamicX), showEta ? etaX + inset : surfaceWidth,
+				showEta ? Math.max(1, etaWidth - inset * 2) : 0, etaX);
 	}
 
 	private static int pipeSegmentCount(String value) {
@@ -145,5 +209,43 @@ public final class DestinationSignAtlasLayout {
 		public int getY() { return y; }
 		public int getWidth() { return width; }
 		public int getHeight() { return height; }
+	}
+
+	public static final class RowGeometry {
+		private final int inset;
+		private final int routeX;
+		private final int routeWidth;
+		private final int platformX;
+		private final int platformWidth;
+		private final int destinationX;
+		private final int destinationWidth;
+		private final int etaX;
+		private final int etaWidth;
+		private final int etaDividerX;
+
+		private RowGeometry(int inset, int routeX, int routeWidth, int platformX, int platformWidth,
+				int destinationX, int destinationWidth, int etaX, int etaWidth, int etaDividerX) {
+			this.inset = inset;
+			this.routeX = routeX;
+			this.routeWidth = routeWidth;
+			this.platformX = platformX;
+			this.platformWidth = platformWidth;
+			this.destinationX = destinationX;
+			this.destinationWidth = destinationWidth;
+			this.etaX = etaX;
+			this.etaWidth = etaWidth;
+			this.etaDividerX = etaDividerX;
+		}
+
+		public int getInset() { return inset; }
+		public int getRouteX() { return routeX; }
+		public int getRouteWidth() { return routeWidth; }
+		public int getPlatformX() { return platformX; }
+		public int getPlatformWidth() { return platformWidth; }
+		public int getDestinationX() { return destinationX; }
+		public int getDestinationWidth() { return destinationWidth; }
+		public int getEtaX() { return etaX; }
+		public int getEtaWidth() { return etaWidth; }
+		public int getEtaDividerX() { return etaDividerX; }
 	}
 }

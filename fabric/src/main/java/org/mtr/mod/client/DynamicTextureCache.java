@@ -74,10 +74,12 @@ public class DynamicTextureCache implements IGui {
 
 	public void onWorldReset() {
 		dependencyTracker.onResourceReload();
+		DestinationSignClientState.INSTANCE.clear();
 	}
 
 	public void onRouteDataChanged() {
 		dependencyTracker.onRouteDataChanged();
+		DestinationSignClientState.INSTANCE.invalidateRouteData();
 	}
 
 	public void onRouteVariantChanged() {
@@ -737,6 +739,10 @@ public class DynamicTextureCache implements IGui {
 		private void remove() {
 			MainRenderer.cancelRender(identifier);
 			MoreRenderLayers.removeFromCache(identifier);
+		}
+
+		public boolean isReady() {
+			return texture != null;
 		}
 	}
 

@@ -15,7 +15,7 @@ public final class DestinationSignDynamicTextCache {
 
 	public static final int MAX_VALUES = 512;
 	public static final DestinationSignDynamicTextCache INSTANCE = new DestinationSignDynamicTextCache(segment ->
-			DynamicTextureCache.instance.getSignText(segment, IGui.HorizontalAlignment.LEFT, 0, 0, IGui.ARGB_WHITE));
+			DynamicTextureCache.instance.getSignText(segment, IGui.HorizontalAlignment.LEFT, 0, 0, IGui.ARGB_BLACK));
 
 	private final Consumer<String> preparer;
 	private final Map<String, List<String>> values = new LinkedHashMap<String, List<String>>(16, 0.75F, true) {
@@ -28,8 +28,7 @@ public final class DestinationSignDynamicTextCache {
 		final String boundedValue = DestinationSignArrivalResult.present(0, value, false).getDestination();
 		final List<String> existing = values.get(boundedValue);
 		if (existing != null) return existing;
-		final String[] split = boundedValue.split("\\|", -1);
-		final List<String> segments = Collections.unmodifiableList(Arrays.asList(Arrays.copyOf(split, Math.min(split.length, RouteAssetProtocol.MAX_DESTINATION_SIGN_PIPE_SEGMENTS))));
+		final List<String> segments = segments(boundedValue);
 		segments.forEach(preparer);
 		values.put(boundedValue, segments);
 		return segments;
@@ -37,4 +36,10 @@ public final class DestinationSignDynamicTextCache {
 
 	public synchronized List<String> get(String value) { return values.getOrDefault(value, Collections.emptyList()); }
 	public synchronized void clear() { values.clear(); }
+
+	public static List<String> segments(String value) {
+		final String boundedValue = DestinationSignArrivalResult.present(0, value, false).getDestination();
+		final String[] split = boundedValue.split("\\|", -1);
+		return Collections.unmodifiableList(Arrays.asList(Arrays.copyOf(split, Math.min(split.length, RouteAssetProtocol.MAX_DESTINATION_SIGN_PIPE_SEGMENTS))));
+	}
 }

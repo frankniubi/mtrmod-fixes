@@ -41,12 +41,28 @@ public final class DestinationSignAssetIdentityTest {
 		}
 	}
 
+	@Test
+	public void namesThatAreNotDrawnDoNotChangeSpritesOrDependencies() {
+		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
+		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		final RouteAssetDependencyCatalog.Entry first = catalog.resolveDestinationSign(key, snapshot("Source A", "Unused A|Unused B|Unused C"), FINGERPRINT).orElseThrow();
+		final RouteAssetDependencyCatalog.Entry second = catalog.resolveDestinationSign(key, snapshot("Source B", "Changed A|Changed B|Changed C|Changed D"), FINGERPRINT).orElseThrow();
+		Assertions.assertEquals(first.getDependencyFingerprint(), second.getDependencyFingerprint());
+		final long rowSprites = first.getSnapshot().getDestinationSignAssetSnapshot().orElseThrow().getSprites().stream()
+				.filter(sprite -> sprite.getKind() == DestinationSignAssetSnapshot.SpriteKind.ROW).count();
+		Assertions.assertEquals(2, rowSprites, "only route and platform language segments control row sprite cycles");
+	}
+
 	private static RouteAssetDataMirror.Snapshot snapshot() {
+		return snapshot("Source|Source EN", "Target|Target EN");
+	}
+
+	private static RouteAssetDataMirror.Snapshot snapshot(String sourceStationName, String unusedDestinationOccurrenceName) {
 		final DestinationSignTopology topology = new DestinationSignTopology(List.of(
 				new DestinationSignTopology.ServiceRoute(100, 0, "R1|Route One", 0x14755E, List.of(
-						new DestinationSignTopology.StopOccurrence(1000, 10, "U1", "Source|Source EN", "Target|Target EN"),
-						new DestinationSignTopology.StopOccurrence(2000, 30, "D1", "Target|Target EN", "")))
-		), List.of(new DestinationSignTopology.StationZone(10, "Source|Source EN"), new DestinationSignTopology.StationZone(30, "Target|Target EN")));
+						new DestinationSignTopology.StopOccurrence(1000, 10, "U1", sourceStationName, "Target|Target EN"),
+						new DestinationSignTopology.StopOccurrence(2000, 30, "D1", unusedDestinationOccurrenceName, "")))
+		), List.of(new DestinationSignTopology.StationZone(10, sourceStationName), new DestinationSignTopology.StationZone(30, "Target|Target EN")));
 		return new RouteAssetDataMirror.Snapshot(1, Map.of(DIMENSION, new RouteAssetDataMirror.DimensionSnapshot(DIMENSION, 1, Map.of(), topology)));
 	}
 }

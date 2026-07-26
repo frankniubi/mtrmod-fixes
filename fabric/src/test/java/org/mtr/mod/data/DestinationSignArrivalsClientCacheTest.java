@@ -63,4 +63,20 @@ public final class DestinationSignArrivalsClientCacheTest {
 		cache.accept(new PacketFetchDestinationSignArrivals.ResponsePayload(sent.get(1).getCallbackId(), now.get(), Map.of()));
 		Assertions.assertTrue(cache.request(List.of(key)).getResults().get(key).isPresent());
 	}
+
+	@Test
+	public void expiringInvisibleResultsAdvancesTheGeneration() {
+		final AtomicLong now = new AtomicLong();
+		final List<PacketFetchDestinationSignArrivals.RequestPayload> sent = new ArrayList<>();
+		final DestinationSignArrivalsClientCache cache = new DestinationSignArrivalsClientCache(now::get, sent::add);
+		final DestinationSignArrivalKey key = new DestinationSignArrivalKey(-1, -10);
+		cache.request(List.of(key));
+		cache.tick();
+		cache.accept(new PacketFetchDestinationSignArrivals.ResponsePayload(sent.get(0).getCallbackId(), 0, Map.of(key, DestinationSignArrivalResult.present(1, "A", true))));
+		final long generation = cache.request(List.of()).getGeneration();
+		for (int index = 0; index < 10; index++) cache.tick();
+		final DestinationSignArrivalsClientCache.Snapshot expired = cache.request(List.of());
+		Assertions.assertTrue(expired.getResults().isEmpty());
+		Assertions.assertTrue(expired.getGeneration() > generation);
+	}
 }

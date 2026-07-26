@@ -20,6 +20,7 @@ import org.mtr.mod.block.BlockStationNameTallStanding;
 import org.mtr.mod.block.BlockTactileMap;
 import org.mtr.mod.block.BlockTrainAnnouncer;
 import org.mtr.mod.client.CustomResourceLoader;
+import org.mtr.mod.client.DestinationSignClientState;
 import org.mtr.mod.client.DynamicTextureCache;
 import org.mtr.mod.client.IDrawing;
 import org.mtr.mod.client.MinecraftClientData;
@@ -175,6 +176,7 @@ public final class InitClient {
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.ROUTE_SIGN_STANDING_METAL, RenderRouteSign::new);
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.ROUTE_SIGN_WALL_LIGHT, RenderRouteSign::new);
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.ROUTE_SIGN_WALL_METAL, RenderRouteSign::new);
+		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.DESTINATION_STATION_SIGN, RenderDestinationSign::new);
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.SIGNAL_LIGHT_2_ASPECT_1, dispatcher -> new RenderSignalLight2Aspect<>(dispatcher, false, 0xFF0000FF));
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.SIGNAL_LIGHT_2_ASPECT_2, dispatcher -> new RenderSignalLight2Aspect<>(dispatcher, false, 0xFF0000FF));
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.SIGNAL_LIGHT_2_ASPECT_3, dispatcher -> new RenderSignalLight2Aspect<>(dispatcher, true, 0xFF00FF00));
@@ -400,6 +402,7 @@ public final class InitClient {
 
 		REGISTRY_CLIENT.eventRegistryClient.registerClientDisconnect(() -> {
 			ClientRouteAssetManager.getInstance().onDisconnect();
+			DestinationSignClientState.INSTANCE.clear();
 			DestinationSignArrivalsClientCache.INSTANCE.clear();
 			org.mtr.mod.client.DestinationSignDynamicTextCache.INSTANCE.clear();
 			DefaultRailMeshCache.clear();
@@ -413,6 +416,7 @@ public final class InitClient {
 		REGISTRY_CLIENT.eventRegistryClient.registerStartClientTick(() -> {
 			final long currentMillis = System.currentTimeMillis();
 			ClientRouteAssetManager.getInstance().tick(currentMillis);
+			DestinationSignClientState.INSTANCE.tick();
 			DestinationSignArrivalsClientCache.INSTANCE.tick();
 			final long millisElapsed = currentMillis - lastMillis;
 			lastMillis = currentMillis;
