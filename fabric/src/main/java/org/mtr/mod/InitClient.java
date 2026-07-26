@@ -26,6 +26,7 @@ import org.mtr.mod.client.MinecraftClientData;
 import org.mtr.mod.client.asset.ClientRouteAssetManager;
 import org.mtr.mod.config.Config;
 import org.mtr.mod.data.IGui;
+import org.mtr.mod.data.DestinationSignArrivalsClientCache;
 import org.mtr.mod.entity.EntityRendering;
 import org.mtr.mod.generated.WebserverResources;
 import org.mtr.mod.generated.lang.TranslationProvider;
@@ -399,6 +400,8 @@ public final class InitClient {
 
 		REGISTRY_CLIENT.eventRegistryClient.registerClientDisconnect(() -> {
 			ClientRouteAssetManager.getInstance().onDisconnect();
+			DestinationSignArrivalsClientCache.INSTANCE.clear();
+			org.mtr.mod.client.DestinationSignDynamicTextCache.INSTANCE.clear();
 			DefaultRailMeshCache.clear();
 			if (webserver != null) {
 				webserver.stop();
@@ -410,6 +413,7 @@ public final class InitClient {
 		REGISTRY_CLIENT.eventRegistryClient.registerStartClientTick(() -> {
 			final long currentMillis = System.currentTimeMillis();
 			ClientRouteAssetManager.getInstance().tick(currentMillis);
+			DestinationSignArrivalsClientCache.INSTANCE.tick();
 			final long millisElapsed = currentMillis - lastMillis;
 			lastMillis = currentMillis;
 			gameMillis += millisElapsed;
@@ -433,6 +437,8 @@ public final class InitClient {
 				if (lastClientWorld == null || !lastClientWorld.equals(clientWorld)) {
 					lastClientWorld = clientWorld;
 					MinecraftClientData.reset();
+					DestinationSignArrivalsClientCache.INSTANCE.clear();
+					org.mtr.mod.client.DestinationSignDynamicTextCache.INSTANCE.clear();
 					DynamicTextureCache.instance.onWorldReset();
 					REGISTRY_CLIENT.sendPacketToServer(new PacketRequestInterchangeData());
 				}
@@ -473,6 +479,7 @@ public final class InitClient {
 		Config.init(MinecraftClient.getInstance().getRunDirectoryMapped());
 		ClientPacketHelper.setRouteAssetManifestHandler(payload -> ClientRouteAssetManager.getInstance().handleManifest(payload));
 		ClientPacketHelper.setRouteAssetChunkHandler(payload -> ClientRouteAssetManager.getInstance().handlePacketFallbackChunk(payload));
+		ClientPacketHelper.setDestinationSignArrivalsHandler(DestinationSignArrivalsClientCache.INSTANCE::accept);
 
 		BlockTactileMap.BlockEntity.updateSoundSource = TACTILE_MAP_SOUND_INSTANCE::setPos;
 		BlockTactileMap.BlockEntity.onUse = blockPos -> {

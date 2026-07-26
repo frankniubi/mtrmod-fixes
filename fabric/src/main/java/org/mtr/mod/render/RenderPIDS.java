@@ -19,6 +19,7 @@ import org.mtr.mod.InitClient;
 import org.mtr.mod.block.*;
 import org.mtr.mod.client.MinecraftClientData;
 import org.mtr.mod.data.ArrivalsCacheClient;
+import org.mtr.mod.data.ArrivalText;
 import org.mtr.mod.data.DisplayCadence;
 import org.mtr.mod.data.IGui;
 import org.mtr.mod.generated.lang.TranslationProvider;
@@ -81,13 +82,7 @@ public class RenderPIDS<T extends BlockPIDSBase.BlockEntityBase> extends BlockEn
 	}
 
 	public String getArrivalString(long arrival, boolean isRealtime, boolean isCjk) {
-		if (arrival >= 60) {
-			return (isRealtime ? "" : "*") + (isCjk ? TranslationProvider.GUI_MTR_ARRIVAL_MIN_CJK : TranslationProvider.GUI_MTR_ARRIVAL_MIN).getString(arrival / 60);
-		} else if (arrival > 0) {
-			return (isRealtime ? "" : "*") + (isCjk ? TranslationProvider.GUI_MTR_ARRIVAL_SEC_CJK : TranslationProvider.GUI_MTR_ARRIVAL_SEC).getString(arrival);
-		} else {
-			return "";
-		}
+		return ArrivalText.format(arrival, isRealtime, isCjk);
 	}
 
 	private void getArrivalsAndRender(T entity, BlockPos blockPos, Direction facing, LongCollection platformIds) {
@@ -108,7 +103,8 @@ public class RenderPIDS<T extends BlockPIDSBase.BlockEntityBase> extends BlockEn
 		int arrivalIndex = entity.getDisplayPage() * arrivalsPerPage;
 
 		for (int i = 0; i < entity.maxArrivals; i++) {
-			final int languageTicks = DisplayCadence.languagePhase((long) Math.floor(InitClient.getGameTick()));
+			final long gameTick = Math.floorDiv(InitClient.getGameMillis(), 50);
+			final int languageTicks = DisplayCadence.languagePhase(gameTick);
 			final ArrivalResponse arrivalResponse;
 			final String customMessage = entity.getMessage(i);
 			final String[] destinationSplit;
@@ -217,7 +213,7 @@ public class RenderPIDS<T extends BlockPIDSBase.BlockEntityBase> extends BlockEn
 							lines.addAll(wrapLines((isCjk ? TranslationProvider.GUI_MTR_TERMINATES_HERE_CJK : TranslationProvider.GUI_MTR_TERMINATES_HERE).getString(), maxWidth * scale / 16));
 						} else {
 							final int callingAtMaxPages = (int) Math.max(Math.ceil(stations.size() / (float) STATIONS_PER_PAGE), 1);
-							final int callingAtPage = callingAtMaxPages == 1 ? 0 : (int) Math.floor(InitClient.getGameTick() / DisplayCadence.SWITCH_PAGE_TICKS) % callingAtMaxPages;
+							final int callingAtPage = callingAtMaxPages == 1 ? 0 : (int) Math.floorMod(Math.floorDiv(gameTick, DisplayCadence.SWITCH_PAGE_TICKS), callingAtMaxPages);
 							lines.add((isCjk ? TranslationProvider.GUI_MTR_CALLING_AT_CJK : TranslationProvider.GUI_MTR_CALLING_AT).getString(callingAtPage + 1, callingAtMaxPages));
 							for (int j = 0; j < STATIONS_PER_PAGE; j++) {
 								final SimplifiedRoutePlatform simplifiedRoutePlatform = Utilities.getElement(stations, j + callingAtPage * STATIONS_PER_PAGE);
