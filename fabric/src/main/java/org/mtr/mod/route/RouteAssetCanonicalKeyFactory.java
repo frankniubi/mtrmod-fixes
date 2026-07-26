@@ -4,6 +4,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 
 public final class RouteAssetCanonicalKeyFactory {
 
@@ -13,6 +14,7 @@ public final class RouteAssetCanonicalKeyFactory {
 	private static final int MAX_READABLE_DENOMINATOR = 4096;
 	private static final int MAX_CONTINUED_FRACTION_STEPS = 32;
 	private static final Set<String> ROUTE_MAP_PARAMETERS = Set.of("a", "f", "p", "t", "v");
+	private static final Set<String> ROUTE_SIGN_MAP_PARAMETERS = Set.of("a", "f", "p", "s", "t", "v");
 	private static final Set<String> DIRECTION_ARROW_PARAMETERS = Set.of("a", "align", "bg", "left", "pad", "right", "show", "text", "transparent");
 	private static final Set<String> ROUTE_SQUARE_PARAMETERS = Set.of("align");
 	private static final Set<String> ROUTE_COLOR_STRIP_PARAMETERS = Set.of("style");
@@ -21,13 +23,27 @@ public final class RouteAssetCanonicalKeyFactory {
 	}
 
 	public static RouteAssetKey routeMap(String dimension, long platformId, int resolution, String language, RouteMapPurpose purpose, boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite) {
-		return key(dimension, RouteAssetType.ROUTE_MAP, platformId, resolution, language, Map.of(
-				"a", encodeAspect(aspectRatio),
-				"f", encodeBoolean(flip),
-				"p", Objects.requireNonNull(purpose, "purpose").name(),
-				"t", encodeBoolean(transparentWhite),
-				"v", encodeBoolean(vertical)
-		));
+		return routeMap(dimension, platformId, resolution, language, purpose, RouteSignStyleMode.AUTO,
+				vertical, flip, aspectRatio, transparentWhite);
+	}
+
+	public static RouteAssetKey routeMap(String dimension, long platformId, int resolution, String language,
+			RouteMapPurpose purpose, RouteSignStyleMode styleMode, boolean vertical, boolean flip,
+			float aspectRatio, boolean transparentWhite) {
+		final RouteMapPurpose checkedPurpose = Objects.requireNonNull(purpose, "purpose");
+		final RouteSignStyleMode checkedStyleMode = Objects.requireNonNull(styleMode, "styleMode");
+		final TreeMap<String, String> parameters = new TreeMap<>();
+		parameters.put("a", encodeAspect(aspectRatio));
+		parameters.put("f", encodeBoolean(flip));
+		parameters.put("p", checkedPurpose.name());
+		parameters.put("t", encodeBoolean(transparentWhite));
+		parameters.put("v", encodeBoolean(vertical));
+		if (checkedPurpose == RouteMapPurpose.ROUTE_SIGN) {
+			parameters.put("s", checkedStyleMode.name());
+		} else if (checkedStyleMode != RouteSignStyleMode.AUTO) {
+			throw new IllegalArgumentException("Generic route maps cannot override Route Sign style");
+		}
+		return key(dimension, RouteAssetType.ROUTE_MAP, platformId, resolution, language, parameters);
 	}
 
 	public static RouteAssetKey directionArrow(String dimension, long platformId, int resolution, String language, boolean hasLeft, boolean hasRight, RouteAssetTextRasterizer.Alignment alignment, boolean showToString, float paddingScale, float aspectRatio, int backgroundColor, int textColor, int transparentColor) {
@@ -53,14 +69,19 @@ public final class RouteAssetCanonicalKeyFactory {
 	}
 
 	static RouteMapParameters decodeRouteMap(RouteAssetKey key) {
-		if (key.getType() != RouteAssetType.ROUTE_MAP || !key.getVariant().getParameters().keySet().equals(ROUTE_MAP_PARAMETERS)) return null;
+		if (key.getType() != RouteAssetType.ROUTE_MAP) return null;
 		final Map<String, String> parameters = key.getVariant().getParameters();
+		final RouteMapPurpose purpose = decodeRouteMapPurpose(parameters.get("p"));
+		if (purpose == null || !parameters.keySet().equals(
+				purpose == RouteMapPurpose.ROUTE_SIGN ? ROUTE_SIGN_MAP_PARAMETERS : ROUTE_MAP_PARAMETERS)) return null;
 		final Float aspectRatio = decodeAspect(parameters.get("a"));
 		final Boolean flip = decodeBoolean(parameters.get("f"));
-		final RouteMapPurpose purpose = decodeRouteMapPurpose(parameters.get("p"));
+		final RouteSignStyleMode styleMode = purpose == RouteMapPurpose.ROUTE_SIGN
+				? decodeRouteSignStyleMode(parameters.get("s")) : RouteSignStyleMode.AUTO;
 		final Boolean transparentWhite = decodeBoolean(parameters.get("t"));
 		final Boolean vertical = decodeBoolean(parameters.get("v"));
-		return aspectRatio == null || flip == null || purpose == null || transparentWhite == null || vertical == null ? null : new RouteMapParameters(purpose, vertical, flip, aspectRatio, transparentWhite);
+		return aspectRatio == null || flip == null || styleMode == null || transparentWhite == null || vertical == null
+				? null : new RouteMapParameters(purpose, styleMode, vertical, flip, aspectRatio, transparentWhite);
 	}
 
 	private static RouteMapPurpose decodeRouteMapPurpose(String value) {
@@ -68,6 +89,16 @@ public final class RouteAssetCanonicalKeyFactory {
 		try {
 			final RouteMapPurpose purpose = RouteMapPurpose.valueOf(value);
 			return purpose.name().equals(value) ? purpose : null;
+		} catch (IllegalArgumentException exception) {
+			return null;
+		}
+	}
+
+	private static RouteSignStyleMode decodeRouteSignStyleMode(String value) {
+		if (value == null) return null;
+		try {
+			final RouteSignStyleMode styleMode = RouteSignStyleMode.valueOf(value);
+			return styleMode.name().equals(value) ? styleMode : null;
 		} catch (IllegalArgumentException exception) {
 			return null;
 		}
@@ -232,13 +263,15 @@ public final class RouteAssetCanonicalKeyFactory {
 
 	static final class RouteMapParameters {
 		final RouteMapPurpose purpose;
+		final RouteSignStyleMode styleMode;
 		final boolean vertical;
 		final boolean flip;
 		final float aspectRatio;
 		final boolean transparentWhite;
 
-		private RouteMapParameters(RouteMapPurpose purpose, boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite) {
+		private RouteMapParameters(RouteMapPurpose purpose, RouteSignStyleMode styleMode, boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite) {
 			this.purpose = purpose;
+			this.styleMode = styleMode;
 			this.vertical = vertical;
 			this.flip = flip;
 			this.aspectRatio = aspectRatio;

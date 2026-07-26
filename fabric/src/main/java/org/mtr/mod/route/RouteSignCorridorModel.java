@@ -34,8 +34,14 @@ public final class RouteSignCorridorModel {
 	}
 
 	public static Optional<Model> tryBuild(RouteAssetRenderSnapshot snapshot) {
+		return tryBuild(snapshot, RouteSignStyleMode.AUTO);
+	}
+
+	public static Optional<Model> tryBuild(RouteAssetRenderSnapshot snapshot, RouteSignStyleMode styleMode) {
 		Objects.requireNonNull(snapshot, "snapshot");
-		if (snapshot.getRouteMapPurpose() != RouteMapPurpose.ROUTE_SIGN || !isHighSpeedOnly(snapshot)) return Optional.empty();
+		final RouteSignStyleMode checkedMode = Objects.requireNonNull(styleMode, "styleMode");
+		if (snapshot.getRouteMapPurpose() != RouteMapPurpose.ROUTE_SIGN || checkedMode == RouteSignStyleMode.NORMAL) return Optional.empty();
+		if (checkedMode == RouteSignStyleMode.AUTO && !isHighSpeedOnly(snapshot)) return Optional.empty();
 		return buildValidated(snapshot);
 	}
 

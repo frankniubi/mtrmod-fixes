@@ -46,6 +46,25 @@ public final class RouteSignCorridorModelTest {
 	}
 
 	@Test
+	public void styleModesControlClassificationWithoutRelaxingMetadataValidation() {
+		final RouteAssetRenderSnapshot mixed = snapshot(List.of(
+				route(1, "HS1", 0x123456, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED,
+						station(SELECTED_PLATFORM, SELECTED_STATION, "P1"), station(2, 20, "P2")),
+				route(2, "M1", 0x654321, RouteAssetRenderSnapshot.RouteKind.METRO,
+						station(SELECTED_PLATFORM, SELECTED_STATION, "P1"), station(3, 30, "P3"))
+		));
+		final RouteAssetRenderSnapshot.Station missingOwner = station(2, 20, 0, "P2", "Next|Next");
+		final RouteAssetRenderSnapshot invalid = snapshot(List.of(route(3, "HS2", 0x112233,
+				RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED,
+				station(SELECTED_PLATFORM, SELECTED_STATION, "P1"), missingOwner)));
+
+		Assertions.assertTrue(RouteSignCorridorModel.tryBuild(mixed, RouteSignStyleMode.AUTO).isEmpty());
+		Assertions.assertTrue(RouteSignCorridorModel.tryBuild(mixed, RouteSignStyleMode.RAILWAY).isPresent());
+		Assertions.assertTrue(RouteSignCorridorModel.tryBuild(mixed, RouteSignStyleMode.NORMAL).isEmpty());
+		Assertions.assertTrue(RouteSignCorridorModel.tryBuild(invalid, RouteSignStyleMode.RAILWAY).isEmpty());
+	}
+
+	@Test
 	public void sameColorRoutesRemainSeparateRows() {
 		final RouteAssetRenderSnapshot snapshot = snapshot(List.of(
 				route(10, "A", 0x123456, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED,

@@ -10,7 +10,7 @@ public final class RouteAssetCanonicalKeyFactoryTest {
 		final RouteAssetKey generic = RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, 2, "normal", RouteMapPurpose.GENERIC, true, false, 37F / 22, false);
 		final RouteAssetKey routeSign = RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, 2, "normal", RouteMapPurpose.ROUTE_SIGN, true, false, 37F / 22, false);
 		Assertions.assertEquals("minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=37:22,f=0,p=GENERIC,t=0,v=1", generic.toString());
-		Assertions.assertEquals("minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=37:22,f=0,p=ROUTE_SIGN,t=0,v=1", routeSign.toString());
+		Assertions.assertEquals("minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=37:22,f=0,p=ROUTE_SIGN,s=AUTO,t=0,v=1", routeSign.toString());
 		Assertions.assertNotEquals(generic, routeSign);
 		Assertions.assertEquals(RouteMapPurpose.ROUTE_SIGN, RouteAssetCanonicalKeyFactory.decodeRouteMap(routeSign).purpose);
 		Assertions.assertNull(RouteAssetCanonicalKeyFactory.decodeRouteMap(RouteAssetKey.parse("minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=37:22,f=0,t=0,v=1")));
@@ -18,6 +18,20 @@ public final class RouteAssetCanonicalKeyFactoryTest {
 
 		final RouteAssetKey arrow = RouteAssetCanonicalKeyFactory.directionArrow("minecraft/overworld", 7, 2, "normal", true, false, RouteAssetTextRasterizer.Alignment.CENTER, true, 0.2F, 22F / 5, 0xFF000000, 0xFFFFFFFF, 0);
 		Assertions.assertEquals("minecraft/overworld|DIRECTION_ARROW|7|2|NORMAL|a=22:5,align=CENTER,bg=FF000000,left=1,pad=1:5,right=0,show=1,text=FFFFFFFF,transparent=00000000", arrow.toString());
+	}
+
+	@Test
+	public void routeSignStyleIsCanonicalWhileGenericSchemaStaysStable() {
+		final RouteAssetKey auto = routeSign(RouteSignStyleMode.AUTO);
+		final RouteAssetKey railway = routeSign(RouteSignStyleMode.RAILWAY);
+		final RouteAssetKey normal = routeSign(RouteSignStyleMode.NORMAL);
+		Assertions.assertTrue(auto.toString().endsWith("a=37:22,f=0,p=ROUTE_SIGN,s=AUTO,t=0,v=1"));
+		Assertions.assertNotEquals(auto, railway);
+		Assertions.assertNotEquals(railway, normal);
+		Assertions.assertEquals(RouteSignStyleMode.NORMAL, RouteAssetCanonicalKeyFactory.decodeRouteMap(normal).styleMode);
+		Assertions.assertFalse(genericRouteMap().toString().contains(",s="));
+		Assertions.assertNull(RouteAssetCanonicalKeyFactory.decodeRouteMap(RouteAssetKey.parse(
+				"minecraft/overworld|ROUTE_MAP|7|2|NORMAL|a=37:22,f=0,p=ROUTE_SIGN,s=railway,t=0,v=1")));
 	}
 
 	@Test
@@ -54,5 +68,13 @@ public final class RouteAssetCanonicalKeyFactoryTest {
 
 	private static RouteAssetKey arrow(boolean left, boolean right, RouteAssetTextRasterizer.Alignment alignment, boolean show, float padding, float aspect, int background, int text, int transparent) {
 		return RouteAssetCanonicalKeyFactory.directionArrow("minecraft/overworld", 7, 2, "NORMAL", left, right, alignment, show, padding, aspect, background, text, transparent);
+	}
+
+	private static RouteAssetKey routeSign(RouteSignStyleMode mode) {
+		return RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, 2, "NORMAL", RouteMapPurpose.ROUTE_SIGN, mode, true, false, 37F / 22, false);
+	}
+
+	private static RouteAssetKey genericRouteMap() {
+		return RouteAssetCanonicalKeyFactory.routeMap("minecraft/overworld", 7, 2, "NORMAL", RouteMapPurpose.GENERIC, true, false, 37F / 22, false);
 	}
 }
