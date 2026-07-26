@@ -1,0 +1,22 @@
+{
+	"parent": "block/block",
+	"textures": {
+		"particle": "mtr:block/metal",
+		"back": "mtr:block/metal",
+		"face": "mtr:block/black"
+	},
+	"elements": [
+		{
+			"from": [ 0, 0, 0 ],
+			"to": [ 16, 16, 1 ],
+			"faces": {
+				"north": { "texture": "#back", "cullface": "north" },
+				"east": { "texture": "#back" },
+				"south": { "texture": "#face" },
+				"west": { "texture": "#back" },
+				"up": { "texture": "#back" },
+				"down": { "texture": "#back" }
+			}
+		}
+	]
+}

@@ -97,14 +97,14 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 	public void render(GraphicsHolder graphicsHolder, int mouseX, int mouseY, float delta) {
 		renderBackground(graphicsHolder);
 		if (model == null) {
-			graphicsHolder.drawCenteredText("gui.mtr.destination_sign_data_unavailable", width / 2, SQUARE_SIZE * 2, ARGB_WHITE);
+			graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_data_unavailable"), width / 2, SQUARE_SIZE * 2, ARGB_WHITE);
 		} else {
-			graphicsHolder.drawCenteredText(model.getSourceStationName(), width / 2, SQUARE_SIZE, ARGB_WHITE);
-			graphicsHolder.drawCenteredText("gui.mtr.destination_sign_width " + model.getWidth(), width / 2, SQUARE_SIZE * 5 + TEXT_PADDING, ARGB_WHITE);
-			graphicsHolder.drawCenteredText("gui.mtr.destination_sign_height " + model.getHeight(), width / 2, SQUARE_SIZE * 6 + TEXT_PADDING, ARGB_WHITE);
+			graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_current_station", model.getSourceStationName()), width / 2, SQUARE_SIZE, ARGB_WHITE);
+			graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_width", model.getWidth()), width / 2, SQUARE_SIZE * 5 + TEXT_PADDING, ARGB_WHITE);
+			graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_height", model.getHeight()), width / 2, SQUARE_SIZE * 6 + TEXT_PADDING, ARGB_WHITE);
 			if (model.getDestinationStationId() != 0 && !model.canSave()) {
 				final DestinationSignScreenModel.Footprint minimum = model.minimumFootprint(model.getStyle());
-				graphicsHolder.drawCenteredText("gui.mtr.destination_sign_minimum " + minimum, width / 2, SQUARE_SIZE * 12, ARGB_WHITE);
+				graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_minimum", minimum), width / 2, SQUARE_SIZE * 12, ARGB_WHITE);
 			}
 		}
 		super.render(graphicsHolder, mouseX, mouseY, delta);

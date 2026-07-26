@@ -1,0 +1,20 @@
+{
+	"multipart": [
+		{
+			"when": { "facing": "north" },
+			"apply": { "model": "mtr:block/destination_station_sign" }
+		},
+		{
+			"when": { "facing": "east" },
+			"apply": { "model": "mtr:block/destination_station_sign", "y": 90 }
+		},
+		{
+			"when": { "facing": "south" },
+			"apply": { "model": "mtr:block/destination_station_sign", "y": 180 }
+		},
+		{
+			"when": { "facing": "west" },
+			"apply": { "model": "mtr:block/destination_station_sign", "y": 270 }
+		}
+	]
+}
