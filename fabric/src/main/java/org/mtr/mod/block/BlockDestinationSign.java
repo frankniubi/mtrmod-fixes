@@ -198,9 +198,13 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 			restoreConfiguredIndexQuietly(persistentState, anchor, previous);
 			return DestinationSignConfigResult.INTERNAL_REJECTED;
 		}
-		if (indexChanged) notifyConfiguredAssets(world, "destination-sign-config");
+		if (indexChanged) notifyConfiguredAssetsQuietly(world, "destination-sign-config");
 		for (final BlockPos position : touched) {
-			world.updateNeighbors(position, org.mtr.mod.Blocks.DESTINATION_STATION_SIGN.get());
+			try {
+				world.updateNeighbors(position, org.mtr.mod.Blocks.DESTINATION_STATION_SIGN.get());
+			} catch (RuntimeException exception) {
+				Init.LOGGER.error("Unable to notify Destination Sign neighbors after a committed save", exception);
+			}
 		}
 		return DestinationSignConfigResult.SUCCESS;
 	}
@@ -301,21 +305,32 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 	private static void restoreConfiguredIndexQuietly(PersistentStateData persistentState, BlockPos anchor, DestinationSignConfig previous) {
 		try {
 			restoreConfiguredIndex(persistentState, anchor, previous);
-		} catch (RuntimeException ignored) { }
+		} catch (RuntimeException exception) {
+			Init.LOGGER.error("Unable to restore Destination Sign configured-asset index", exception);
+		}
 	}
 
 	private static void restoreWorldStateQuietly(World world, Map<BlockPos, BlockState> originalStates) {
 		originalStates.forEach((position, originalState) -> {
 			try {
-				world.setBlockState(position, originalState, 2);
-			} catch (RuntimeException ignored) { }
+				if (!world.getBlockState(position).equals(originalState)
+						&& !world.setBlockState(position, originalState, 2)
+						&& !world.getBlockState(position).equals(originalState)) {
+					Init.LOGGER.error("Unable to restore Destination Sign block state at {}", position);
+				}
+			} catch (RuntimeException exception) {
+				Init.LOGGER.error("Unable to restore Destination Sign block state at " + position, exception);
+			}
 		});
 	}
 
 	private static void restoreEntityConfigQuietly(BlockEntity entity, DestinationSignConfig previous) {
 		try {
 			entity.setConfig(previous);
-		} catch (RuntimeException ignored) { }
+			if (!previous.equals(entity.getConfig())) Init.LOGGER.error("Unable to restore Destination Sign block entity configuration");
+		} catch (RuntimeException exception) {
+			Init.LOGGER.error("Unable to restore Destination Sign block entity configuration", exception);
+		}
 	}
 
 	private static DestinationSignConfiguredEntry configuredEntry(DestinationSignConfig config) {
@@ -326,6 +341,14 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 	private static void notifyConfiguredAssets(World world, String cause) {
 		final RouteAssetServerManager manager = Init.getRouteAssetServerManager();
 		if (manager != null) manager.configuredSignsChanged(world.getServer(), cause);
+	}
+
+	private static void notifyConfiguredAssetsQuietly(World world, String cause) {
+		try {
+			notifyConfiguredAssets(world, cause);
+		} catch (RuntimeException exception) {
+			Init.LOGGER.error("Unable to refresh route assets after a committed Destination Sign save", exception);
+		}
 	}
 
 	public static final class BlockEntity extends BlockEntityExtension {

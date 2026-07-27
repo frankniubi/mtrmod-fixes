@@ -122,5 +122,7 @@ public final class DestinationSignFootprintTest {
 		Assertions.assertTrue(block.contains("restoreEntityConfigQuietly(entity, previous)"));
 		Assertions.assertTrue(block.contains("restoreConfiguredIndexQuietly(persistentState, anchor, previous)"));
 		Assertions.assertTrue(block.contains("config.isShowEta(), config.getRoutesPerBlockHeight())"));
+		Assertions.assertTrue(block.contains("if (indexChanged) notifyConfiguredAssetsQuietly(world, \"destination-sign-config\")"));
+		Assertions.assertTrue(block.contains("Unable to notify Destination Sign neighbors after a committed save"));
 	}
 }

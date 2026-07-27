@@ -25,10 +25,13 @@ import java.util.function.Consumer;
 public final class DestinationSignServerTopology {
 
 	private static final long CACHE_MILLIS = 5_000;
+	private static final int SERVER_TIMEOUT_TICKS = 160;
 	private static final Map<CacheKey, CacheEntry> CACHE = new HashMap<>();
 	private static final Map<CacheKey, List<ResolutionCallback>> PENDING = new HashMap<>();
+	private static final List<SourceResolution> PENDING_SOURCES = new ArrayList<>();
 	private static final Map<CacheKey, Long> GENERATIONS = new HashMap<>();
 	private static long lifecycleEpoch;
+	private static long topologyTick;
 	private static final SerializedDataBase EMPTY_REQUEST = new SerializedDataBase() {
 		@Override public void updateData(ReaderBase readerBase) { }
 		@Override public void serializeData(WriterBase writerBase) { }
@@ -44,24 +47,30 @@ public final class DestinationSignServerTopology {
 			Runnable sourceUnavailable, Runnable resolutionFailed) {
 		final Runnable checkedSourceUnavailable = checkedFailure(sourceUnavailable);
 		final Runnable checkedResolutionFailed = checkedFailure(resolutionFailed);
+		final SourceResolution sourceResolution;
+		synchronized (DestinationSignServerTopology.class) {
+			sourceResolution = new SourceResolution(topologyTick + SERVER_TIMEOUT_TICKS, checkedResolutionFailed);
+			PENDING_SOURCES.add(sourceResolution);
+		}
 		try {
 			if (!Init.trySendMessageC2S(OperationProcessor.NEARBY_STATIONS, world.getServer(), world,
 					new NearbyAreasRequest<>(Init.blockPosToPosition(anchor), 0), nearby -> {
+						if (!completeSource(sourceResolution)) return;
 						try {
 							if (nearby == null || nearby.getStations().isEmpty() || nearby.getStations().get(0).getId() == 0) {
 								checkedSourceUnavailable.run();
 								return;
 							}
 							final long sourceStationId = nearby.getStations().get(0).getId();
-							resolveTopology(world, topology -> callback.accept(sourceStationId, topology), checkedResolutionFailed);
+							resolveTopology(world, topology -> callback.accept(sourceStationId, topology), checkedResolutionFailed, sourceResolution.deadlineTick);
 						} catch (RuntimeException exception) {
 							checkedResolutionFailed.run();
 						}
 				}, NearbyAreasResponse.class)) {
-				checkedResolutionFailed.run();
+				failSource(sourceResolution);
 			}
 		} catch (RuntimeException exception) {
-			checkedResolutionFailed.run();
+			failSource(sourceResolution);
 		}
 	}
 
@@ -70,6 +79,14 @@ public final class DestinationSignServerTopology {
 	}
 
 	public static void resolveTopology(World world, Consumer<DestinationSignTopology> callback, Runnable resolutionFailed) {
+		final long deadlineTick;
+		synchronized (DestinationSignServerTopology.class) {
+			deadlineTick = topologyTick + SERVER_TIMEOUT_TICKS;
+		}
+		resolveTopology(world, callback, resolutionFailed, deadlineTick);
+	}
+
+	private static void resolveTopology(World world, Consumer<DestinationSignTopology> callback, Runnable resolutionFailed, long deadlineTick) {
 		final ResolutionCallback request = new ResolutionCallback(callback, resolutionFailed);
 		final String dimension = Init.getWorldId(world);
 		final RouteAssetServerManager manager = Init.getRouteAssetServerManager();
@@ -91,6 +108,7 @@ public final class DestinationSignServerTopology {
 				callbackEpoch = null;
 			} else {
 				cachedTopology = null;
+				request.arm(deadlineTick);
 				final List<ResolutionCallback> callbacks = PENDING.get(key);
 				if (callbacks != null) {
 					callbacks.add(request);
@@ -134,6 +152,34 @@ public final class DestinationSignServerTopology {
 		}
 	}
 
+	public static void tick() {
+		final List<ResolutionCallback> expired = new ArrayList<>();
+		final List<SourceResolution> expiredSources = new ArrayList<>();
+		synchronized (DestinationSignServerTopology.class) {
+			topologyTick++;
+			PENDING_SOURCES.removeIf(source -> {
+				if (source.deadlineTick > topologyTick) return false;
+				expiredSources.add(source);
+				return true;
+			});
+			final java.util.Iterator<Map.Entry<CacheKey, List<ResolutionCallback>>> iterator = PENDING.entrySet().iterator();
+			while (iterator.hasNext()) {
+				final Map.Entry<CacheKey, List<ResolutionCallback>> entry = iterator.next();
+				entry.getValue().removeIf(callback -> {
+					if (callback.deadlineTick > topologyTick) return false;
+					expired.add(callback);
+					return true;
+				});
+				if (entry.getValue().isEmpty()) {
+					iterator.remove();
+					GENERATIONS.put(entry.getKey(), GENERATIONS.getOrDefault(entry.getKey(), 0L) + 1);
+				}
+			}
+		}
+		expiredSources.forEach(SourceResolution::fail);
+		failCallbacks(expired);
+	}
+
 	public static void invalidate(World world) {
 		final CacheKey key = new CacheKey(world.getServer().data, Init.getWorldId(world));
 		final List<ResolutionCallback> callbacks;
@@ -147,14 +193,29 @@ public final class DestinationSignServerTopology {
 
 	public static void clearServerState() {
 		final List<ResolutionCallback> callbacks = new ArrayList<>();
+		final List<SourceResolution> sourceResolutions = new ArrayList<>();
 		synchronized (DestinationSignServerTopology.class) {
 			lifecycleEpoch++;
 			CACHE.clear();
 			PENDING.values().forEach(callbacks::addAll);
 			PENDING.clear();
+			sourceResolutions.addAll(PENDING_SOURCES);
+			PENDING_SOURCES.clear();
 			GENERATIONS.clear();
+			topologyTick = 0;
 		}
+		sourceResolutions.forEach(SourceResolution::fail);
 		failCallbacks(callbacks);
+	}
+
+	private static boolean completeSource(SourceResolution sourceResolution) {
+		synchronized (DestinationSignServerTopology.class) {
+			return PENDING_SOURCES.remove(sourceResolution);
+		}
+	}
+
+	private static void failSource(SourceResolution sourceResolution) {
+		if (completeSource(sourceResolution)) sourceResolution.fail();
 	}
 
 	private static List<ResolutionCallback> failPending(CacheKey key, CallbackEpoch callbackEpoch) {
@@ -205,12 +266,24 @@ public final class DestinationSignServerTopology {
 	private static final class ResolutionCallback {
 		private final Consumer<DestinationSignTopology> success;
 		private final Runnable failure;
+		private long deadlineTick;
 		private ResolutionCallback(Consumer<DestinationSignTopology> success, Runnable failure) {
 			this.success = Objects.requireNonNull(success, "success");
 			this.failure = checkedFailure(failure);
 		}
 		private void succeed(DestinationSignTopology topology) {
 			try { success.accept(topology); } catch (RuntimeException exception) { failure.run(); }
+		}
+		private void arm(long deadlineTick) { this.deadlineTick = deadlineTick; }
+		private void fail() { failure.run(); }
+	}
+
+	private static final class SourceResolution {
+		private final long deadlineTick;
+		private final Runnable failure;
+		private SourceResolution(long deadlineTick, Runnable failure) {
+			this.deadlineTick = deadlineTick;
+			this.failure = failure;
 		}
 		private void fail() { failure.run(); }
 	}

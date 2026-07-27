@@ -165,16 +165,20 @@ public final class DestinationSignConfigPacketTest {
 		Assertions.assertTrue(topology.contains("Runnable sourceUnavailable, Runnable resolutionFailed"));
 		Assertions.assertTrue(topology.contains("failPending(key, callbackEpoch)"));
 		Assertions.assertTrue(topology.contains("Init.trySendMessageC2S("));
+		Assertions.assertTrue(topology.contains("SERVER_TIMEOUT_TICKS = 160"));
+		Assertions.assertTrue(topology.contains("public static void tick()"));
 		Assertions.assertTrue(init.contains("boolean trySendMessageC2S("));
+		Assertions.assertTrue(init.contains("DestinationSignServerTopology.tick();"));
 	}
 
 	@Test
 	public void v2AcknowledgesAParsedRequestWithoutStationOwnership() throws Exception {
-		final String source = Files.readString(project("fabric/src/main/java/org/mtr/mod/packet/PacketUpdateDestinationSignConfigV2.java"), StandardCharsets.UTF_8);
-		Assertions.assertTrue(source.contains("nearby.getStations().isEmpty()"));
-		Assertions.assertTrue(source.contains("sendResultOnce.accept(DestinationSignConfigResult.STALE_TARGET)"));
-		Assertions.assertTrue(source.contains("DestinationSignServerTopology.resolveTopology(world"));
-		Assertions.assertFalse(source.contains("DestinationSignServerTopology.resolve(world, anchor"));
+		final String request = Files.readString(project("fabric/src/main/java/org/mtr/mod/packet/PacketUpdateDestinationSignConfigV2.java"), StandardCharsets.UTF_8);
+		final String topology = Files.readString(project("fabric/src/main/java/org/mtr/mod/route/DestinationSignServerTopology.java"), StandardCharsets.UTF_8);
+		Assertions.assertTrue(topology.contains("nearby == null || nearby.getStations().isEmpty()"));
+		Assertions.assertTrue(topology.contains("checkedSourceUnavailable.run()"));
+		Assertions.assertTrue(request.contains("sendResultOnce.accept(DestinationSignConfigResult.STALE_TARGET)"));
+		Assertions.assertTrue(request.contains("DestinationSignServerTopology.resolve(world, anchor"));
 	}
 
 	private static PacketUpdateDestinationSignConfigV2.Payload v2Payload(long source, Set<Long> destinations, int density) {

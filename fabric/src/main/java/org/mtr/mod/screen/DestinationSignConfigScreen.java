@@ -174,7 +174,7 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 
 	@Override
 	public void onClose2() {
-		saveState.cancelPending();
+		if (saveState.isPending()) return;
 		super.onClose2();
 	}
 

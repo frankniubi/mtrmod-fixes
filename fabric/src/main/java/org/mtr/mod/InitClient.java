@@ -411,6 +411,7 @@ public final class InitClient {
 
 		REGISTRY_CLIENT.eventRegistryClient.registerClientDisconnect(() -> {
 			ClientRouteAssetManager.getInstance().onDisconnect();
+			org.mtr.mod.screen.DestinationSignSaveState.clearClientSession();
 			DestinationSignClientState.INSTANCE.clear();
 			DestinationSignArrivalsClientCache.INSTANCE.clear();
 			org.mtr.mod.client.DestinationSignDynamicTextCache.INSTANCE.clear();

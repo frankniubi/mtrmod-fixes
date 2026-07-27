@@ -32,6 +32,13 @@ public final class DestinationSignSaveState {
 		this.requestIds = Objects.requireNonNull(requestIds, "requestIds");
 	}
 
+	public static void clearClientSession() {
+		synchronized (PENDING_IDS) {
+			PENDING_IDS.remove(SESSION_REQUEST_IDS);
+			SESSION_REQUEST_IDS.set(0);
+		}
+	}
+
 	public long begin(BlockPos anchor) {
 		if (isPending()) throw new IllegalStateException("Destination sign save is already pending");
 		pendingAnchor = Objects.requireNonNull(anchor, "anchor");

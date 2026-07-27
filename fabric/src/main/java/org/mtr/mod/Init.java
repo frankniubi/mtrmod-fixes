@@ -281,6 +281,7 @@ public final class Init implements Utilities {
 
 		REGISTRY.eventRegistry.registerStartServerTick(() -> {
 			if (routeAssetServerManager != null) routeAssetServerManager.tick();
+			DestinationSignServerTopology.tick();
 			if (sendWorldTimeUpdate != null && serverTick % (SECONDS_PER_MC_HOUR * 10) == 0) {
 				sendWorldTimeUpdate.run();
 			}

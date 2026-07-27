@@ -96,6 +96,17 @@ public final class DestinationSignSaveStateTest {
 	}
 
 	@Test
+	public void disconnectStartsANewClientRequestIdSession() {
+		DestinationSignSaveState.clearClientSession();
+		final BlockPos anchor = new BlockPos(3, 3, 3);
+		final DestinationSignSaveState firstSession = new DestinationSignSaveState();
+		Assertions.assertEquals(1, firstSession.begin(anchor));
+		DestinationSignSaveState.clearClientSession();
+		Assertions.assertEquals(1, new DestinationSignSaveState().begin(anchor));
+		DestinationSignSaveState.clearClientSession();
+	}
+
+	@Test
 	public void screenUsesAcknowledgedSaveFlowAndCompactDensitySegments() throws Exception {
 		Path path = Path.of("src", "main", "java", "org", "mtr", "mod", "screen", "DestinationSignConfigScreen.java");
 		if (!Files.exists(path)) path = Path.of("fabric").resolve(path);
@@ -108,10 +119,14 @@ public final class DestinationSignSaveStateTest {
 		Assertions.assertTrue(source.contains("saveState.tick()"));
 		Assertions.assertTrue(source.contains("final boolean mutable = available && !saveState.isPending()"));
 		Assertions.assertTrue(source.contains("MATCHED_SUCCESS) onClose2()"));
+		Assertions.assertTrue(source.contains("if (saveState.isPending()) return;"));
 		Assertions.assertTrue(source.contains("gui.mtr.destination_sign_save_timeout"));
 		Assertions.assertTrue(source.contains("buttonDensity2"));
 		Assertions.assertTrue(source.contains("buttonDensity3"));
 		Assertions.assertTrue(source.contains("buttonDensity4"));
 		Assertions.assertTrue(source.contains("model.setRoutesPerBlockHeight(density)"));
+		Path initClientPath = Path.of("src", "main", "java", "org", "mtr", "mod", "InitClient.java");
+		if (!Files.exists(initClientPath)) initClientPath = Path.of("fabric").resolve(initClientPath);
+		Assertions.assertTrue(Files.readString(initClientPath).contains("DestinationSignSaveState.clearClientSession();"));
 	}
 }
