@@ -3,10 +3,14 @@ package org.mtr.mod.client;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mtr.mod.route.DestinationSignAssetSnapshot;
+import org.mtr.mod.route.DestinationSignDirectServiceModel;
 import org.mtr.mod.route.DestinationSignStyle;
 import org.mtr.mod.route.DestinationSignTopology;
 import org.mtr.mod.route.RouteAssetCanonicalKeyFactory;
 import org.mtr.mod.route.RouteAssetKey;
+import org.mtr.mod.data.DestinationSignArrivalKey;
+import org.mtr.mod.data.DestinationSignArrivalResult;
+import org.mtr.mod.data.DestinationSignRows;
 
 import java.util.List;
 import java.util.Optional;
@@ -91,6 +95,20 @@ public final class DestinationSignClientStateTest {
 		Assertions.assertEquals(2, resolves.get());
 	}
 
+	@Test
+	public void pageCyclesIncludeSelectedStationLabelsAndIgnorePhysicalTerminal() {
+		final DestinationSignAssetSnapshot snapshot = snapshotWithThreePhaseIntermediate();
+		final DestinationSignClientState.Prepared prepared = state(new MutableClock(), ignored -> Optional.of(snapshot)).request(1, key()).orElseThrow();
+		final DestinationSignDirectServiceModel.Option option = snapshot.getModel().getOptions().get(0);
+		final DestinationSignArrivalKey arrivalKey = new DestinationSignArrivalKey(option.getRoute().getRouteId(), option.getSource().getPlatformId());
+		final DestinationSignRows.Snapshot first = DestinationSignRows.resolve(snapshot.getModel(),
+				java.util.Map.of(arrivalKey, DestinationSignArrivalResult.present(60_000, "Terminal A", true)), true, 0, true, DestinationSignStyle.ARRIVAL_ORDER);
+		final DestinationSignRows.Snapshot second = DestinationSignRows.resolve(snapshot.getModel(),
+				java.util.Map.of(arrivalKey, DestinationSignArrivalResult.present(60_000, "Other|Terminal|Value|Ignored", true)), true, 0, true, DestinationSignStyle.ARRIVAL_ORDER);
+		Assertions.assertEquals(List.of(3), DestinationSignClientState.buildRenderRows(prepared, first).getLanguageCyclesByPage());
+		Assertions.assertEquals(List.of(3), DestinationSignClientState.buildRenderRows(prepared, second).getLanguageCyclesByPage());
+	}
+
 	private static DestinationSignClientState state(LongSupplier clock, DestinationSignClientState.Resolver resolver) {
 		final Executor direct = Runnable::run;
 		return new DestinationSignClientState(clock, direct, direct, resolver);
@@ -106,6 +124,17 @@ public final class DestinationSignClientStateTest {
 						new DestinationSignTopology.StopOccurrence(-10, -100, "U1", "Source", ""),
 						new DestinationSignTopology.StopOccurrence(-20, -200, "D", "Target", "")))
 		), List.of(new DestinationSignTopology.StationZone(-100, "Source|Source EN"), new DestinationSignTopology.StationZone(-200, "Target|Target EN")));
+		return DestinationSignAssetSnapshot.create(topology, -100, -200, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+	}
+
+	private static DestinationSignAssetSnapshot snapshotWithThreePhaseIntermediate() {
+		final DestinationSignTopology topology = new DestinationSignTopology(List.of(
+				new DestinationSignTopology.ServiceRoute(-1, 0, "R", 0x008A72, List.of(
+						new DestinationSignTopology.StopOccurrence(-10, -100, "U1", "Source", ""),
+						new DestinationSignTopology.StopOccurrence(-15, -150, "U2", "Middle|Middle EN|Milieu", ""),
+						new DestinationSignTopology.StopOccurrence(-20, -200, "D", "Target", "")))
+		), List.of(new DestinationSignTopology.StationZone(-100, "Source"), new DestinationSignTopology.StationZone(-150, "Middle|Middle EN|Milieu"),
+				new DestinationSignTopology.StationZone(-200, "Target")));
 		return DestinationSignAssetSnapshot.create(topology, -100, -200, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
 	}
 

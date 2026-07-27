@@ -224,6 +224,59 @@ public class DynamicTextureCache implements IGui {
 		return getRouteAssetResource(key, "destination_sign_" + key, () -> ClientRouteAssetRenderer.prepare(key).map(ClientRouteAssetRenderer::render).orElse(null), DefaultRenderingColor.TRANSPARENT, true);
 	}
 
+	public DynamicResource getDestinationSignText(String finalText, int fontSize, boolean semibold, int color, int resolution, int logicalMaxWidth) {
+		final DestinationSignDynamicTextCache.DynamicText request = DestinationSignDynamicTextCache.INSTANCE.resolve(
+				finalText, fontSize, semibold, color, resolution, logicalMaxWidth);
+		final String key = String.format(Locale.ROOT, "destination_sign_text_%d:%s_%d_%s_%08X_%d_%d", request.getText().length(), request.getText(),
+				request.getFontSize(), request.isSemibold(), request.getColor(), request.getResolution(), request.getLogicalMaxWidth());
+		return getResource(key, () -> generateDestinationSignText(request), DefaultRenderingColor.TRANSPARENT);
+	}
+
+	private NativeImage generateDestinationSignText(DestinationSignDynamicTextCache.DynamicText request) {
+		final int scale = 1 << request.getResolution();
+		final int physicalFontSize = Math.multiplyExact(request.getFontSize(), scale);
+		final int physicalMaxWidth = Math.multiplyExact(request.getLogicalMaxWidth(), scale);
+		final String value = DestinationSignDynamicTextCache.ellipsize(request.getText(), physicalMaxWidth, text -> measureDestinationSignText(text, physicalFontSize));
+		final int[] dimensions = new int[2];
+		final byte[] pixels = value.isEmpty() ? new byte[0] : getTextPixels(value, dimensions, physicalMaxWidth,
+				Math.max(1, (int) (physicalFontSize * LINE_HEIGHT_MULTIPLIER)), physicalFontSize, physicalFontSize, 0, null);
+		int minX = dimensions[0];
+		int minY = dimensions[1];
+		int maxX = -1;
+		int maxY = -1;
+		for (int y = 0; y < dimensions[1]; y++) {
+			for (int x = 0; x < dimensions[0]; x++) {
+				if ((pixels[y * dimensions[0] + x] & 0xFF) == 0) continue;
+				minX = Math.min(minX, x);
+				minY = Math.min(minY, y);
+				maxX = Math.max(maxX, x);
+				maxY = Math.max(maxY, y);
+			}
+		}
+		final int width = Math.max(1, maxX - minX + 1);
+		final int height = Math.max(1, maxY - minY + 1);
+		final NativeImage image = new NativeImage(NativeImageFormat.getAbgrMapped(), width, height, false);
+		final int sourceAlpha = request.getColor() >>> 24;
+		final int abgr = request.getColor() & 0xFF00FF00 | (request.getColor() & 0xFF) << 16 | (request.getColor() >>> 16 & 0xFF);
+		if (maxX >= minX && maxY >= minY) {
+			for (int y = minY; y <= maxY; y++) {
+				for (int x = minX; x <= maxX; x++) {
+					final int alpha = (pixels[y * dimensions[0] + x] & 0xFF) * sourceAlpha / 255;
+					image.setPixelColor(x - minX, y - minY, alpha << 24 | abgr & 0xFFFFFF);
+				}
+			}
+		}
+		return image;
+	}
+
+	private int measureDestinationSignText(String value, int physicalFontSize) {
+		if (value.isEmpty()) return 0;
+		final int[] dimensions = new int[2];
+		getTextPixels(value, dimensions, Integer.MAX_VALUE, Math.max(1, (int) (physicalFontSize * LINE_HEIGHT_MULTIPLIER)),
+				physicalFontSize, physicalFontSize, 0, null);
+		return dimensions[0];
+	}
+
 	private DynamicResource getRouteMap(long platformId, RouteMapPurpose purpose, RouteSignStyleMode styleMode,
 			boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite, String localKey) {
 		final Supplier<NativeImage> localSupplier = () -> RouteMapGenerator.generateRouteMap(platformId, vertical, flip, aspectRatio, transparentWhite);

@@ -9,7 +9,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
-import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -61,13 +60,8 @@ public final class DestinationSignRows {
 
 	private static void sortPlatformGroups(List<Row> rows) {
 		final Comparator<Row> arrivalOrder = comparator(true, DestinationSignStyle.ARRIVAL_ORDER);
-		final Map<Long, List<Row>> groups = new LinkedHashMap<>();
-		for (final Row row : rows) groups.computeIfAbsent(row.arrivalKey.getPlatformId(), ignored -> new ArrayList<>()).add(row);
-		groups.values().forEach(group -> group.sort(arrivalOrder));
-		final List<List<Row>> orderedGroups = new ArrayList<>(groups.values());
-		orderedGroups.sort((first, second) -> arrivalOrder.compare(first.get(0), second.get(0)));
-		rows.clear();
-		orderedGroups.forEach(rows::addAll);
+		rows.sort(Comparator.comparing((Row row) -> row.option.getSource().getPlatformDisplayName().toLowerCase(Locale.ROOT))
+				.thenComparingLong(row -> row.arrivalKey.getPlatformId()).thenComparing(arrivalOrder));
 	}
 
 	public static Set<DestinationSignArrivalKey> uniqueArrivalKeys(DestinationSignDirectServiceModel.Model model) {

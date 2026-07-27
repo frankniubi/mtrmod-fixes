@@ -30,4 +30,34 @@ public final class DestinationSignDynamicTextCacheTest {
 		cache.clear();
 		Assertions.assertTrue(cache.get("Destination|Terminal").isEmpty());
 	}
+
+	@Test
+	public void destinationEtaRequestsAreKeyedByEveryRasterInput() {
+		final DestinationSignDynamicTextCache cache = new DestinationSignDynamicTextCache(ignored -> { });
+		final DestinationSignDynamicTextCache.DynamicText baseline = cache.resolve("12 min", 13, true, 0xFF112233, 2, 51);
+		Assertions.assertSame(baseline, cache.resolve("12 min", 13, true, 0xFF112233, 2, 51));
+		Assertions.assertNotSame(baseline, cache.resolve("12 min", 13, true, 0xFF112233, 2, 56));
+		Assertions.assertNotSame(baseline, cache.resolve("12 min", 12, true, 0xFF112233, 2, 51));
+		Assertions.assertNotSame(baseline, cache.resolve("12 min", 13, false, 0xFF112233, 2, 51));
+		Assertions.assertNotSame(baseline, cache.resolve("12 min", 13, true, 0xFF445566, 2, 51));
+		Assertions.assertNotSame(baseline, cache.resolve("12 min", 13, true, 0xFF112233, 1, 51));
+		Assertions.assertNotSame(baseline, cache.resolve("13 min", 13, true, 0xFF112233, 2, 51));
+		Assertions.assertEquals(51, baseline.getLogicalMaxWidth());
+		Assertions.assertEquals(13, baseline.getLogicalHeight());
+	}
+
+	@Test
+	public void codePointEllipsisNeverSplitsSupplementaryCharacters() {
+		Assertions.assertEquals("A...", DestinationSignDynamicTextCache.ellipsize("A\uD83D\uDE89B", 4,
+				value -> value.codePoints().map(codePoint -> codePoint == 0x1F689 ? 10 : 1).sum()));
+		Assertions.assertEquals("\uD83D\uDE89", DestinationSignDynamicTextCache.ellipsize("\uD83D\uDE89", 1,
+				value -> value.codePointCount(0, value.length())));
+	}
+
+	@Test
+	public void sharedCacheDoesNotRetainPhysicalTrainTerminalValues() {
+		DestinationSignDynamicTextCache.INSTANCE.clear();
+		Assertions.assertEquals(List.of("Physical", "Terminal"), DestinationSignDynamicTextCache.INSTANCE.prepare("Physical|Terminal"));
+		Assertions.assertTrue(DestinationSignDynamicTextCache.INSTANCE.get("Physical|Terminal").isEmpty());
+	}
 }

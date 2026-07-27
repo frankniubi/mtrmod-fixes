@@ -63,6 +63,18 @@ public final class DestinationSignRowsTest {
 		Assertions.assertEquals(List.of("P1", "P1", "P2"), platforms);
 	}
 
+	@Test
+	public void platformGroupsSortByPlatformBeforeArrivalWithinEachGroup() {
+		final DestinationSignDirectServiceModel.Model model = threePlatformGroupRows();
+		final Map<DestinationSignArrivalKey, DestinationSignArrivalResult> arrivals = new HashMap<>();
+		arrivals.put(key(model.getOptions().get(0)), DestinationSignArrivalResult.present(300, "ignored", true));
+		arrivals.put(key(model.getOptions().get(1)), DestinationSignArrivalResult.present(10, "ignored", true));
+		arrivals.put(key(model.getOptions().get(2)), DestinationSignArrivalResult.present(100, "ignored", true));
+		final List<String> platforms = DestinationSignRows.resolve(model, arrivals, true, 0, true, DestinationSignStyle.PLATFORM_GROUPS)
+				.getRows().stream().map(row -> row.getOption().getSource().getPlatformDisplayName()).toList();
+		Assertions.assertEquals(List.of("P1", "P1", "P2"), platforms);
+	}
+
 	private static DestinationSignDirectServiceModel.Model model(boolean duplicatePair) {
 		final List<DestinationSignTopology.ServiceRoute> routes = duplicatePair ? List.of(
 				new DestinationSignTopology.ServiceRoute(-1, 0, "R", 1, List.of(

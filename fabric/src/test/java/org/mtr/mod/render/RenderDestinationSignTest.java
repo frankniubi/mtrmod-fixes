@@ -14,6 +14,7 @@ import org.mtr.mod.route.DestinationSignAtlasLayout;
 import org.mtr.mod.route.DestinationSignDirectServiceModel;
 import org.mtr.mod.route.DestinationSignStyle;
 import org.mtr.mod.route.DestinationSignTopology;
+import org.mtr.mod.route.DestinationSignRouteStripLayout;
 import org.mtr.mod.route.RouteAssetCanonicalKeyFactory;
 import org.mtr.mod.route.RouteAssetKey;
 
@@ -61,21 +62,20 @@ public final class RenderDestinationSignTest {
 	}
 
 	@Test
-	public void countdownUsesReusablePiecesAndStaticDwellingLabels() {
+	public void countdownUsesOneFixedEmQuadPerRowAndStaticDwellingLabels() {
 		final Fixture fixture = fixture(DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
 		final Map<DestinationSignArrivalKey, DestinationSignArrivalResult> approaching = arrivals(fixture.snapshot.getModel(), 59_000, "Central|Central EN");
 		final RenderDestinationSign.Composition countdown = RenderDestinationSign.compose(fixture.prepared,
 				DestinationSignRows.resolve(fixture.snapshot.getModel(), approaching, true, 0, true, DestinationSignStyle.ARRIVAL_ORDER), 0, 0);
-		Assertions.assertEquals(List.of("5", "9", " sec"), RenderDestinationSign.etaPieces("59 sec"));
-		Assertions.assertTrue(RenderDestinationSign.etaPieceWeight(" sec") > RenderDestinationSign.etaPieceWeight("5"));
-		Assertions.assertTrue(countdown.getDynamicQuads().size() <= fixture.snapshot.getLayout().getRowsPerPage() * 8);
+		Assertions.assertEquals(2, countdown.getDynamicQuads().size());
+		Assertions.assertTrue(countdown.getDynamicQuads().stream().allMatch(quad -> quad.getLogicalHeight() == quad.getFontSize()));
 
 		final RenderDestinationSign.Composition leaving = RenderDestinationSign.compose(fixture.prepared,
 				DestinationSignRows.resolve(fixture.snapshot.getModel(), approaching, true, 59_000, true, DestinationSignStyle.ARRIVAL_ORDER), 59_000, 0);
 		final RenderDestinationSign.AtlasQuad leavingLabel = leaving.getAtlasQuads().stream()
 				.filter(quad -> quad.getSprite().getKind() == DestinationSignAssetSnapshot.SpriteKind.LEAVING).findFirst().orElseThrow();
-		final DestinationSignAtlasLayout.RowGeometry geometry = DestinationSignAtlasLayout.rowGeometry(DestinationSignStyle.ARRIVAL_ORDER,
-				fixture.snapshot.getLayout().getSurfaceWidth(), DestinationSignStyle.ARRIVAL_ORDER.getRowHeight(), true);
+		final DestinationSignRouteStripLayout.RowMetrics geometry = DestinationSignRouteStripLayout.rowMetrics(3,
+				DestinationSignStyle.ARRIVAL_ORDER.getRowHeight(), true);
 		final int scaledWidth = DestinationSignAtlasLayout.scaledSize(fixture.snapshot.getAtlasWidth(), fixture.key.getVariant().getResolution());
 		Assertions.assertEquals(geometry.getEtaX(), leavingLabel.getX());
 		Assertions.assertEquals((float) DestinationSignAtlasLayout.scaledEdge(geometry.getEtaX(), fixture.key.getVariant().getResolution()) / scaledWidth, leavingLabel.getU1());
@@ -86,14 +86,14 @@ public final class RenderDestinationSignTest {
 	public void dynamicArrivalChangesNeverChangeTheStaticKey() {
 		final Fixture fixture = fixture(DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
 		final Map<DestinationSignArrivalKey, DestinationSignArrivalResult> first = arrivals(fixture.snapshot.getModel(), 10_000, "Central|Central EN");
-		final Map<DestinationSignArrivalKey, DestinationSignArrivalResult> second = arrivals(fixture.snapshot.getModel(), 20_000, "Airport|Airport EN");
+		final Map<DestinationSignArrivalKey, DestinationSignArrivalResult> second = arrivals(fixture.snapshot.getModel(), 10_000, "Airport|Airport EN");
 		final RenderDestinationSign.Composition before = RenderDestinationSign.compose(fixture.prepared,
 				DestinationSignRows.resolve(fixture.snapshot.getModel(), first, true, 0, true, DestinationSignStyle.ARRIVAL_ORDER), 0, 0);
 		final RenderDestinationSign.Composition after = RenderDestinationSign.compose(fixture.prepared,
 				DestinationSignRows.resolve(fixture.snapshot.getModel(), second, true, 0, true, DestinationSignStyle.ARRIVAL_ORDER), 0, 60);
 
 		Assertions.assertEquals(before.getStaticKey(), after.getStaticKey());
-		Assertions.assertNotEquals(before.getDynamicQuads(), after.getDynamicQuads());
+		Assertions.assertEquals(before.getDynamicQuads(), after.getDynamicQuads());
 	}
 
 	@Test
@@ -203,6 +203,35 @@ public final class RenderDestinationSignTest {
 					Assertions.assertTrue(quad.getY() + quad.getHeight() <= dimensions[1] * DestinationSignAtlasLayout.LOGICAL_PIXELS_PER_BLOCK);
 				});
 			}
+		}
+	}
+
+	@Test
+	public void etaUsesConfiguredDestinationLanguageAndFixedEmBounds() {
+		final Fixture fixture = fixture(DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		final RenderDestinationSign.Composition composition = RenderDestinationSign.compose(fixture.prepared,
+				DestinationSignRows.resolve(fixture.snapshot.getModel(), arrivals(fixture.snapshot.getModel(), 120_000, "\u7d42\u9ede"), true, 0, true,
+						DestinationSignStyle.ARRIVAL_ORDER), 0, 60);
+		final RenderDestinationSign.DynamicQuad eta = composition.getDynamicQuads().stream().findFirst().orElseThrow();
+		Assertions.assertTrue(eta.getText().contains("min"));
+		Assertions.assertEquals(eta.getFontSize(), eta.getLogicalHeight());
+		Assertions.assertEquals(eta.getWidth(), eta.getLogicalWidth());
+		Assertions.assertTrue(eta.isSemibold());
+	}
+
+	@Test
+	public void everyLiveStateKeepsOneStaticRouteRowAndPlatformPagesStartWithDivider() {
+		final Fixture fixture = fixture(DestinationSignStyle.PLATFORM_GROUPS, 2, 1, true);
+		final DestinationSignClientState.RenderRows renderRows = renderRows(fixture, Map.of(), 0);
+		for (final long tick : List.of(0L, 120L)) {
+			final RenderDestinationSign.Composition composition = RenderDestinationSign.compose(fixture.prepared, renderRows, 0, tick);
+			Assertions.assertEquals(1, composition.getAtlasQuads().stream()
+					.filter(quad -> quad.getSprite().getKind() == DestinationSignAssetSnapshot.SpriteKind.ROW).count());
+			final RenderDestinationSign.SolidQuad divider = composition.getSolidQuads().stream()
+					.filter(RenderDestinationSign.SolidQuad::isGroupDivider).findFirst().orElseThrow();
+			Assertions.assertEquals(0, divider.getX());
+			Assertions.assertEquals(2, divider.getHeight());
+			Assertions.assertTrue(divider.getX() + divider.getWidth() <= divider.getRouteStripX());
 		}
 	}
 

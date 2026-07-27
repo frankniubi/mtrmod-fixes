@@ -9,6 +9,7 @@ import org.mtr.mod.render.MainRenderer;
 import org.mtr.mod.route.DestinationSignAssetSnapshot;
 import org.mtr.mod.route.DestinationSignAtlasLayout;
 import org.mtr.mod.route.DestinationSignDirectServiceModel;
+import org.mtr.mod.route.DestinationSignRouteStripLayout;
 import org.mtr.mod.route.RouteAssetKey;
 import org.mtr.mod.route.RouteAssetType;
 
@@ -138,17 +139,26 @@ public final class DestinationSignClientState {
 		final int pageCount = Math.max(1, (rows.getRows().size() + capacity - 1) / capacity);
 		final List<Integer> cyclesByPage = new ArrayList<>(pageCount);
 		for (int page = 0; page < pageCount; page++) {
-			int cycles = prepared.headerCycles;
+			int cycles = Math.max(prepared.headerCycles, prepared.staticStateCycles);
 			for (int index = page * capacity; index < Math.min(rows.getRows().size(), (page + 1) * capacity); index++) {
 				final DestinationSignRows.Row row = rows.getRows().get(index);
 				cycles = Math.max(cycles, prepared.optionCycles(row.getOption()));
-				if (row.getResult() != null && row.getResult().isPresent()) {
-					cycles = Math.max(cycles, DestinationSignDynamicTextCache.segments(row.getResult().getDestination()).size());
+				final DestinationSignRouteStripLayout.RowMetrics metrics = DestinationSignRouteStripLayout.rowMetrics(
+						prepared.layout.getWidthBlocks(), rowHeight(prepared.layout, prepared.snapshot), prepared.snapshot.isShowEta());
+				for (final DestinationSignRouteStripLayout.LabelSlot label : DestinationSignRouteStripLayout.project(row.getOption(), metrics).getLabels()) {
+					cycles = Math.max(cycles, DestinationSignDynamicTextCache.segments(label.getStationName()).size());
 				}
 			}
 			cyclesByPage.add(Math.max(1, cycles));
 		}
 		return new RenderRows(rows, cyclesByPage);
+	}
+
+	private static int rowHeight(DestinationSignAtlasLayout.Layout layout, DestinationSignAssetSnapshot snapshot) {
+		for (final DestinationSignAtlasLayout.Page page : layout.getPages()) {
+			if (!page.getRows().isEmpty()) return page.getRows().get(0).getHeight();
+		}
+		return snapshot.getStyle().getRowHeight();
 	}
 
 	private void schedule(Work work) {
@@ -220,6 +230,7 @@ public final class DestinationSignClientState {
 		private final Map<DestinationSignDirectServiceModel.OptionKey, Integer> optionCycles;
 		private final Set<DestinationSignArrivalKey> arrivalKeys;
 		private final int headerCycles;
+		private final int staticStateCycles;
 
 		private Prepared(RouteAssetKey staticKey, DestinationSignAssetSnapshot snapshot) {
 			this.staticKey = validateKey(staticKey);
@@ -247,6 +258,9 @@ public final class DestinationSignClientState {
 			labels = Collections.unmodifiableMap(immutableLabels);
 			if (headers.isEmpty()) throw new IllegalArgumentException("Destination sign atlas has no header sprites");
 			headerCycles = headers.size();
+			int maximumStateCycles = 1;
+			for (final List<DestinationSignAssetSnapshot.Sprite> stateSprites : labels.values()) maximumStateCycles = Math.max(maximumStateCycles, stateSprites.size());
+			staticStateCycles = maximumStateCycles;
 			arrivalKeys = DestinationSignRows.uniqueArrivalKeys(snapshot.getModel());
 		}
 
@@ -264,6 +278,13 @@ public final class DestinationSignClientState {
 		}
 		public DestinationSignAssetSnapshot.Sprite label(DestinationSignAssetSnapshot.SpriteKind kind, int phase) {
 			return select(labels.getOrDefault(Objects.requireNonNull(kind, "kind"), Collections.emptyList()), phase);
+		}
+		public DestinationSignAssetSnapshot.Sprite unavailable(int phase) {
+			try {
+				return label(DestinationSignAssetSnapshot.SpriteKind.valueOf("UNAVAILABLE"), phase);
+			} catch (IllegalArgumentException ignored) {
+				return label(DestinationSignAssetSnapshot.SpriteKind.NO_SERVICE, phase);
+			}
 		}
 
 		private static DestinationSignAssetSnapshot.Sprite select(List<DestinationSignAssetSnapshot.Sprite> sprites, int phase) {

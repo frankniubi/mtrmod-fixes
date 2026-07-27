@@ -28,6 +28,7 @@ import org.mtr.mod.data.DisplayCadence;
 import org.mtr.mod.data.IGui;
 import org.mtr.mod.route.DestinationSignAssetSnapshot;
 import org.mtr.mod.route.DestinationSignAtlasLayout;
+import org.mtr.mod.route.DestinationSignRouteStripLayout;
 import org.mtr.mod.route.RouteAssetKey;
 
 import java.util.ArrayList;
@@ -43,9 +44,6 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 	private static final Identifier BLACK = new Identifier(Init.MOD_ID, "textures/block/black.png");
 	private static final float BORDER = 0.035F;
 	private static final double RENDER_DISTANCE = 256;
-	private static final Map<String, List<String>> ETA_PIECE_CACHE = new LinkedHashMap<String, List<String>>(32, 0.75F, true) {
-		@Override protected boolean removeEldestEntry(Map.Entry<String, List<String>> eldest) { return size() > 128; }
-	};
 	private final CompositionCache compositionCache = new CompositionCache(DestinationSignClientState.MAX_ANCHORS);
 
 	public RenderDestinationSign(Argument dispatcher) {
@@ -100,7 +98,7 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 	static float readableUvEnd(float start, float end) { return start; }
 
 	public static Composition placeholder(RouteAssetKey key, int widthBlocks, int heightBlocks) {
-		return new Composition(key, widthBlocks, heightBlocks, true, 1, Collections.emptyList(), Collections.emptyList());
+		return new Composition(key, widthBlocks, heightBlocks, true, 1, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
 	}
 
 	public static boolean needsPlaceholder(boolean prepared, boolean atlasReady) {
@@ -124,39 +122,53 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 		final int phase = DisplayCadence.languagePhase(gameTick);
 		final List<AtlasQuad> atlasQuads = new ArrayList<>();
 		final List<DynamicQuad> dynamicQuads = new ArrayList<>();
-		atlasQuads.add(atlasQuad(checkedPrepared.header(phase), 0, 0, layout.getSurfaceWidth(), DestinationSignAtlasLayout.HEADER_HEIGHT, snapshot.getAtlasHeight(), checkedPrepared.getStaticKey().getVariant().getResolution()));
+		final List<SolidQuad> solidQuads = new ArrayList<>();
+		final int rowHeight = rowHeight(layout, snapshot);
+		final DestinationSignAssetSnapshot.Sprite header = checkedPrepared.header(phase);
+		final int headerHeight = header.getHeight();
+		final int resolution = checkedPrepared.getStaticKey().getVariant().getResolution();
+		atlasQuads.add(atlasQuad(header, 0, 0, layout.getSurfaceWidth(), headerHeight, snapshot.getAtlasHeight(), resolution));
 
 		if (allRows.isEmpty()) {
 			final DestinationSignAssetSnapshot.Sprite label = checkedPrepared.label(DestinationSignAssetSnapshot.SpriteKind.NO_DIRECT_SERVICE, phase);
-			atlasQuads.add(atlasQuad(label, 0, DestinationSignAtlasLayout.HEADER_HEIGHT, layout.getSurfaceWidth(), snapshot.getStyle().getRowHeight(), snapshot.getAtlasHeight(), checkedPrepared.getStaticKey().getVariant().getResolution()));
+			atlasQuads.add(atlasQuad(label, 0, headerHeight, layout.getSurfaceWidth(), rowHeight, snapshot.getAtlasHeight(), resolution));
 		} else {
 			final int start = page * capacity;
 			final int end = Math.min(allRows.size(), start + capacity);
-			final DestinationSignAtlasLayout.RowGeometry geometry = DestinationSignAtlasLayout.rowGeometry(snapshot.getStyle(), layout.getSurfaceWidth(), snapshot.getStyle().getRowHeight(), snapshot.isShowEta());
+			final DestinationSignRouteStripLayout.RowMetrics metrics = DestinationSignRouteStripLayout.rowMetrics(layout.getWidthBlocks(), rowHeight, snapshot.isShowEta());
 			for (int index = start; index < end; index++) {
 				final int visibleIndex = index - start;
-				final int rowY = DestinationSignAtlasLayout.HEADER_HEIGHT + visibleIndex * snapshot.getStyle().getRowHeight();
+				final int rowY = headerHeight + visibleIndex * rowHeight;
 				final DestinationSignRows.Row row = allRows.get(index);
-				atlasQuads.add(atlasQuad(checkedPrepared.row(row.getOption(), phase), 0, rowY, layout.getSurfaceWidth(), snapshot.getStyle().getRowHeight(), snapshot.getAtlasHeight(), checkedPrepared.getStaticKey().getVariant().getResolution()));
-				if (row.getResult() != null && row.getResult().isPresent()) {
-					final String destination = dynamicSegment(row.getResult().getDestination(), phase);
-					if (!destination.isEmpty()) dynamicQuads.add(new DynamicQuad(destination, geometry.getDestinationX(), rowY + geometry.getInset(),
-							geometry.getDestinationWidth(), snapshot.getStyle().getRowHeight() - geometry.getInset() * 2, HorizontalAlignment.LEFT));
+				atlasQuads.add(atlasQuad(checkedPrepared.row(row.getOption(), phase), 0, rowY, layout.getSurfaceWidth(), rowHeight, snapshot.getAtlasHeight(), resolution));
+				if (snapshot.getStyle() == org.mtr.mod.route.DestinationSignStyle.PLATFORM_GROUPS
+						&& (index == start || allRows.get(index - 1).getArrivalKey().getPlatformId() != row.getArrivalKey().getPlatformId())) {
+					solidQuads.add(new SolidQuad(0, rowY, metrics.getIdentityX() + metrics.getIdentityWidth(), 2,
+							metrics.getRouteStripX(), ARGB_LIGHT_GRAY, true));
 				}
 				if (snapshot.isShowEta()) {
 					if (row.getState() == DestinationSignArrivalState.LEAVING || row.getState() == DestinationSignArrivalState.NO_SERVICE) {
 						final DestinationSignAssetSnapshot.SpriteKind kind = row.getState() == DestinationSignArrivalState.LEAVING
 								? DestinationSignAssetSnapshot.SpriteKind.LEAVING : DestinationSignAssetSnapshot.SpriteKind.NO_SERVICE;
-						atlasQuads.add(atlasRegionQuad(checkedPrepared.label(kind, phase), geometry.getEtaX(), rowY,
-								geometry.getEtaWidth(), snapshot.getStyle().getRowHeight(),
-								geometry.getEtaX(), geometry.getEtaWidth(), layout.getSurfaceWidth(), snapshot.getAtlasHeight(), checkedPrepared.getStaticKey().getVariant().getResolution()));
+						atlasQuads.add(atlasRegionQuad(checkedPrepared.label(kind, phase), metrics.getEtaX(), rowY,
+								metrics.getEtaWidth(), rowHeight, metrics.getEtaX(), metrics.getEtaWidth(), layout.getSurfaceWidth(), snapshot.getAtlasHeight(), resolution));
+					} else if (row.getState() == DestinationSignArrivalState.LOADING || row.getState() == DestinationSignArrivalState.AMBIGUOUS) {
+						atlasQuads.add(atlasRegionQuad(checkedPrepared.unavailable(phase), metrics.getEtaX(), rowY,
+								metrics.getEtaWidth(), rowHeight, metrics.getEtaX(), metrics.getEtaWidth(), layout.getSurfaceWidth(), snapshot.getAtlasHeight(), resolution));
 					} else {
-						addEtaPieces(dynamicQuads, eta(row, serverNowMillis, phase), geometry, rowY, snapshot.getStyle().getRowHeight());
+						final String eta = eta(row, serverNowMillis, phase);
+						if (!eta.isEmpty()) dynamicQuads.add(new DynamicQuad(eta, metrics.getEtaX(), rowY + (rowHeight - metrics.getRowFontSize()) / 2,
+								metrics.getEtaWidth(), metrics.getRowFontSize(), metrics.getRowFontSize(), true, ARGB_BLACK, resolution, HorizontalAlignment.RIGHT));
 					}
 				}
 			}
 		}
-		return new Composition(checkedPrepared.getStaticKey(), layout.getWidthBlocks(), layout.getHeightBlocks(), false, 1, atlasQuads, dynamicQuads);
+		return new Composition(checkedPrepared.getStaticKey(), layout.getWidthBlocks(), layout.getHeightBlocks(), false, 1, atlasQuads, dynamicQuads, solidQuads);
+	}
+
+	private static int rowHeight(DestinationSignAtlasLayout.Layout layout, DestinationSignAssetSnapshot snapshot) {
+		for (final DestinationSignAtlasLayout.Page page : layout.getPages()) if (!page.getRows().isEmpty()) return page.getRows().get(0).getHeight();
+		return snapshot.getStyle().getRowHeight();
 	}
 
 	private void draw(Composition composition, Identifier atlas, Direction facing, GraphicsHolder graphicsHolder, int light) {
@@ -170,6 +182,7 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 		if (!composition.neutralPlaceholder) {
 			graphicsHolder.createVertexConsumer(MoreRenderLayers.getExterior(atlas));
 			for (final AtlasQuad quad : composition.atlasQuads) drawAtlasQuad(graphicsHolder, composition, quad, facing, light);
+			for (final SolidQuad quad : composition.solidQuads) drawSolidQuad(graphicsHolder, composition, quad, facing, light);
 			for (final DynamicQuad quad : composition.dynamicQuads) drawDynamicQuad(graphicsHolder, composition, quad, facing, light);
 		}
 
@@ -192,14 +205,13 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 	}
 
 	private static void drawDynamicQuad(GraphicsHolder graphicsHolder, Composition composition, DynamicQuad quad, Direction facing, int light) {
-		final DynamicTextureCache.DynamicResource resource = DynamicTextureCache.instance.getSignText(quad.text, quad.alignment, 0, 0, ARGB_BLACK);
+		final DynamicTextureCache.DynamicResource resource = DynamicTextureCache.instance.getDestinationSignText(
+				quad.text, quad.fontSize, quad.semibold, quad.color, quad.resolution, quad.logicalWidth);
 		graphicsHolder.createVertexConsumer(MoreRenderLayers.getExterior(resource.identifier));
 		final float scale = 1F / DestinationSignAtlasLayout.LOGICAL_PIXELS_PER_BLOCK;
-		final float regionWidth = quad.width * scale;
-		final float regionHeight = quad.height * scale;
-		final float textureAspect = resource.height <= 0 ? 1 : (float) resource.width / resource.height;
-		final float drawHeight = Math.min(regionHeight, regionWidth / Math.max(textureAspect, 0.01F));
-		final float drawWidth = Math.min(regionWidth, drawHeight * textureAspect);
+		final float drawHeight = quad.logicalHeight * scale;
+		final float drawWidth = Math.min(quad.logicalWidth, (float) resource.width / (1 << quad.resolution)) * scale;
+		final float regionWidth = quad.logicalWidth * scale;
 		final float x;
 		switch (quad.alignment) {
 			case RIGHT: x = (quad.x + quad.width) * scale - drawWidth; break;
@@ -208,9 +220,18 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 			default: x = quad.x * scale; break;
 		}
 		final float left = composition.widthBlocks - x - drawWidth;
-		final float bottom = composition.heightBlocks - (quad.y + quad.height) * scale + (regionHeight - drawHeight) / 2;
+		final float bottom = composition.heightBlocks - (quad.y + quad.logicalHeight) * scale;
 		IDrawing.drawTexture(graphicsHolder, left, bottom, -SMALL_OFFSET * 2, left + drawWidth, bottom + drawHeight, -SMALL_OFFSET * 2,
 				readableUvStart(0, 1), readableUvStart(0, 1), readableUvEnd(0, 1), readableUvEnd(0, 1), facing.getOpposite(), -1, light);
+	}
+
+	private static void drawSolidQuad(GraphicsHolder graphicsHolder, Composition composition, SolidQuad quad, Direction facing, int light) {
+		graphicsHolder.createVertexConsumer(MoreRenderLayers.getExterior(WHITE));
+		final float scale = 1F / DestinationSignAtlasLayout.LOGICAL_PIXELS_PER_BLOCK;
+		final float left = composition.widthBlocks - (quad.x + quad.width) * scale;
+		final float bottom = composition.heightBlocks - (quad.y + quad.height) * scale;
+		IDrawing.drawTexture(graphicsHolder, left, bottom, -SMALL_OFFSET * 2, left + quad.width * scale, bottom + quad.height * scale,
+				-SMALL_OFFSET * 2, facing.getOpposite(), quad.color, light);
 	}
 
 	private static AtlasQuad atlasQuad(DestinationSignAssetSnapshot.Sprite sprite, int x, int y, int width, int height, int atlasHeight, int resolution) {
@@ -229,49 +250,6 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 				(float) DestinationSignAtlasLayout.scaledEdge(sprite.getY() + sprite.getHeight(), resolution) / scaledHeight);
 	}
 
-	private static void addEtaPieces(List<DynamicQuad> dynamicQuads, String eta, DestinationSignAtlasLayout.RowGeometry geometry, int rowY, int rowHeight) {
-		final List<String> pieces = etaPieces(eta);
-		if (pieces.isEmpty()) return;
-		int totalWeight = 0;
-		for (final String piece : pieces) totalWeight += etaPieceWeight(piece);
-		int x = geometry.getEtaX();
-		int consumedWeight = 0;
-		for (int index = 0; index < pieces.size(); index++) {
-			consumedWeight += etaPieceWeight(pieces.get(index));
-			final int right = geometry.getEtaX() + geometry.getEtaWidth() * consumedWeight / totalWeight;
-			dynamicQuads.add(new DynamicQuad(pieces.get(index), x, rowY + geometry.getInset(), Math.max(1, right - x),
-					rowHeight - geometry.getInset() * 2, HorizontalAlignment.RIGHT));
-			x = right;
-		}
-	}
-
-	static int etaPieceWeight(String piece) {
-		return Math.max(1, Objects.requireNonNull(piece, "piece").codePointCount(0, piece.length()));
-	}
-
-	static synchronized List<String> etaPieces(String eta) {
-		if (eta == null || eta.isEmpty()) return Collections.emptyList();
-		final List<String> cached = ETA_PIECE_CACHE.get(eta);
-		if (cached != null) return cached;
-		final List<String> result = new ArrayList<>();
-		final StringBuilder nonDigits = new StringBuilder();
-		eta.codePoints().forEach(codePoint -> {
-			if (Character.isDigit(codePoint)) {
-				if (nonDigits.length() > 0) {
-					result.add(nonDigits.toString());
-					nonDigits.setLength(0);
-				}
-				result.add(new String(Character.toChars(codePoint)));
-			} else {
-				nonDigits.appendCodePoint(codePoint);
-			}
-		});
-		if (nonDigits.length() > 0) result.add(nonDigits.toString());
-		final List<String> bounded = result.size() <= 8 ? List.copyOf(result) : List.copyOf(result.subList(0, 8));
-		ETA_PIECE_CACHE.put(eta, bounded);
-		return bounded;
-	}
-
 	private static String eta(DestinationSignRows.Row row, long serverNowMillis, int phase) {
 		switch (row.getState()) {
 			case LOADING:
@@ -280,13 +258,13 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 			case APPROACHING:
 			default:
 				if (row.getResult() == null || !row.getResult().isPresent()) return "--";
-				final String destination = dynamicSegment(row.getResult().getDestination(), phase);
+				final String destination = segment(row.getOption().getDestination().getStationDisplayName(), phase);
 				return ArrivalText.format((row.getResult().getArrivalMillis() - serverNowMillis) / 1_000, row.getResult().isRealtime(), IGui.isCjk(destination));
 		}
 	}
 
-	private static String dynamicSegment(String value, int phase) {
-		final List<String> segments = DestinationSignDynamicTextCache.INSTANCE.prepare(value);
+	private static String segment(String value, int phase) {
+		final List<String> segments = DestinationSignDynamicTextCache.segments(value);
 		return segments.isEmpty() ? "" : segments.get(Math.floorMod(phase, segments.size()));
 	}
 
@@ -398,8 +376,9 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 		private final int atlasRequestCount;
 		private final List<AtlasQuad> atlasQuads;
 		private final List<DynamicQuad> dynamicQuads;
+		private final List<SolidQuad> solidQuads;
 		private Composition(RouteAssetKey staticKey, int widthBlocks, int heightBlocks, boolean neutralPlaceholder, int atlasRequestCount,
-				List<AtlasQuad> atlasQuads, List<DynamicQuad> dynamicQuads) {
+				List<AtlasQuad> atlasQuads, List<DynamicQuad> dynamicQuads, List<SolidQuad> solidQuads) {
 			this.staticKey = Objects.requireNonNull(staticKey, "staticKey");
 			if (widthBlocks < DestinationSignAtlasLayout.MIN_WIDTH_BLOCKS || widthBlocks > DestinationSignAtlasLayout.MAX_WIDTH_BLOCKS
 					|| heightBlocks < DestinationSignAtlasLayout.MIN_HEIGHT_BLOCKS || heightBlocks > DestinationSignAtlasLayout.MAX_HEIGHT_BLOCKS
@@ -410,6 +389,7 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 			this.atlasRequestCount = atlasRequestCount;
 			this.atlasQuads = List.copyOf(atlasQuads);
 			this.dynamicQuads = List.copyOf(dynamicQuads);
+			this.solidQuads = List.copyOf(solidQuads);
 		}
 		public RouteAssetKey getStaticKey() { return staticKey; }
 		public int getWidthBlocks() { return widthBlocks; }
@@ -418,6 +398,7 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 		public int getAtlasRequestCount() { return atlasRequestCount; }
 		public List<AtlasQuad> getAtlasQuads() { return atlasQuads; }
 		public List<DynamicQuad> getDynamicQuads() { return dynamicQuads; }
+		public List<SolidQuad> getSolidQuads() { return solidQuads; }
 	}
 
 	public static final class AtlasQuad {
@@ -451,18 +432,50 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 		private final int width;
 		private final int height;
 		private final HorizontalAlignment alignment;
-		private DynamicQuad(String text, int x, int y, int width, int height, HorizontalAlignment alignment) {
+		private final int logicalWidth;
+		private final int logicalHeight;
+		private final int fontSize;
+		private final boolean semibold;
+		private final int color;
+		private final int resolution;
+		private DynamicQuad(String text, int x, int y, int width, int height, int fontSize, boolean semibold, int color, int resolution, HorizontalAlignment alignment) {
 			this.text = text; this.x = x; this.y = y; this.width = width; this.height = height; this.alignment = alignment;
+			this.logicalWidth = width; this.logicalHeight = height; this.fontSize = fontSize; this.semibold = semibold; this.color = color; this.resolution = resolution;
 		}
 		public String getText() { return text; }
 		public int getX() { return x; }
 		public int getY() { return y; }
 		public int getWidth() { return width; }
 		public int getHeight() { return height; }
+		public int getLogicalWidth() { return logicalWidth; }
+		public int getLogicalHeight() { return logicalHeight; }
+		public int getFontSize() { return fontSize; }
+		public boolean isSemibold() { return semibold; }
 		@Override public boolean equals(Object object) {
 			return this == object || object instanceof DynamicQuad && text.equals(((DynamicQuad) object).text) && x == ((DynamicQuad) object).x
-					&& y == ((DynamicQuad) object).y && width == ((DynamicQuad) object).width && height == ((DynamicQuad) object).height && alignment == ((DynamicQuad) object).alignment;
+					&& y == ((DynamicQuad) object).y && width == ((DynamicQuad) object).width && height == ((DynamicQuad) object).height
+					&& fontSize == ((DynamicQuad) object).fontSize && semibold == ((DynamicQuad) object).semibold && color == ((DynamicQuad) object).color
+					&& resolution == ((DynamicQuad) object).resolution && alignment == ((DynamicQuad) object).alignment;
 		}
-		@Override public int hashCode() { return Objects.hash(text, x, y, width, height, alignment); }
+		@Override public int hashCode() { return Objects.hash(text, x, y, width, height, fontSize, semibold, color, resolution, alignment); }
+	}
+
+	public static final class SolidQuad {
+		private final int x;
+		private final int y;
+		private final int width;
+		private final int height;
+		private final int routeStripX;
+		private final int color;
+		private final boolean groupDivider;
+		private SolidQuad(int x, int y, int width, int height, int routeStripX, int color, boolean groupDivider) {
+			this.x = x; this.y = y; this.width = width; this.height = height; this.routeStripX = routeStripX; this.color = color; this.groupDivider = groupDivider;
+		}
+		public int getX() { return x; }
+		public int getY() { return y; }
+		public int getWidth() { return width; }
+		public int getHeight() { return height; }
+		public int getRouteStripX() { return routeStripX; }
+		public boolean isGroupDivider() { return groupDivider; }
 	}
 }
