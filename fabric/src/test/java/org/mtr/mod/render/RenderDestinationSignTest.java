@@ -18,6 +18,7 @@ import org.mtr.mod.route.DestinationSignRouteStripLayout;
 import org.mtr.mod.route.RouteAssetCanonicalKeyFactory;
 import org.mtr.mod.route.RouteAssetKey;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -75,7 +76,7 @@ public final class RenderDestinationSignTest {
 		final RenderDestinationSign.AtlasQuad leavingLabel = leaving.getAtlasQuads().stream()
 				.filter(quad -> quad.getSprite().getKind() == DestinationSignAssetSnapshot.SpriteKind.LEAVING).findFirst().orElseThrow();
 		final DestinationSignRouteStripLayout.RowMetrics geometry = DestinationSignRouteStripLayout.rowMetrics(3,
-				DestinationSignStyle.ARRIVAL_ORDER.getRowHeight(), true);
+				fixture.snapshot.getLayout().getRowHeight(), true);
 		final int scaledWidth = DestinationSignAtlasLayout.scaledSize(fixture.snapshot.getAtlasWidth(), fixture.key.getVariant().getResolution());
 		Assertions.assertEquals(geometry.getEtaX(), leavingLabel.getX());
 		Assertions.assertEquals((float) DestinationSignAtlasLayout.scaledEdge(geometry.getEtaX(), fixture.key.getVariant().getResolution()) / scaledWidth, leavingLabel.getU1());
@@ -127,7 +128,7 @@ public final class RenderDestinationSignTest {
 		Assertions.assertSame(first, cache.resolve(1, fixture.prepared, rows, 1_000_000, 59));
 		Assertions.assertNotSame(first, cache.resolve(1, fixture.prepared, rows, 1_000_000, 60));
 
-		final Fixture paged = fixture(DestinationSignStyle.ARRIVAL_ORDER, 2, 1, false);
+		final Fixture paged = fixture(DestinationSignStyle.ARRIVAL_ORDER, 2, 1, false, 4);
 		final DestinationSignClientState.RenderRows pagedRows = renderRows(paged, Map.of(), 0);
 		Assertions.assertNotEquals(DisplayCadence.page(119, pagedRows.getLanguageCyclesByPage()),
 				DisplayCadence.page(120, pagedRows.getLanguageCyclesByPage()));
@@ -225,7 +226,7 @@ public final class RenderDestinationSignTest {
 		final DestinationSignClientState.RenderRows renderRows = renderRows(fixture, Map.of(), 0);
 		for (final long tick : List.of(0L, 120L)) {
 			final RenderDestinationSign.Composition composition = RenderDestinationSign.compose(fixture.prepared, renderRows, 0, tick);
-			Assertions.assertEquals(1, composition.getAtlasQuads().stream()
+			Assertions.assertEquals(Math.min(fixture.snapshot.getLayout().getRowsPerPage(), renderRows.getRows().getRows().size()), composition.getAtlasQuads().stream()
 					.filter(quad -> quad.getSprite().getKind() == DestinationSignAssetSnapshot.SpriteKind.ROW).count());
 			final RenderDestinationSign.SolidQuad divider = composition.getSolidQuads().stream()
 					.filter(RenderDestinationSign.SolidQuad::isGroupDivider).findFirst().orElseThrow();
@@ -233,6 +234,21 @@ public final class RenderDestinationSignTest {
 			Assertions.assertEquals(2, divider.getHeight());
 			Assertions.assertTrue(divider.getX() + divider.getWidth() <= divider.getRouteStripX());
 		}
+	}
+
+	@Test
+	public void loadingAndNoServiceUseDistinctStaticStateSprites() {
+		final Fixture fixture = fixture(DestinationSignStyle.ARRIVAL_ORDER, 3, 1, true);
+		final RenderDestinationSign.Composition loading = RenderDestinationSign.compose(fixture.prepared,
+				DestinationSignRows.resolve(fixture.snapshot.getModel(), Map.of(), false, 0, true, DestinationSignStyle.ARRIVAL_ORDER), 0, 0);
+		final RenderDestinationSign.Composition noService = RenderDestinationSign.compose(fixture.prepared,
+				DestinationSignRows.resolve(fixture.snapshot.getModel(), Map.of(), true, 0, true, DestinationSignStyle.ARRIVAL_ORDER), 0, 0);
+		Assertions.assertTrue(loading.getAtlasQuads().stream()
+				.anyMatch(quad -> quad.getSprite().getKind() == DestinationSignAssetSnapshot.SpriteKind.UNAVAILABLE));
+		Assertions.assertTrue(loading.getAtlasQuads().stream()
+				.noneMatch(quad -> quad.getSprite().getKind() == DestinationSignAssetSnapshot.SpriteKind.NO_SERVICE));
+		Assertions.assertTrue(noService.getAtlasQuads().stream()
+				.anyMatch(quad -> quad.getSprite().getKind() == DestinationSignAssetSnapshot.SpriteKind.NO_SERVICE));
 	}
 
 	private static Map<DestinationSignArrivalKey, DestinationSignArrivalResult> arrivals(DestinationSignDirectServiceModel.Model model, long arrival, String destination) {
@@ -250,10 +266,18 @@ public final class RenderDestinationSignTest {
 	}
 
 	private static Fixture fixture(DestinationSignStyle style, int width, int height, boolean showEta) {
-		final DestinationSignTopology topology = new DestinationSignTopology(List.of(
-				new DestinationSignTopology.ServiceRoute(-1, 0, "IG5|Intercity 5", 0x008A72, List.of(stop(-10, -100, "U1"), stop(-20, -200, "D"))),
-				new DestinationSignTopology.ServiceRoute(-2, 1, "OG14|Orbital 14", 0x493C7C, List.of(stop(-11, -100, "D"), stop(-21, -200, "D")))
-		), List.of(new DestinationSignTopology.StationZone(-100, "Source|Source EN"), new DestinationSignTopology.StationZone(-200, "Target|Target EN")));
+		return fixture(style, width, height, showEta, 2);
+	}
+
+	private static Fixture fixture(DestinationSignStyle style, int width, int height, boolean showEta, int routeCount) {
+		final List<DestinationSignTopology.ServiceRoute> routes = new ArrayList<>();
+		for (int index = 0; index < routeCount; index++) {
+			final String displayName = index == 0 ? "IG5|Intercity 5" : index == 1 ? "OG14|Orbital 14" : "R" + index + "|Route " + index;
+			routes.add(new DestinationSignTopology.ServiceRoute(-1 - index, index, displayName, index == 1 ? 0x493C7C : 0x008A72,
+					List.of(stop(-10 - index, -100, index == 0 ? "U1" : "D"), stop(-20 - index, -200, "D"))));
+		}
+		final DestinationSignTopology topology = new DestinationSignTopology(routes,
+				List.of(new DestinationSignTopology.StationZone(-100, "Source|Source EN"), new DestinationSignTopology.StationZone(-200, "Target|Target EN")));
 		final DestinationSignAssetSnapshot snapshot = DestinationSignAssetSnapshot.create(topology, -100, -200, style, width, height, showEta);
 		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.destinationSign("minecraft/overworld", -100, -200, 1, style, width, height, showEta);
 		final DestinationSignClientState state = new DestinationSignClientState(() -> 0, Runnable::run, Runnable::run, ignored -> Optional.of(snapshot));

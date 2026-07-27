@@ -1,7 +1,6 @@
 package org.mtr.mod.data;
 
 import org.mtr.mod.InitClient;
-import org.mtr.mod.client.DestinationSignDynamicTextCache;
 import org.mtr.mod.packet.PacketFetchDestinationSignArrivals;
 
 import java.util.ArrayList;
@@ -96,7 +95,6 @@ public final class DestinationSignArrivalsClientCache {
 			if (!pending.keys.contains(key)) return;
 			results.put(key, result);
 			authoritativeKeys.add(key);
-			if (result.isPresent()) DestinationSignDynamicTextCache.INSTANCE.prepare(result.getDestination());
 		});
 		generation++;
 	}

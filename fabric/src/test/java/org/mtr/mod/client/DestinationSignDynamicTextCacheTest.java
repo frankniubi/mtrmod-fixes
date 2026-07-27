@@ -60,4 +60,12 @@ public final class DestinationSignDynamicTextCacheTest {
 		Assertions.assertEquals(List.of("Physical", "Terminal"), DestinationSignDynamicTextCache.INSTANCE.prepare("Physical|Terminal"));
 		Assertions.assertTrue(DestinationSignDynamicTextCache.INSTANCE.get("Physical|Terminal").isEmpty());
 	}
+
+	@Test
+	public void etaTextureCanvasKeepsTheRequestedEmHeight() {
+		Assertions.assertEquals(13, DynamicTextureCache.destinationSignTextCanvasHeight(13, 0));
+		Assertions.assertEquals(26, DynamicTextureCache.destinationSignTextCanvasHeight(13, 1));
+		Assertions.assertEquals(104, DynamicTextureCache.destinationSignTextCanvasHeight(13, 3));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DynamicTextureCache.destinationSignTextCanvasHeight(0, 1));
+	}
 }

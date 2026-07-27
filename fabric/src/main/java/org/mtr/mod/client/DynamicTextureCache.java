@@ -254,19 +254,28 @@ public class DynamicTextureCache implements IGui {
 			}
 		}
 		final int width = Math.max(1, maxX - minX + 1);
-		final int height = Math.max(1, maxY - minY + 1);
+		final int height = destinationSignTextCanvasHeight(request.getFontSize(), request.getResolution());
 		final NativeImage image = new NativeImage(NativeImageFormat.getAbgrMapped(), width, height, false);
 		final int sourceAlpha = request.getColor() >>> 24;
 		final int abgr = request.getColor() & 0xFF00FF00 | (request.getColor() & 0xFF) << 16 | (request.getColor() >>> 16 & 0xFF);
 		if (maxX >= minX && maxY >= minY) {
+			final int glyphHeight = maxY - minY + 1;
+			final int destinationTop = (height - glyphHeight) / 2;
 			for (int y = minY; y <= maxY; y++) {
 				for (int x = minX; x <= maxX; x++) {
+					final int destinationY = destinationTop + y - minY;
+					if (destinationY < 0 || destinationY >= height) continue;
 					final int alpha = (pixels[y * dimensions[0] + x] & 0xFF) * sourceAlpha / 255;
-					image.setPixelColor(x - minX, y - minY, alpha << 24 | abgr & 0xFFFFFF);
+					image.setPixelColor(x - minX, destinationY, alpha << 24 | abgr & 0xFFFFFF);
 				}
 			}
 		}
 		return image;
+	}
+
+	static int destinationSignTextCanvasHeight(int fontSize, int resolution) {
+		if (fontSize <= 0 || resolution < 0 || resolution > 3) throw new IllegalArgumentException("Invalid destination sign text canvas");
+		return Math.multiplyExact(fontSize, 1 << resolution);
 	}
 
 	private int measureDestinationSignText(String value, int physicalFontSize) {

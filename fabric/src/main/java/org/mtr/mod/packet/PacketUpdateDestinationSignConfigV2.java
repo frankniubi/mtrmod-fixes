@@ -199,7 +199,7 @@ public final class PacketUpdateDestinationSignConfigV2 extends PacketHandler {
 						.forEach(destination -> reachableDestinationIds.add(destination.getId()));
 				if (!reachableDestinationIds.containsAll(destinationStationIds)) return Validation.failure(DestinationSignConfigResult.NO_DIRECT_SERVICE);
 				final DestinationSignAssetSnapshot snapshot = DestinationSignAssetSnapshot.create(topology, sourceStationId, destinationStationIds,
-						customHeader, config.get().getStyle(), width, height, showEta);
+						customHeader, config.get().getStyle(), width, height, showEta, routesPerBlockHeight);
 				return snapshot.getModel().getOptions().isEmpty() ? Validation.failure(DestinationSignConfigResult.NO_DIRECT_SERVICE) : Validation.success(config.get());
 			} catch (IllegalArgumentException exception) {
 				return Validation.failure(DestinationSignConfigResult.INVALID_LAYOUT);

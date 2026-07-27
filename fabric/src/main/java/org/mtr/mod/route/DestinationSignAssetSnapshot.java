@@ -16,6 +16,7 @@ public final class DestinationSignAssetSnapshot {
 	public static final String CURRENT_TEXT = "\u672c\u7ad9|HERE";
 	public static final String NO_DIRECT_SERVICE_TEXT = "\u5f53\u524d\u65e0\u76f4\u8fbe\u670d\u52a1|No direct service";
 	public static final String NO_SERVICE_TEXT = "\u6682\u65e0\u73ed\u6b21|No service";
+	public static final String UNAVAILABLE_TEXT = "--|--";
 
 	private final long sourceStationId;
 	private final String sourceStationName;
@@ -78,7 +79,7 @@ public final class DestinationSignAssetSnapshot {
 				y = Math.addExact(y, layout.getRowHeight());
 			}
 		}
-		for (final SpriteKind label : List.of(SpriteKind.LEAVING, SpriteKind.NO_DIRECT_SERVICE, SpriteKind.NO_SERVICE)) {
+		for (final SpriteKind label : List.of(SpriteKind.LEAVING, SpriteKind.NO_DIRECT_SERVICE, SpriteKind.NO_SERVICE, SpriteKind.UNAVAILABLE)) {
 			for (int phase = 0; phase < 2; phase++) {
 				mutableSprites.add(new Sprite(label, null, null, phase, y, layout.getRowHeight()));
 				y = Math.addExact(y, layout.getRowHeight());
@@ -186,7 +187,7 @@ public final class DestinationSignAssetSnapshot {
 	public int getAtlasWidth() { return atlasWidth; }
 	public int getAtlasHeight() { return atlasHeight; }
 
-	public enum SpriteKind { HEADER, ROW, LEAVING, NO_DIRECT_SERVICE, NO_SERVICE }
+	public enum SpriteKind { HEADER, ROW, LEAVING, NO_DIRECT_SERVICE, NO_SERVICE, UNAVAILABLE }
 
 	public static final class Sprite {
 		private final SpriteKind kind;

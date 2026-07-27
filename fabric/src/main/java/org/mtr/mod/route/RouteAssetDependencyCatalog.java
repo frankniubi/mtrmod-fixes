@@ -278,6 +278,7 @@ public final class RouteAssetDependencyCatalog {
 		writeString(canonical, DestinationSignAssetSnapshot.CURRENT_TEXT);
 		writeString(canonical, DestinationSignAssetSnapshot.NO_DIRECT_SERVICE_TEXT);
 		writeString(canonical, DestinationSignAssetSnapshot.NO_SERVICE_TEXT);
+		writeString(canonical, DestinationSignAssetSnapshot.UNAVAILABLE_TEXT);
 		canonical.writeInt(snapshot.getRouteStrips().size());
 		for (final DestinationSignAssetSnapshot.RouteStripRecord record : snapshot.getRouteStrips()) {
 			final DestinationSignDirectServiceModel.OptionKey key = record.getOptionKey();

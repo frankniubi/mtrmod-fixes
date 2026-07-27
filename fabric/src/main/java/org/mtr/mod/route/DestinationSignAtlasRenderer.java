@@ -28,6 +28,7 @@ public final class DestinationSignAtlasRenderer {
 				case LEAVING: drawStateLabel(image, checkedSnapshot, checkedText, DestinationSignAssetSnapshot.LEAVING_TEXT, sprite, 0xFFB42318, resolution); break;
 				case NO_DIRECT_SERVICE: drawStateLabel(image, checkedSnapshot, checkedText, DestinationSignAssetSnapshot.NO_DIRECT_SERVICE_TEXT, sprite, 0xFF3F464D, resolution); break;
 				case NO_SERVICE: drawStateLabel(image, checkedSnapshot, checkedText, DestinationSignAssetSnapshot.NO_SERVICE_TEXT, sprite, 0xFF3F464D, resolution); break;
+				case UNAVAILABLE: drawStateLabel(image, checkedSnapshot, checkedText, DestinationSignAssetSnapshot.UNAVAILABLE_TEXT, sprite, 0xFF3F464D, resolution); break;
 			}
 		}
 		return image;

@@ -152,14 +152,15 @@ public final class DestinationSignEndToEndTest {
 				prepared, replacement, dwellNow, DisplayCadence.SWITCH_LANGUAGE_TICKS);
 		Assertions.assertEquals(0, headerSegment(replacementRender));
 		Assertions.assertEquals(1, headerSegment(englishRender));
-		Assertions.assertTrue(dynamicTexts(replacementRender).contains("\u6811\u56ED\u5317"));
-		Assertions.assertTrue(dynamicTexts(englishRender).contains("North Treetrunk"));
+		Assertions.assertTrue(dynamicTexts(replacementRender).stream()
+				.noneMatch(text -> text.contains("\u6811\u56ED\u5317") || text.contains("North Treetrunk")));
+		Assertions.assertTrue(dynamicTexts(englishRender).stream().allMatch(text -> text.contains("min")));
 		assertStaticInvariants(initial, topology, englishRender, cache, transport, initialHttpRequests);
 
 		final DestinationSignClientState.RenderRows renderRows = DestinationSignClientState.buildRenderRows(prepared, replacement);
-		Assertions.assertEquals(4, prepared.getLayout().getRowsPerPage());
+		Assertions.assertEquals(6, prepared.getLayout().getRowsPerPage());
 		Assertions.assertEquals(4, model.getOptions().size());
-		Assertions.assertEquals(1, prepared.getLayout().getPages().size(), "the four real services exactly fill one 3x2 Arrival Order page");
+		Assertions.assertEquals(1, prepared.getLayout().getPages().size(), "the four real services fit one 3x2 Arrival Order page");
 		Assertions.assertEquals(List.of(2), renderRows.getLanguageCyclesByPage());
 		final long pageBoundaryTick = Math.max(DisplayCadence.SWITCH_PAGE_TICKS,
 				(long) DisplayCadence.SWITCH_LANGUAGE_TICKS * renderRows.getLanguageCyclesByPage().get(0));

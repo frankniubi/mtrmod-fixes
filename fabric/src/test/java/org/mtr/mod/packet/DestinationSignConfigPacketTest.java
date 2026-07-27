@@ -156,6 +156,17 @@ public final class DestinationSignConfigPacketTest {
 	}
 
 	@Test
+	public void v2ValidationUsesTheRequestedDensityForAtlasBounds() {
+		final DestinationSignTopology manyRoutes = topology(60);
+		final PacketUpdateDestinationSignConfigV2.Payload sparse = new PacketUpdateDestinationSignConfigV2.Payload(-10, Set.of(-20L), "", 3, 1, 2,
+				DestinationSignStyle.ARRIVAL_ORDER.ordinal(), true);
+		final PacketUpdateDestinationSignConfigV2.Payload dense = new PacketUpdateDestinationSignConfigV2.Payload(-10, Set.of(-20L), "", 3, 1, 4,
+				DestinationSignStyle.ARRIVAL_ORDER.ordinal(), true);
+		Assertions.assertEquals(DestinationSignConfigResult.INVALID_LAYOUT, sparse.validateAgainst(-10, manyRoutes).getResult());
+		Assertions.assertEquals(DestinationSignConfigResult.SUCCESS, dense.validateAgainst(-10, manyRoutes).getResult());
+	}
+
+	@Test
 	public void v2TopologyResolutionAcknowledgesEveryDeterministicFailurePath() throws Exception {
 		final String request = Files.readString(project("fabric/src/main/java/org/mtr/mod/packet/PacketUpdateDestinationSignConfigV2.java"), StandardCharsets.UTF_8);
 		final String topology = Files.readString(project("fabric/src/main/java/org/mtr/mod/route/DestinationSignServerTopology.java"), StandardCharsets.UTF_8);
@@ -202,7 +213,7 @@ public final class DestinationSignConfigPacketTest {
 	private static DestinationSignTopology topology(int routeCount) {
 		final List<DestinationSignTopology.ServiceRoute> routes = new ArrayList<>();
 		for (int index = 0; index < routeCount; index++) {
-			routes.add(new DestinationSignTopology.ServiceRoute(-100 - index, index, "R" + index, 0x14755E + index, List.of(
+			routes.add(new DestinationSignTopology.ServiceRoute(-100 - index, index, "R" + index + "|Route " + index, 0x14755E + index, List.of(
 					new DestinationSignTopology.StopOccurrence(-1000 - index, -10, "U" + index, "Source", ""),
 					new DestinationSignTopology.StopOccurrence(-2000 - index, -20, "D" + index, "Target", ""))));
 		}

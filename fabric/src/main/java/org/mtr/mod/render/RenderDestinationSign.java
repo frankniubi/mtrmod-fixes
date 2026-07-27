@@ -123,7 +123,7 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 		final List<AtlasQuad> atlasQuads = new ArrayList<>();
 		final List<DynamicQuad> dynamicQuads = new ArrayList<>();
 		final List<SolidQuad> solidQuads = new ArrayList<>();
-		final int rowHeight = rowHeight(layout, snapshot);
+		final int rowHeight = layout.getRowHeight();
 		final DestinationSignAssetSnapshot.Sprite header = checkedPrepared.header(phase);
 		final int headerHeight = header.getHeight();
 		final int resolution = checkedPrepared.getStaticKey().getVariant().getResolution();
@@ -164,11 +164,6 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 			}
 		}
 		return new Composition(checkedPrepared.getStaticKey(), layout.getWidthBlocks(), layout.getHeightBlocks(), false, 1, atlasQuads, dynamicQuads, solidQuads);
-	}
-
-	private static int rowHeight(DestinationSignAtlasLayout.Layout layout, DestinationSignAssetSnapshot snapshot) {
-		for (final DestinationSignAtlasLayout.Page page : layout.getPages()) if (!page.getRows().isEmpty()) return page.getRows().get(0).getHeight();
-		return snapshot.getStyle().getRowHeight();
 	}
 
 	private void draw(Composition composition, Identifier atlas, Direction facing, GraphicsHolder graphicsHolder, int light) {
