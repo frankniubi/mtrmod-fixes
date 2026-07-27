@@ -90,6 +90,26 @@ public final class RouteAssetCanonicalKeyFactoryTest {
 		Assertions.assertThrows(IllegalArgumentException.class, () -> arrow(false, false, RouteAssetTextRasterizer.Alignment.CENTER, true, Float.NaN, 2, 0, 0, 0));
 	}
 
+	@Test
+	public void destinationDensityIsMandatoryCanonicalAndBounded() {
+		final RouteAssetKey defaulted = RouteAssetCanonicalKeyFactory.destinationSign("minecraft/overworld", 10, 30, 1,
+				DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		final RouteAssetKey dense = RouteAssetCanonicalKeyFactory.destinationSign("minecraft/overworld", 10, 30, 1,
+				DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true, 4);
+		Assertions.assertEquals("3", defaulted.getVariant().getParameters().get("rpb"));
+		Assertions.assertEquals("4", dense.getVariant().getParameters().get("rpb"));
+		Assertions.assertNotEquals(defaulted, dense);
+		Assertions.assertEquals(4, RouteAssetCanonicalKeyFactory.decodeDestinationSign(dense).routesPerBlockHeight);
+		Assertions.assertNull(RouteAssetCanonicalKeyFactory.decodeDestinationSign(RouteAssetKey.parse(
+				"minecraft/overworld|DESTINATION_SIGN_ATLAS|10|1|MULTI|d=30,eta=1,h=2,hdr=-,s=ARRIVAL_ORDER,v=1,w=3")));
+		Assertions.assertNull(RouteAssetCanonicalKeyFactory.decodeDestinationSign(RouteAssetKey.parse(
+				"minecraft/overworld|DESTINATION_SIGN_ATLAS|10|1|MULTI|d=30,eta=1,h=2,hdr=-,rpb=03,s=ARRIVAL_ORDER,v=1,w=3")));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> RouteAssetCanonicalKeyFactory.destinationSign(
+				"minecraft/overworld", 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true, 1));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> RouteAssetCanonicalKeyFactory.destinationSign(
+				"minecraft/overworld", 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true, 5));
+	}
+
 	private static RouteAssetKey arrow(boolean left, boolean right, RouteAssetTextRasterizer.Alignment alignment, boolean show, float padding, float aspect, int background, int text, int transparent) {
 		return RouteAssetCanonicalKeyFactory.directionArrow("minecraft/overworld", 7, 2, "NORMAL", left, right, alignment, show, padding, aspect, background, text, transparent);
 	}

@@ -26,6 +26,7 @@ public final class DestinationSignConfig {
 	private static final String KEY_CUSTOM_HEADER = "custom_header";
 	private static final String KEY_WIDTH = "width";
 	private static final String KEY_HEIGHT = "height";
+	private static final String KEY_ROUTES_PER_BLOCK_HEIGHT = "routes_per_block_height";
 	private static final String KEY_STYLE = "style";
 	private static final String KEY_SHOW_ETA = "show_eta";
 
@@ -34,14 +35,19 @@ public final class DestinationSignConfig {
 	private final String customHeader;
 	private final int width;
 	private final int height;
+	private final int routesPerBlockHeight;
 	private final DestinationSignStyle style;
 	private final boolean showEta;
 
-	private DestinationSignConfig(long sourceStationId, Set<Long> destinationStationIds, int width, int height,
+	private DestinationSignConfig(long sourceStationId, Set<Long> destinationStationIds, int width, int height, int routesPerBlockHeight,
 			DestinationSignStyle style, boolean showEta, String customHeader) {
 		this.style = Objects.requireNonNull(style, "style");
 		DestinationSignFootprint.validateDimensions(width, height);
 		if (width < style.getMinimumWidthBlocks()) throw new IllegalArgumentException("Destination sign is too narrow for its style");
+		if (routesPerBlockHeight < RouteAssetProtocol.MIN_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT
+				|| routesPerBlockHeight > RouteAssetProtocol.MAX_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT) {
+			throw new IllegalArgumentException("Invalid destination sign density");
+		}
 		final TreeSet<Long> sortedDestinations = new TreeSet<>(Objects.requireNonNull(destinationStationIds, "destinationStationIds"));
 		if (sortedDestinations.size() > MAX_DESTINATIONS || sortedDestinations.contains(0L)) throw new IllegalArgumentException("Invalid destination sign destinations");
 		if ((sourceStationId == 0) != sortedDestinations.isEmpty()) throw new IllegalArgumentException("Destination sign is only partially configured");
@@ -52,25 +58,45 @@ public final class DestinationSignConfig {
 		this.customHeader = checkedHeader;
 		this.width = width;
 		this.height = height;
+		this.routesPerBlockHeight = routesPerBlockHeight;
 		this.showEta = showEta;
 	}
 
 	public static DestinationSignConfig configured(long sourceStationId, long destinationStationId, int width, int height, DestinationSignStyle style, boolean showEta) {
-		return configured(sourceStationId, Set.of(destinationStationId), width, height, style, showEta, "");
+		return configured(sourceStationId, destinationStationId, width, height, style, showEta, RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT);
+	}
+
+	public static DestinationSignConfig configured(long sourceStationId, long destinationStationId, int width, int height,
+			DestinationSignStyle style, boolean showEta, int routesPerBlockHeight) {
+		return configured(sourceStationId, Set.of(destinationStationId), width, height, style, showEta, "", routesPerBlockHeight);
 	}
 
 	public static DestinationSignConfig configured(long sourceStationId, Set<Long> destinationStationIds, int width, int height,
 			DestinationSignStyle style, boolean showEta, String customHeader) {
+		return configured(sourceStationId, destinationStationIds, width, height,
+				style, showEta, customHeader, RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT);
+	}
+
+	public static DestinationSignConfig configured(long sourceStationId, Set<Long> destinationStationIds, int width, int height,
+			DestinationSignStyle style, boolean showEta, String customHeader, int routesPerBlockHeight) {
 		if (sourceStationId == 0 || Objects.requireNonNull(destinationStationIds, "destinationStationIds").isEmpty()) throw new IllegalArgumentException("Configured destination sign station is not set");
-		return new DestinationSignConfig(sourceStationId, destinationStationIds, width, height, style, showEta, customHeader);
+		return new DestinationSignConfig(sourceStationId, destinationStationIds, width, height, routesPerBlockHeight, style, showEta, customHeader);
 	}
 
 	public static DestinationSignConfig unconfigured(int width, int height) {
-		return unconfigured(width, height, DestinationSignStyle.ARRIVAL_ORDER, true);
+		return unconfigured(width, height, RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT);
+	}
+
+	public static DestinationSignConfig unconfigured(int width, int height, int routesPerBlockHeight) {
+		return unconfigured(width, height, DestinationSignStyle.ARRIVAL_ORDER, true, routesPerBlockHeight);
 	}
 
 	public static DestinationSignConfig unconfigured(int width, int height, DestinationSignStyle style, boolean showEta) {
-		return new DestinationSignConfig(0, Collections.emptySet(), width, height, style, showEta, "");
+		return unconfigured(width, height, style, showEta, RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT);
+	}
+
+	public static DestinationSignConfig unconfigured(int width, int height, DestinationSignStyle style, boolean showEta, int routesPerBlockHeight) {
+		return new DestinationSignConfig(0, Collections.emptySet(), width, height, routesPerBlockHeight, style, showEta, "");
 	}
 
 	public static DestinationSignConfig read(CompoundTag tag) {
@@ -90,10 +116,12 @@ public final class DestinationSignConfig {
 			}
 			final int width = Math.toIntExact(tag.getLong(KEY_WIDTH));
 			final int height = Math.toIntExact(tag.getLong(KEY_HEIGHT));
+			final int routesPerBlockHeight = tag.contains(KEY_ROUTES_PER_BLOCK_HEIGHT)
+					? Math.toIntExact(tag.getLong(KEY_ROUTES_PER_BLOCK_HEIGHT)) : RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT;
 			final DestinationSignStyle style = DestinationSignStyle.valueOf(tag.getString(KEY_STYLE));
 			final boolean showEta = !tag.contains(KEY_SHOW_ETA) || tag.getBoolean(KEY_SHOW_ETA);
-			return source == 0 && destinations.isEmpty() ? unconfigured(width, height, style, showEta)
-					: configured(source, destinations, width, height, style, showEta, tag.getString(KEY_CUSTOM_HEADER));
+			return source == 0 && destinations.isEmpty() ? unconfigured(width, height, style, showEta, routesPerBlockHeight)
+					: configured(source, destinations, width, height, style, showEta, tag.getString(KEY_CUSTOM_HEADER), routesPerBlockHeight);
 		} catch (IllegalArgumentException | ArithmeticException ignored) {
 			return unconfigured(DEFAULT_WIDTH, DEFAULT_HEIGHT);
 		}
@@ -109,6 +137,7 @@ public final class DestinationSignConfig {
 		tag.putString(KEY_CUSTOM_HEADER, customHeader);
 		tag.putLong(KEY_WIDTH, width);
 		tag.putLong(KEY_HEIGHT, height);
+		tag.putLong(KEY_ROUTES_PER_BLOCK_HEIGHT, routesPerBlockHeight);
 		tag.putString(KEY_STYLE, style.name());
 		tag.putBoolean(KEY_SHOW_ETA, showEta);
 	}
@@ -120,6 +149,7 @@ public final class DestinationSignConfig {
 	public String getCustomHeader() { return customHeader; }
 	public int getWidth() { return width; }
 	public int getHeight() { return height; }
+	public int getRoutesPerBlockHeight() { return routesPerBlockHeight; }
 	public DestinationSignStyle getStyle() { return style; }
 	public boolean isShowEta() { return showEta; }
 
@@ -131,12 +161,13 @@ public final class DestinationSignConfig {
 				&& customHeader.equals(((DestinationSignConfig) object).customHeader)
 				&& width == ((DestinationSignConfig) object).width
 				&& height == ((DestinationSignConfig) object).height
+				&& routesPerBlockHeight == ((DestinationSignConfig) object).routesPerBlockHeight
 				&& style == ((DestinationSignConfig) object).style
 				&& showEta == ((DestinationSignConfig) object).showEta;
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(sourceStationId, destinationStationIds, customHeader, width, height, style, showEta);
+		return Objects.hash(sourceStationId, destinationStationIds, customHeader, width, height, routesPerBlockHeight, style, showEta);
 	}
 }

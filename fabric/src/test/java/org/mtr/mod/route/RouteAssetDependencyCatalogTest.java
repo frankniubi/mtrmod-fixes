@@ -112,11 +112,11 @@ public final class RouteAssetDependencyCatalogTest {
 
 	@Test
 	public void compatibilityVersionsSeparateTheReadableCorridorAndDynamicValuesAreAbsent() {
-		Assertions.assertEquals(2, RouteAssetProtocol.PROTOCOL_VERSION);
+		Assertions.assertEquals(3, RouteAssetProtocol.PROTOCOL_VERSION);
 		Assertions.assertEquals(3, RouteAssetProtocol.RENDERER_VERSION);
 		Assertions.assertEquals(4, RouteAssetProtocol.ROUTE_MAP_RENDERER_VERSION);
 		Assertions.assertEquals(4, RouteAssetProtocol.CORRIDOR_SCHEMA_VERSION);
-		Assertions.assertEquals(5, RouteAssetProtocol.DESTINATION_SIGN_RENDERER_VERSION);
+		Assertions.assertEquals(6, RouteAssetProtocol.DESTINATION_SIGN_RENDERER_VERSION);
 		Assertions.assertEquals(1, RouteAssetProtocol.MIN_REUSABLE_PNG_RENDERER_VERSION);
 		for (final java.lang.reflect.Field field : RouteAssetRenderSnapshot.class.getDeclaredFields()) {
 			final String name = field.getName().toLowerCase(java.util.Locale.ROOT);

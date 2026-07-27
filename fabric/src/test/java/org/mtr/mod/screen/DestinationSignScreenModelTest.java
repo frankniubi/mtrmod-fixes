@@ -38,16 +38,16 @@ public final class DestinationSignScreenModelTest {
 		final DestinationSignScreenModel draft = new DestinationSignScreenModel(-10, "Source", topology(1), DestinationSignConfig.unconfigured(3, 2));
 		for (int index = 0; index < 30; index++) draft.adjustWidth(-1);
 		for (int index = 0; index < 30; index++) draft.adjustHeight(-1);
-		Assertions.assertEquals(1, draft.getWidth());
-		Assertions.assertEquals(2, draft.getHeight());
-		Assertions.assertFalse(draft.canAdjustHeight(-1), "the stepper must not create a 1x1 sign");
+		Assertions.assertEquals(3, draft.getWidth());
+		Assertions.assertEquals(1, draft.getHeight());
+		Assertions.assertFalse(draft.canAdjustHeight(-1));
 
 		final DestinationSignScreenModel landscape = new DestinationSignScreenModel(-10, "Source", topology(1), DestinationSignConfig.unconfigured(3, 2));
 		for (int index = 0; index < 30; index++) landscape.adjustHeight(-1);
 		for (int index = 0; index < 30; index++) landscape.adjustWidth(-1);
-		Assertions.assertEquals(2, landscape.getWidth());
+		Assertions.assertEquals(3, landscape.getWidth());
 		Assertions.assertEquals(1, landscape.getHeight());
-		Assertions.assertFalse(landscape.canAdjustWidth(-1), "the stepper must not create a 1x1 sign");
+		Assertions.assertFalse(landscape.canAdjustWidth(-1), "editable destination signs require width three");
 		draft.selectDestination(-20);
 		landscape.selectDestination(-20);
 		Assertions.assertTrue(draft.canSave());
@@ -60,12 +60,27 @@ public final class DestinationSignScreenModelTest {
 	}
 
 	@Test
+	public void densityAndLegacyWidthAreNormalizedIntoTheEditableDraft() {
+		final DestinationSignConfig legacy = DestinationSignConfig.configured(-10, -20, 1, 2, DestinationSignStyle.ARRIVAL_ORDER, true, 4);
+		final DestinationSignScreenModel draft = new DestinationSignScreenModel(-10, "Source", topology(1), legacy);
+		Assertions.assertEquals(3, draft.getWidth());
+		Assertions.assertEquals(4, draft.getRoutesPerBlockHeight());
+		draft.setRoutesPerBlockHeight(2);
+		Assertions.assertEquals(2, draft.getRoutesPerBlockHeight());
+		Assertions.assertEquals(2, draft.toConfig().getRoutesPerBlockHeight());
+		Assertions.assertThrows(IllegalArgumentException.class, () -> draft.setRoutesPerBlockHeight(1));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> draft.setRoutesPerBlockHeight(5));
+		Assertions.assertTrue(DestinationSignScreenModel.isValidRoutesPerBlockHeight(3));
+		Assertions.assertFalse(DestinationSignScreenModel.isValidRoutesPerBlockHeight(1));
+	}
+
+	@Test
 	public void exactMinimumFootprintAccountsForStyleAndEveryDirectRow() {
 		final DestinationSignScreenModel draft = new DestinationSignScreenModel(-10, "Source", topology(5), DestinationSignConfig.unconfigured(3, 2));
 		draft.selectDestination(-20);
-		Assertions.assertEquals(new DestinationSignScreenModel.Footprint(2, 1), draft.minimumFootprint(DestinationSignStyle.ARRIVAL_ORDER));
-		Assertions.assertEquals(new DestinationSignScreenModel.Footprint(2, 1), draft.minimumFootprint(DestinationSignStyle.PLATFORM_GROUPS));
-		Assertions.assertEquals(new DestinationSignScreenModel.Footprint(2, 1), draft.minimumFootprint(DestinationSignStyle.DESTINATION_FLAG));
+		Assertions.assertEquals(new DestinationSignScreenModel.Footprint(3, 1), draft.minimumFootprint(DestinationSignStyle.ARRIVAL_ORDER));
+		Assertions.assertEquals(new DestinationSignScreenModel.Footprint(3, 1), draft.minimumFootprint(DestinationSignStyle.PLATFORM_GROUPS));
+		Assertions.assertEquals(new DestinationSignScreenModel.Footprint(3, 1), draft.minimumFootprint(DestinationSignStyle.DESTINATION_FLAG));
 	}
 
 	@Test

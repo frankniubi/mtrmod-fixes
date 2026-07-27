@@ -24,7 +24,7 @@ public final class RouteAssetCanonicalKeyFactory {
 	private static final Set<String> DIRECTION_ARROW_PARAMETERS = Set.of("a", "align", "bg", "left", "pad", "right", "show", "text", "transparent");
 	private static final Set<String> ROUTE_SQUARE_PARAMETERS = Set.of("align");
 	private static final Set<String> ROUTE_COLOR_STRIP_PARAMETERS = Set.of("style");
-	private static final Set<String> DESTINATION_SIGN_PARAMETERS = Set.of("d", "eta", "h", "hdr", "s", "v", "w");
+	private static final Set<String> DESTINATION_SIGN_PARAMETERS = Set.of("d", "eta", "h", "hdr", "rpb", "s", "v", "w");
 
 	private RouteAssetCanonicalKeyFactory() {
 	}
@@ -100,16 +100,30 @@ public final class RouteAssetCanonicalKeyFactory {
 
 	public static RouteAssetKey destinationSign(String dimension, long sourceStationId, long destinationStationId, int resolution,
 			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
-		return destinationSign(dimension, sourceStationId, Set.of(destinationStationId), "", resolution, style, widthBlocks, heightBlocks, showEta);
+		return destinationSign(dimension, sourceStationId, destinationStationId, resolution, style, widthBlocks, heightBlocks,
+				showEta, RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT);
+	}
+
+	public static RouteAssetKey destinationSign(String dimension, long sourceStationId, long destinationStationId, int resolution,
+			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta, int routesPerBlockHeight) {
+		return destinationSign(dimension, sourceStationId, Set.of(destinationStationId), "", resolution, style, widthBlocks, heightBlocks, showEta, routesPerBlockHeight);
 	}
 
 	public static RouteAssetKey destinationSign(String dimension, long sourceStationId, Set<Long> destinationStationIds, String customHeader, int resolution,
 			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
+		return destinationSign(dimension, sourceStationId, destinationStationIds, customHeader, resolution, style, widthBlocks, heightBlocks,
+				showEta, RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT);
+	}
+
+	public static RouteAssetKey destinationSign(String dimension, long sourceStationId, Set<Long> destinationStationIds, String customHeader, int resolution,
+			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta, int routesPerBlockHeight) {
 		final DestinationSignStyle checkedStyle = Objects.requireNonNull(style, "style");
 		final TreeSet<Long> checkedDestinations = new TreeSet<>(Objects.requireNonNull(destinationStationIds, "destinationStationIds"));
 		final String checkedHeader = DestinationSignAssetSnapshot.validateCustomHeader(customHeader);
 		if (sourceStationId == 0 || checkedDestinations.isEmpty() || checkedDestinations.size() > RouteAssetProtocol.MAX_DESTINATION_SIGN_DESTINATIONS
 				|| checkedDestinations.contains(0L)
+				|| routesPerBlockHeight < RouteAssetProtocol.MIN_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT
+				|| routesPerBlockHeight > RouteAssetProtocol.MAX_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT
 				|| !DestinationSignAtlasLayout.isValidFootprint(checkedStyle, widthBlocks, heightBlocks)) {
 			throw new IllegalArgumentException("Invalid destination sign key");
 		}
@@ -118,6 +132,7 @@ public final class RouteAssetCanonicalKeyFactory {
 				"eta", encodeBoolean(showEta),
 				"h", Integer.toString(heightBlocks),
 				"hdr", encodeHeader(checkedHeader),
+				"rpb", Integer.toString(routesPerBlockHeight),
 				"s", checkedStyle.name(),
 				"v", "1",
 				"w", Integer.toString(widthBlocks)
@@ -134,11 +149,12 @@ public final class RouteAssetCanonicalKeyFactory {
 			final Boolean showEta = decodeBoolean(parameters.get("eta"));
 			final int widthBlocks = Integer.parseInt(parameters.get("w"));
 			final int heightBlocks = Integer.parseInt(parameters.get("h"));
+			final int routesPerBlockHeight = Integer.parseInt(parameters.get("rpb"));
 			final DestinationSignStyle style = DestinationSignStyle.valueOf(parameters.get("s"));
 			if (!"1".equals(parameters.get("v")) || showEta == null) return null;
 			final RouteAssetKey canonical = destinationSign(key.getDimension(), key.getPrimaryId(), destinationStationIds, customHeader,
-					key.getVariant().getResolution(), style, widthBlocks, heightBlocks, showEta);
-			return canonical.equals(key) ? new DestinationSignParameters(destinationStationIds, customHeader, style, widthBlocks, heightBlocks, showEta) : null;
+					key.getVariant().getResolution(), style, widthBlocks, heightBlocks, showEta, routesPerBlockHeight);
+			return canonical.equals(key) ? new DestinationSignParameters(destinationStationIds, customHeader, style, widthBlocks, heightBlocks, routesPerBlockHeight, showEta) : null;
 		} catch (IllegalArgumentException exception) {
 			return null;
 		}
@@ -410,15 +426,18 @@ public final class RouteAssetCanonicalKeyFactory {
 		final DestinationSignStyle style;
 		final int widthBlocks;
 		final int heightBlocks;
+		final int routesPerBlockHeight;
 		final boolean showEta;
 
-		private DestinationSignParameters(Set<Long> destinationStationIds, String customHeader, DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
+		private DestinationSignParameters(Set<Long> destinationStationIds, String customHeader, DestinationSignStyle style, int widthBlocks, int heightBlocks,
+				int routesPerBlockHeight, boolean showEta) {
 			this.destinationStationIds = java.util.Collections.unmodifiableSortedSet(new TreeSet<>(destinationStationIds));
 			destinationStationId = this.destinationStationIds.first();
 			this.customHeader = customHeader;
 			this.style = style;
 			this.widthBlocks = widthBlocks;
 			this.heightBlocks = heightBlocks;
+			this.routesPerBlockHeight = routesPerBlockHeight;
 			this.showEta = showEta;
 		}
 	}

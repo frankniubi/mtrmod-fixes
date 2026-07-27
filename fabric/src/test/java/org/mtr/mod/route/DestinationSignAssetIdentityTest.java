@@ -15,7 +15,7 @@ public final class DestinationSignAssetIdentityTest {
 	@Test
 	public void canonicalKeyContainsOnlyStaticConfigurationAndAllowsSignedIds() {
 		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
-		Assertions.assertEquals("minecraft/overworld|DESTINATION_SIGN_ATLAS|10|1|MULTI|d=30,eta=1,h=2,hdr=-,s=ARRIVAL_ORDER,v=1,w=3", key.toString());
+		Assertions.assertEquals("minecraft/overworld|DESTINATION_SIGN_ATLAS|10|1|MULTI|d=30,eta=1,h=2,hdr=-,rpb=3,s=ARRIVAL_ORDER,v=1,w=3", key.toString());
 		final RouteAssetKey signed = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, -10, -30, 0, DestinationSignStyle.DESTINATION_FLAG, 3, 2, false);
 		Assertions.assertEquals(-10, signed.getPrimaryId());
 		Assertions.assertEquals("-30", signed.getVariant().getParameters().get("d"));
@@ -44,6 +44,7 @@ public final class DestinationSignAssetIdentityTest {
 		Assertions.assertNotNull(decoded);
 		Assertions.assertEquals(Set.of(-30L, -20L), decoded.destinationStationIds);
 		Assertions.assertEquals(header, decoded.customHeader);
+		Assertions.assertEquals(3, decoded.routesPerBlockHeight);
 	}
 
 	@Test

@@ -117,7 +117,9 @@ public final class ConfiguredSignAssetIndex {
 					final DestinationSignConfiguredEntry destination = new DestinationSignConfiguredEntry(
 							compoundTag.getLong(prefix + "source_id"), destinationIds, compoundTag.getString(prefix + "custom_header"),
 							Math.toIntExact(compoundTag.getLong(prefix + "width")), Math.toIntExact(compoundTag.getLong(prefix + "height")),
-							DestinationSignStyle.valueOf(compoundTag.getString(prefix + "style")), compoundTag.getLong(prefix + "eta") == 1);
+							DestinationSignStyle.valueOf(compoundTag.getString(prefix + "style")), compoundTag.getLong(prefix + "eta") == 1,
+							compoundTag.contains(prefix + "routes_per_block_height") ? Math.toIntExact(compoundTag.getLong(prefix + "routes_per_block_height"))
+									: RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT);
 					load(StoredEntry.destinationSign(anchor, destination));
 				}
 			} catch (IllegalArgumentException | ArithmeticException ignored) {
@@ -202,7 +204,7 @@ public final class ConfiguredSignAssetIndex {
 			if (!config.isConfigured()) return null;
 			return StoredEntry.destinationSign(anchorPosition, new DestinationSignConfiguredEntry(
 					config.getSourceStationId(), config.getDestinationStationIds(), config.getCustomHeader(),
-					config.getWidth(), config.getHeight(), config.getStyle(), config.isShowEta()));
+					config.getWidth(), config.getHeight(), config.getStyle(), config.isShowEta(), config.getRoutesPerBlockHeight()));
 		}
 		if (blockEntity.data instanceof BlockRouteSignBase.BlockEntityBase) {
 			final BlockRouteSignBase.BlockEntityBase routeSign = (BlockRouteSignBase.BlockEntityBase) blockEntity.data;
@@ -238,6 +240,7 @@ public final class ConfiguredSignAssetIndex {
 				compoundTag.putString(prefix + "custom_header", entry.destinationSign.getCustomHeader());
 				compoundTag.putLong(prefix + "width", entry.destinationSign.getWidthBlocks());
 				compoundTag.putLong(prefix + "height", entry.destinationSign.getHeightBlocks());
+				compoundTag.putLong(prefix + "routes_per_block_height", entry.destinationSign.getRoutesPerBlockHeight());
 				compoundTag.putString(prefix + "style", entry.destinationSign.getStyle().name());
 				compoundTag.putLong(prefix + "eta", entry.destinationSign.isShowEta() ? 1 : 0);
 			}
@@ -247,7 +250,7 @@ public final class ConfiguredSignAssetIndex {
 	}
 
 	private static void clearEntry(CompoundTag tag, String prefix) {
-		for (final String field : List.of("type", "anchor", "primary_id", "platform_ids_count", "custom_platform_header", "source_id", "destination_id", "destination_ids_count", "custom_header", "width", "height", "style", "eta")) tag.remove(prefix + field);
+		for (final String field : List.of("type", "anchor", "primary_id", "platform_ids_count", "custom_platform_header", "source_id", "destination_id", "destination_ids_count", "custom_header", "width", "height", "routes_per_block_height", "style", "eta")) tag.remove(prefix + field);
 		for (int index = 0; index < RouteAssetProtocol.MAX_ROUTE_SIGN_PLATFORMS; index++) tag.remove(prefix + "platform_id_" + index);
 		for (int index = 0; index < RouteAssetProtocol.MAX_DESTINATION_SIGN_DESTINATIONS; index++) tag.remove(prefix + "destination_id_" + index);
 	}
@@ -306,7 +309,8 @@ public final class ConfiguredSignAssetIndex {
 			final String destinationIds = destinationSign.getDestinationStationIds().stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(":"));
 			return dimension + "|DESTINATION_SIGN|" + destinationSign.getSourceStationId() + '|' + destinationIds + '|'
 					+ destinationSign.getCustomHeader().length() + ':' + destinationSign.getCustomHeader() + '|'
-					+ destinationSign.getStyle().name() + '|' + destinationSign.getWidthBlocks() + '|' + destinationSign.getHeightBlocks() + '|' + destinationSign.isShowEta();
+					+ destinationSign.getStyle().name() + '|' + destinationSign.getWidthBlocks() + '|' + destinationSign.getHeightBlocks() + '|'
+					+ destinationSign.getRoutesPerBlockHeight() + '|' + destinationSign.isShowEta();
 		}
 
 		@Override public int compareTo(Entry other) {

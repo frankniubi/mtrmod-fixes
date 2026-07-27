@@ -69,6 +69,52 @@ public final class ConfiguredSignAssetIndexTest {
 	}
 
 	@Test
+	public void destinationDensityPersistsDefaultsAndSeparatesIdentity() {
+		final DestinationSignConfiguredEntry dense = new DestinationSignConfiguredEntry(-10, Set.of(-30L), "",
+				3, 2, DestinationSignStyle.ARRIVAL_ORDER, true, 4);
+		final DestinationSignConfiguredEntry defaulted = new DestinationSignConfiguredEntry(-10, Set.of(-30L), "",
+				3, 2, DestinationSignStyle.ARRIVAL_ORDER, true);
+		final ConfiguredSignAssetIndex index = new ConfiguredSignAssetIndex();
+		index.configureDestinationSign(1, dense);
+		index.configureDestinationSign(2, defaulted);
+		final List<ConfiguredSignAssetIndex.Entry> before = index.snapshot("minecraft/overworld");
+		Assertions.assertNotEquals(before.get(0).canonicalAssetIdentity(), before.get(1).canonicalAssetIdentity());
+
+		final CompoundTag tag = new CompoundTag();
+		index.write(tag);
+		Assertions.assertEquals(4, tag.getLong("configured_sign_asset_0_routes_per_block_height"));
+		Assertions.assertEquals(3, tag.getLong("configured_sign_asset_1_routes_per_block_height"));
+		final ConfiguredSignAssetIndex restored = new ConfiguredSignAssetIndex();
+		restored.read(tag);
+		Assertions.assertEquals(before, restored.snapshot("minecraft/overworld"));
+
+		final CompoundTag legacy = new CompoundTag();
+		legacy.putLong("configured_sign_asset_count", 1);
+		legacy.putString("configured_sign_asset_0_type", "DESTINATION_SIGN");
+		legacy.putLong("configured_sign_asset_0_anchor", 9);
+		legacy.putLong("configured_sign_asset_0_source_id", -10);
+		legacy.putLong("configured_sign_asset_0_destination_id", -30);
+		legacy.putLong("configured_sign_asset_0_width", 3);
+		legacy.putLong("configured_sign_asset_0_height", 2);
+		legacy.putString("configured_sign_asset_0_style", DestinationSignStyle.ARRIVAL_ORDER.name());
+		legacy.putLong("configured_sign_asset_0_eta", 1);
+		final ConfiguredSignAssetIndex legacyIndex = new ConfiguredSignAssetIndex();
+		legacyIndex.read(legacy);
+		Assertions.assertEquals(3, legacyIndex.snapshot("minecraft/overworld").get(0).getDestinationSign().getRoutesPerBlockHeight());
+	}
+
+	@Test
+	public void rewritingEntryClearsStaleDensity() {
+		final CompoundTag tag = new CompoundTag();
+		tag.putLong("configured_sign_asset_count", 1);
+		tag.putLong("configured_sign_asset_0_routes_per_block_height", 4);
+		final ConfiguredSignAssetIndex index = new ConfiguredSignAssetIndex();
+		index.configureRouteSign(1, 20, RouteSignStyleMode.RAILWAY);
+		index.write(tag);
+		Assertions.assertFalse(tag.contains("configured_sign_asset_0_routes_per_block_height"));
+	}
+
+	@Test
 	public void destinationIdentityIsOrderIndependentAndIncludesCustomHeader() {
 		final DestinationSignConfiguredEntry first = new DestinationSignConfiguredEntry(-10, Set.of(-20L, -30L), "A|B",
 				3, 2, DestinationSignStyle.ARRIVAL_ORDER, true);

@@ -13,20 +13,34 @@ public final class DestinationSignConfiguredEntry {
 	private final String customHeader;
 	private final int widthBlocks;
 	private final int heightBlocks;
+	private final int routesPerBlockHeight;
 	private final DestinationSignStyle style;
 	private final boolean showEta;
 
 	public DestinationSignConfiguredEntry(long sourceStationId, long destinationStationId, int widthBlocks, int heightBlocks, DestinationSignStyle style, boolean showEta) {
-		this(sourceStationId, Set.of(destinationStationId), "", widthBlocks, heightBlocks, style, showEta);
+		this(sourceStationId, destinationStationId, widthBlocks, heightBlocks, style, showEta, RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT);
+	}
+
+	public DestinationSignConfiguredEntry(long sourceStationId, long destinationStationId, int widthBlocks, int heightBlocks,
+			DestinationSignStyle style, boolean showEta, int routesPerBlockHeight) {
+		this(sourceStationId, Set.of(destinationStationId), "", widthBlocks, heightBlocks, style, showEta, routesPerBlockHeight);
 	}
 
 	public DestinationSignConfiguredEntry(long sourceStationId, Set<Long> destinationStationIds, String customHeader,
 			int widthBlocks, int heightBlocks, DestinationSignStyle style, boolean showEta) {
+		this(sourceStationId, destinationStationIds, customHeader, widthBlocks, heightBlocks,
+				style, showEta, RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT);
+	}
+
+	public DestinationSignConfiguredEntry(long sourceStationId, Set<Long> destinationStationIds, String customHeader,
+			int widthBlocks, int heightBlocks, DestinationSignStyle style, boolean showEta, int routesPerBlockHeight) {
 		final DestinationSignStyle checkedStyle = Objects.requireNonNull(style, "style");
 		final TreeSet<Long> checkedDestinations = new TreeSet<>(Objects.requireNonNull(destinationStationIds, "destinationStationIds"));
 		final String checkedHeader = DestinationSignAssetSnapshot.validateCustomHeader(customHeader);
 		if (sourceStationId == 0 || checkedDestinations.isEmpty() || checkedDestinations.size() > RouteAssetProtocol.MAX_DESTINATION_SIGN_DESTINATIONS
 				|| checkedDestinations.contains(0L)
+				|| routesPerBlockHeight < RouteAssetProtocol.MIN_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT
+				|| routesPerBlockHeight > RouteAssetProtocol.MAX_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT
 				|| !DestinationSignAtlasLayout.isValidFootprint(checkedStyle, widthBlocks, heightBlocks)) {
 			throw new IllegalArgumentException("Invalid configured destination sign");
 		}
@@ -35,6 +49,7 @@ public final class DestinationSignConfiguredEntry {
 		this.customHeader = checkedHeader;
 		this.widthBlocks = widthBlocks;
 		this.heightBlocks = heightBlocks;
+		this.routesPerBlockHeight = routesPerBlockHeight;
 		this.style = checkedStyle;
 		this.showEta = showEta;
 	}
@@ -45,6 +60,7 @@ public final class DestinationSignConfiguredEntry {
 	public String getCustomHeader() { return customHeader; }
 	public int getWidthBlocks() { return widthBlocks; }
 	public int getHeightBlocks() { return heightBlocks; }
+	public int getRoutesPerBlockHeight() { return routesPerBlockHeight; }
 	public DestinationSignStyle getStyle() { return style; }
 	public boolean isShowEta() { return showEta; }
 
@@ -56,12 +72,13 @@ public final class DestinationSignConfiguredEntry {
 				&& customHeader.equals(((DestinationSignConfiguredEntry) object).customHeader)
 				&& widthBlocks == ((DestinationSignConfiguredEntry) object).widthBlocks
 				&& heightBlocks == ((DestinationSignConfiguredEntry) object).heightBlocks
+				&& routesPerBlockHeight == ((DestinationSignConfiguredEntry) object).routesPerBlockHeight
 				&& style == ((DestinationSignConfiguredEntry) object).style
 				&& showEta == ((DestinationSignConfiguredEntry) object).showEta;
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(sourceStationId, destinationStationIds, customHeader, widthBlocks, heightBlocks, style, showEta);
+		return Objects.hash(sourceStationId, destinationStationIds, customHeader, widthBlocks, heightBlocks, routesPerBlockHeight, style, showEta);
 	}
 }

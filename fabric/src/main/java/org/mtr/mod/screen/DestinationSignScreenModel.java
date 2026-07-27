@@ -7,6 +7,7 @@ import org.mtr.mod.route.DestinationSignAssetSnapshot;
 import org.mtr.mod.route.DestinationSignDirectServiceModel;
 import org.mtr.mod.route.DestinationSignStyle;
 import org.mtr.mod.route.DestinationSignTopology;
+import org.mtr.mod.route.RouteAssetProtocol;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
@@ -28,6 +29,7 @@ public final class DestinationSignScreenModel {
 	private String customHeader;
 	private int width;
 	private int height;
+	private int routesPerBlockHeight;
 	private DestinationSignStyle style;
 	private boolean showEta;
 
@@ -37,8 +39,9 @@ public final class DestinationSignScreenModel {
 		this.sourceStationName = Objects.requireNonNull(sourceStationName, "sourceStationName");
 		this.topology = Objects.requireNonNull(topology, "topology");
 		destinations = DestinationSignDirectServiceModel.reachableDestinations(topology, sourceStationId);
-		width = initial.getWidth();
+		width = Math.max(3, initial.getWidth());
 		height = initial.getHeight();
+		routesPerBlockHeight = initial.getRoutesPerBlockHeight();
 		style = initial.getStyle();
 		showEta = initial.isShowEta();
 		customHeader = initial.getCustomHeader();
@@ -72,7 +75,7 @@ public final class DestinationSignScreenModel {
 
 	public boolean canAdjustWidth(int delta) {
 		final int candidate = width + Integer.signum(delta);
-		return delta != 0 && candidate >= Math.max(DestinationSignFootprint.MIN_WIDTH, style.getMinimumWidthBlocks())
+		return delta != 0 && candidate >= Math.max(3, style.getMinimumWidthBlocks())
 				&& candidate <= DestinationSignFootprint.MAX_WIDTH && DestinationSignFootprint.isValidDimensions(candidate, height);
 	}
 
@@ -84,10 +87,18 @@ public final class DestinationSignScreenModel {
 
 	public void setStyle(DestinationSignStyle style) {
 		this.style = Objects.requireNonNull(style, "style");
-		width = Math.max(width, style.getMinimumWidthBlocks());
+		width = Math.max(width, Math.max(3, style.getMinimumWidthBlocks()));
 	}
 
 	public void setShowEta(boolean showEta) { this.showEta = showEta; }
+	public void setRoutesPerBlockHeight(int routesPerBlockHeight) {
+		if (!isValidRoutesPerBlockHeight(routesPerBlockHeight)) throw new IllegalArgumentException("Invalid destination sign density");
+		this.routesPerBlockHeight = routesPerBlockHeight;
+	}
+	public static boolean isValidRoutesPerBlockHeight(int value) {
+		return value >= RouteAssetProtocol.MIN_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT
+				&& value <= RouteAssetProtocol.MAX_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT;
+	}
 	public void setCustomHeader(String customHeader) {
 		final String checked = Objects.requireNonNull(customHeader, "customHeader");
 		if (checked.getBytes(StandardCharsets.UTF_8).length > DestinationSignConfig.MAX_CUSTOM_HEADER_UTF8_BYTES) throw new IllegalArgumentException("Custom header is too long");
@@ -99,7 +110,7 @@ public final class DestinationSignScreenModel {
 	}
 
 	public Optional<Footprint> findMinimumFootprint(DestinationSignStyle candidateStyle) {
-		final int minimumWidth = Math.max(DestinationSignFootprint.MIN_WIDTH, candidateStyle.getMinimumWidthBlocks());
+		final int minimumWidth = Math.max(3, candidateStyle.getMinimumWidthBlocks());
 		for (int candidateHeight = DestinationSignFootprint.MIN_HEIGHT; candidateHeight <= DestinationSignFootprint.MAX_HEIGHT; candidateHeight++) {
 			for (int candidateWidth = minimumWidth; candidateWidth <= DestinationSignFootprint.MAX_WIDTH; candidateWidth++) {
 				if (destinationStationIds.isEmpty()) {
@@ -119,7 +130,7 @@ public final class DestinationSignScreenModel {
 
 	public DestinationSignConfig toConfig() {
 		if (!canSave()) throw new IllegalStateException("Destination sign draft is incomplete or undersized");
-		return DestinationSignConfig.configured(sourceStationId, destinationStationIds, width, height, style, showEta, customHeader);
+		return DestinationSignConfig.configured(sourceStationId, destinationStationIds, width, height, style, showEta, customHeader, routesPerBlockHeight);
 	}
 
 	private DestinationSignAssetSnapshot projectedSnapshot(DestinationSignStyle candidateStyle, int candidateWidth, int candidateHeight) {
@@ -143,6 +154,7 @@ public final class DestinationSignScreenModel {
 	public String getCustomHeader() { return customHeader; }
 	public int getWidth() { return width; }
 	public int getHeight() { return height; }
+	public int getRoutesPerBlockHeight() { return routesPerBlockHeight; }
 	public DestinationSignStyle getStyle() { return style; }
 	public boolean isShowEta() { return showEta; }
 

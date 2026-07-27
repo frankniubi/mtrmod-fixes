@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mtr.mapping.holder.CompoundTag;
 import org.mtr.mod.route.DestinationSignStyle;
+import org.mtr.mod.route.RouteAssetProtocol;
 
 import java.util.List;
 import java.util.Set;
@@ -12,10 +13,12 @@ public final class DestinationSignConfigTest {
 
 	@Test
 	public void configuredSignedIdsRoundTripExactly() {
-		final DestinationSignConfig config = DestinationSignConfig.configured(-10, -30, 7, 4, DestinationSignStyle.PLATFORM_GROUPS, false);
+		final DestinationSignConfig config = DestinationSignConfig.configured(-10, -30, 7, 4, DestinationSignStyle.PLATFORM_GROUPS, false, 4);
 		final CompoundTag tag = new CompoundTag();
 		config.write(tag);
 		Assertions.assertEquals(config, DestinationSignConfig.read(tag));
+		Assertions.assertEquals(4, config.getRoutesPerBlockHeight());
+		Assertions.assertEquals(4, tag.getLong("routes_per_block_height"));
 		Assertions.assertTrue(config.isConfigured());
 	}
 
@@ -39,6 +42,7 @@ public final class DestinationSignConfigTest {
 		Assertions.assertFalse(fresh.isConfigured());
 		Assertions.assertEquals(0, fresh.getDestinationStationId());
 		Assertions.assertTrue(fresh.isShowEta());
+		Assertions.assertEquals(RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT, fresh.getRoutesPerBlockHeight());
 
 		final CompoundTag oldTag = new CompoundTag();
 		oldTag.putLong("source_station_id", -20);
@@ -47,6 +51,24 @@ public final class DestinationSignConfigTest {
 		oldTag.putLong("height", 2);
 		oldTag.putString("style", DestinationSignStyle.ARRIVAL_ORDER.name());
 		Assertions.assertTrue(DestinationSignConfig.read(oldTag).isShowEta());
+		Assertions.assertEquals(3, DestinationSignConfig.read(oldTag).getRoutesPerBlockHeight());
+	}
+
+	@Test
+	public void densityIsBoundedAndMalformedStoredDensityFailsClosed() {
+		Assertions.assertEquals(2, DestinationSignConfig.unconfigured(3, 2, 2).getRoutesPerBlockHeight());
+		Assertions.assertEquals(4, DestinationSignConfig.unconfigured(3, 2, 4).getRoutesPerBlockHeight());
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.unconfigured(3, 2, 1));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.unconfigured(3, 2, 5));
+
+		final CompoundTag invalid = new CompoundTag();
+		invalid.putLong("source_station_id", 5);
+		invalid.putLong("destination_station_id", 6);
+		invalid.putLong("width", 2);
+		invalid.putLong("height", 2);
+		invalid.putLong("routes_per_block_height", 5);
+		invalid.putString("style", DestinationSignStyle.ARRIVAL_ORDER.name());
+		Assertions.assertEquals(DestinationSignConfig.unconfigured(3, 2), DestinationSignConfig.read(invalid));
 	}
 
 	@Test
