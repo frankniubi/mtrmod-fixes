@@ -86,16 +86,39 @@ public final class DestinationSignAtlasRendererTest {
 
 	@Test
 	public void snapshotRejectsAnyConfigurationThatCannotRenderEveryServerResolution() {
-		final List<DestinationSignTopology.ServiceRoute> routes = new ArrayList<>();
-		for (int index = 0; index < DestinationSignDirectServiceModel.MAX_OPTIONS; index++) {
-			routes.add(new DestinationSignTopology.ServiceRoute(10_000 + index, index, "R" + index + "|Route " + index, 0x14755E, List.of(
-					new DestinationSignTopology.StopOccurrence(20_000 + index, 1, "P" + index, "Source", ""),
-					new DestinationSignTopology.StopOccurrence(30_000 + index, 2, "D" + index, "Target", ""))));
-		}
-		final DestinationSignTopology topology = new DestinationSignTopology(routes, List.of(
-				new DestinationSignTopology.StationZone(1, "Source"), new DestinationSignTopology.StationZone(2, "Target")));
 		Assertions.assertThrows(IllegalArgumentException.class,
-				() -> DestinationSignAssetSnapshot.create(topology, 1, 2, DestinationSignStyle.ARRIVAL_ORDER, 2, 1, true));
+				() -> DestinationSignAssetSnapshot.create(topologyWithRoutes(DestinationSignDirectServiceModel.MAX_OPTIONS, 16), 1, 2,
+						DestinationSignStyle.ARRIVAL_ORDER, 2, 1, true));
+	}
+
+	@Test
+	public void legalWidthAndDensityChangesDownshiftOversizedAtlasesInsteadOfRejectingTheSave() {
+		final DestinationSignTopology topology = topologyWithRoutes(13, 2);
+		final DestinationSignAssetSnapshot width15 = DestinationSignAssetSnapshot.create(topology, 1, 2,
+				DestinationSignStyle.ARRIVAL_ORDER, 15, 1, true, 3);
+		final DestinationSignAssetSnapshot width16 = DestinationSignAssetSnapshot.create(topology, 1, 2,
+				DestinationSignStyle.ARRIVAL_ORDER, 16, 1, true, 3);
+		final DestinationSignAssetSnapshot sparse = DestinationSignAssetSnapshot.create(topology, 1, 2,
+				DestinationSignStyle.ARRIVAL_ORDER, 15, 1, true, 2);
+		Assertions.assertEquals(3, width15.renderResolution(3));
+		Assertions.assertEquals(2, width16.renderResolution(3));
+		Assertions.assertEquals(2, sparse.renderResolution(3));
+		final RouteAssetImage image = DestinationSignAtlasRenderer.render(width16, text, 3);
+		Assertions.assertEquals(DestinationSignAtlasLayout.scaledSize(width16.getAtlasWidth(), 2), image.getWidth());
+		Assertions.assertTrue((long) image.getWidth() * image.getHeight() <= RouteAssetProtocol.MAX_DESTINATION_SIGN_ATLAS_PIXELS);
+	}
+
+	@Test
+	public void destinationFlagUsesAHighContrastMasthead() {
+		final DestinationSignTopology topology = simpleTopology();
+		final DestinationSignAssetSnapshot standard = DestinationSignAssetSnapshot.create(topology, 1, 3,
+				DestinationSignStyle.ARRIVAL_ORDER, 3, 1, true);
+		final DestinationSignAssetSnapshot flag = DestinationSignAssetSnapshot.create(topology, 1, 3,
+				DestinationSignStyle.DESTINATION_FLAG, 3, 1, true);
+		final RouteAssetImage standardImage = DestinationSignAtlasRenderer.render(standard, text, 1);
+		final RouteAssetImage flagImage = DestinationSignAtlasRenderer.render(flag, text, 1);
+		Assertions.assertEquals(WHITE(), standardImage.getPixel(0, 0));
+		Assertions.assertEquals(RouteAssetImage.argbToAbgr(0xFF111111), flagImage.getPixel(0, 0));
 	}
 
 	@Test
@@ -184,5 +207,17 @@ public final class DestinationSignAtlasRendererTest {
 				new DestinationSignTopology.StationZone(3, "Target|Target EN"),
 				new DestinationSignTopology.StationZone(4, "Following|Following EN"),
 				new DestinationSignTopology.StationZone(5, "End|End EN")));
+	}
+
+	private static DestinationSignTopology topologyWithRoutes(int routeCount, int languageSegments) {
+		final List<DestinationSignTopology.ServiceRoute> routes = new ArrayList<>();
+		for (int index = 0; index < routeCount; index++) {
+			final String routeName = String.join("|", java.util.Collections.nCopies(languageSegments, "R" + index));
+			routes.add(new DestinationSignTopology.ServiceRoute(10_000 + index, index, routeName, 0x14755E, List.of(
+					new DestinationSignTopology.StopOccurrence(20_000 + index, 1, "P" + index, "Source", ""),
+					new DestinationSignTopology.StopOccurrence(30_000 + index, 2, "D" + index, "Target", ""))));
+		}
+		return new DestinationSignTopology(routes, List.of(
+				new DestinationSignTopology.StationZone(1, "Source"), new DestinationSignTopology.StationZone(2, "Target")));
 	}
 }

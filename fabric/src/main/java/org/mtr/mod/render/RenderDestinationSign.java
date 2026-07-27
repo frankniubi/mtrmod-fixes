@@ -127,11 +127,12 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 		final DestinationSignAssetSnapshot.Sprite header = checkedPrepared.header(phase);
 		final int headerHeight = header.getHeight();
 		final int resolution = checkedPrepared.getStaticKey().getVariant().getResolution();
-		atlasQuads.add(atlasQuad(header, 0, 0, layout.getSurfaceWidth(), headerHeight, snapshot.getAtlasHeight(), resolution));
+		final int atlasResolution = snapshot.renderResolution(resolution);
+		atlasQuads.add(atlasQuad(header, 0, 0, layout.getSurfaceWidth(), headerHeight, snapshot.getAtlasHeight(), atlasResolution));
 
 		if (allRows.isEmpty()) {
 			final DestinationSignAssetSnapshot.Sprite label = checkedPrepared.label(DestinationSignAssetSnapshot.SpriteKind.NO_DIRECT_SERVICE, phase);
-			atlasQuads.add(atlasQuad(label, 0, headerHeight, layout.getSurfaceWidth(), rowHeight, snapshot.getAtlasHeight(), resolution));
+			atlasQuads.add(atlasQuad(label, 0, headerHeight, layout.getSurfaceWidth(), rowHeight, snapshot.getAtlasHeight(), atlasResolution));
 		} else {
 			final int start = page * capacity;
 			final int end = Math.min(allRows.size(), start + capacity);
@@ -140,7 +141,7 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 				final int visibleIndex = index - start;
 				final int rowY = headerHeight + visibleIndex * rowHeight;
 				final DestinationSignRows.Row row = allRows.get(index);
-				atlasQuads.add(atlasQuad(checkedPrepared.row(row.getOption(), phase), 0, rowY, layout.getSurfaceWidth(), rowHeight, snapshot.getAtlasHeight(), resolution));
+				atlasQuads.add(atlasQuad(checkedPrepared.row(row.getOption(), phase), 0, rowY, layout.getSurfaceWidth(), rowHeight, snapshot.getAtlasHeight(), atlasResolution));
 				if (snapshot.getStyle() == org.mtr.mod.route.DestinationSignStyle.PLATFORM_GROUPS
 						&& (index == start || allRows.get(index - 1).getArrivalKey().getPlatformId() != row.getArrivalKey().getPlatformId())) {
 					solidQuads.add(new SolidQuad(0, rowY, metrics.getIdentityX() + metrics.getIdentityWidth(), 2,
@@ -151,10 +152,10 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 						final DestinationSignAssetSnapshot.SpriteKind kind = row.getState() == DestinationSignArrivalState.LEAVING
 								? DestinationSignAssetSnapshot.SpriteKind.LEAVING : DestinationSignAssetSnapshot.SpriteKind.NO_SERVICE;
 						atlasQuads.add(atlasRegionQuad(checkedPrepared.label(kind, phase), metrics.getEtaX(), rowY,
-								metrics.getEtaWidth(), rowHeight, metrics.getEtaX(), metrics.getEtaWidth(), layout.getSurfaceWidth(), snapshot.getAtlasHeight(), resolution));
+								metrics.getEtaWidth(), rowHeight, metrics.getEtaX(), metrics.getEtaWidth(), layout.getSurfaceWidth(), snapshot.getAtlasHeight(), atlasResolution));
 					} else if (row.getState() == DestinationSignArrivalState.LOADING || row.getState() == DestinationSignArrivalState.AMBIGUOUS) {
 						atlasQuads.add(atlasRegionQuad(checkedPrepared.unavailable(phase), metrics.getEtaX(), rowY,
-								metrics.getEtaWidth(), rowHeight, metrics.getEtaX(), metrics.getEtaWidth(), layout.getSurfaceWidth(), snapshot.getAtlasHeight(), resolution));
+								metrics.getEtaWidth(), rowHeight, metrics.getEtaX(), metrics.getEtaWidth(), layout.getSurfaceWidth(), snapshot.getAtlasHeight(), atlasResolution));
 					} else {
 						final String eta = eta(row, serverNowMillis, phase);
 						if (!eta.isEmpty()) dynamicQuads.add(new DynamicQuad(eta, metrics.getEtaX(), rowY + (rowHeight - metrics.getRowFontSize()) / 2,

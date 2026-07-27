@@ -15,20 +15,19 @@ public final class DestinationSignAtlasRenderer {
 	public static RouteAssetImage render(DestinationSignAssetSnapshot snapshot, RouteAssetTextRasterizer text, int resolution) {
 		final DestinationSignAssetSnapshot checkedSnapshot = Objects.requireNonNull(snapshot, "snapshot");
 		final RouteAssetTextRasterizer checkedText = Objects.requireNonNull(text, "text");
-		if (resolution < 0 || resolution > 3) throw new IllegalArgumentException("Invalid destination sign resolution");
-		final int width = DestinationSignAtlasLayout.scaledSize(checkedSnapshot.getAtlasWidth(), resolution);
-		final int height = DestinationSignAtlasLayout.scaledSize(checkedSnapshot.getAtlasHeight(), resolution);
-		if ((long) width * height > RouteAssetProtocol.MAX_DESTINATION_SIGN_ATLAS_PIXELS) throw new IllegalArgumentException("Destination sign atlas exceeds the pixel limit");
+		final int renderResolution = checkedSnapshot.renderResolution(resolution);
+		final int width = DestinationSignAtlasLayout.scaledSize(checkedSnapshot.getAtlasWidth(), renderResolution);
+		final int height = DestinationSignAtlasLayout.scaledSize(checkedSnapshot.getAtlasHeight(), renderResolution);
 		final RouteAssetImage image = new RouteAssetImage(width, height);
 		image.fillRect(0, 0, width, height, WHITE);
 		for (final DestinationSignAssetSnapshot.Sprite sprite : checkedSnapshot.getSprites()) {
 			switch (sprite.getKind()) {
-				case HEADER: drawHeader(image, checkedSnapshot, checkedText, sprite, resolution); break;
-				case ROW: drawRow(image, checkedText, sprite, resolution); break;
-				case LEAVING: drawStateLabel(image, checkedSnapshot, checkedText, DestinationSignAssetSnapshot.LEAVING_TEXT, sprite, 0xFFB42318, resolution); break;
-				case NO_DIRECT_SERVICE: drawStateLabel(image, checkedSnapshot, checkedText, DestinationSignAssetSnapshot.NO_DIRECT_SERVICE_TEXT, sprite, 0xFF3F464D, resolution); break;
-				case NO_SERVICE: drawStateLabel(image, checkedSnapshot, checkedText, DestinationSignAssetSnapshot.NO_SERVICE_TEXT, sprite, 0xFF3F464D, resolution); break;
-				case UNAVAILABLE: drawStateLabel(image, checkedSnapshot, checkedText, DestinationSignAssetSnapshot.UNAVAILABLE_TEXT, sprite, 0xFF3F464D, resolution); break;
+				case HEADER: drawHeader(image, checkedSnapshot, checkedText, sprite, renderResolution); break;
+				case ROW: drawRow(image, checkedText, sprite, renderResolution); break;
+				case LEAVING: drawStateLabel(image, checkedSnapshot, checkedText, DestinationSignAssetSnapshot.LEAVING_TEXT, sprite, 0xFFB42318, renderResolution); break;
+				case NO_DIRECT_SERVICE: drawStateLabel(image, checkedSnapshot, checkedText, DestinationSignAssetSnapshot.NO_DIRECT_SERVICE_TEXT, sprite, 0xFF3F464D, renderResolution); break;
+				case NO_SERVICE: drawStateLabel(image, checkedSnapshot, checkedText, DestinationSignAssetSnapshot.NO_SERVICE_TEXT, sprite, 0xFF3F464D, renderResolution); break;
+				case UNAVAILABLE: drawStateLabel(image, checkedSnapshot, checkedText, DestinationSignAssetSnapshot.UNAVAILABLE_TEXT, sprite, 0xFF3F464D, renderResolution); break;
 			}
 		}
 		return image;
@@ -41,11 +40,13 @@ public final class DestinationSignAtlasRenderer {
 		final int arrowWidth = Math.max(20, snapshot.getAtlasWidth() / 12);
 		final int fontSize = clamp(14, (int) Math.floor(logicalHeight * 0.55), 28);
 		final int textWidth = Math.max(1, snapshot.getAtlasWidth() - arrowWidth - inset * 3);
+		final boolean highContrast = snapshot.getStyle() == DestinationSignStyle.DESTINATION_FLAG;
+		if (highContrast) fillLogicalRect(image, 0, sprite.getY(), snapshot.getAtlasWidth(), logicalHeight, BLACK, resolution);
 		drawSized(text, image, DestinationSignAtlasLayout.languageSegment(snapshot.getDestinationStationName(), sprite.getSegmentIndex()),
-				inset, sprite.getY(), textWidth, logicalHeight, fontSize, BLACK, RouteAssetTextRasterizer.Alignment.RIGHT, resolution);
+				inset, sprite.getY(), textWidth, logicalHeight, fontSize, highContrast ? WHITE : BLACK, RouteAssetTextRasterizer.Alignment.RIGHT, resolution);
 		drawSized(text, image, "\u2192", snapshot.getAtlasWidth() - arrowWidth - inset, sprite.getY(), arrowWidth, logicalHeight,
-				fontSize, GRAY, RouteAssetTextRasterizer.Alignment.CENTER, resolution);
-		fillLogicalRect(image, 0, sprite.getY() + logicalHeight - 1, snapshot.getAtlasWidth(), 1, LIGHT_GRAY, resolution);
+				fontSize, highContrast ? WHITE : GRAY, RouteAssetTextRasterizer.Alignment.CENTER, resolution);
+		fillLogicalRect(image, 0, sprite.getY() + logicalHeight - 1, snapshot.getAtlasWidth(), 1, highContrast ? GRAY : LIGHT_GRAY, resolution);
 	}
 
 	private static void drawRow(RouteAssetImage image, RouteAssetTextRasterizer text, DestinationSignAssetSnapshot.Sprite sprite, int resolution) {

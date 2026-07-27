@@ -85,7 +85,7 @@ public final class DestinationSignScreenModelTest {
 
 	@Test
 	public void saveRejectsAStaticAtlasThatCannotRenderAtAllServerResolutions() {
-		final DestinationSignScreenModel draft = new DestinationSignScreenModel(-10, "Source", topology(128), DestinationSignConfig.unconfigured(2, 1));
+		final DestinationSignScreenModel draft = new DestinationSignScreenModel(-10, "Source", topology(128, 16), DestinationSignConfig.unconfigured(2, 1));
 		draft.selectDestination(-20);
 		Assertions.assertFalse(draft.canSave());
 		Assertions.assertTrue(draft.findMinimumFootprint(DestinationSignStyle.ARRIVAL_ORDER).isEmpty());
@@ -93,7 +93,7 @@ public final class DestinationSignScreenModelTest {
 
 	@Test
 	public void projectedValidationUsesTheSelectedDensity() {
-		final DestinationSignScreenModel draft = new DestinationSignScreenModel(-10, "Source", topology(80), DestinationSignConfig.unconfigured(3, 1));
+		final DestinationSignScreenModel draft = new DestinationSignScreenModel(-10, "Source", topology(80, 16), DestinationSignConfig.unconfigured(3, 1));
 		draft.selectDestination(-20);
 		draft.setRoutesPerBlockHeight(2);
 		final boolean sparse = draft.canSave();
@@ -115,9 +115,14 @@ public final class DestinationSignScreenModelTest {
 	}
 
 	private static DestinationSignTopology topology(int routeCount) {
+		return topology(routeCount, 1);
+	}
+
+	private static DestinationSignTopology topology(int routeCount, int languageSegments) {
 		final List<DestinationSignTopology.ServiceRoute> routes = new ArrayList<>();
 		for (int index = 0; index < routeCount; index++) {
-			routes.add(new DestinationSignTopology.ServiceRoute(-100 - index, index, "R" + index, 0x14755E + index, List.of(
+			final String routeName = String.join("|", java.util.Collections.nCopies(languageSegments, "R" + index));
+			routes.add(new DestinationSignTopology.ServiceRoute(-100 - index, index, routeName, 0x14755E + index, List.of(
 					new DestinationSignTopology.StopOccurrence(-1000 - index, -10, "U" + index, "Source|Source EN", ""),
 					new DestinationSignTopology.StopOccurrence(-2000 - index, -20, "D" + index, "Target|Target EN", ""),
 					new DestinationSignTopology.StopOccurrence(-3000 - index, -30, "E" + index, "Other|Other EN", ""),

@@ -40,7 +40,7 @@ public final class DestinationSignConfigPacketTest {
 		Assertions.assertFalse(payload(-30, -20, 2, 2).validateAgainst(-10, topology).isPresent());
 		Assertions.assertFalse(payload(-10, -30, 2, 2).validateAgainst(-10, topology).isPresent());
 		Assertions.assertTrue(payload(-10, -20, 2, 2, DestinationSignStyle.DESTINATION_FLAG).validateAgainst(-10, topology).isPresent());
-		Assertions.assertFalse(payload(-10, -20, 2, 1).validateAgainst(-10, topology(128)).isPresent(), "the server must reject atlases that cannot publish every resolution");
+		Assertions.assertFalse(payload(-10, -20, 2, 1).validateAgainst(-10, topology(128, 16)).isPresent(), "the server must reject atlases that cannot publish every resolution");
 	}
 
 	@Test
@@ -157,7 +157,7 @@ public final class DestinationSignConfigPacketTest {
 
 	@Test
 	public void v2ValidationUsesTheRequestedDensityForAtlasBounds() {
-		final DestinationSignTopology manyRoutes = topology(60);
+		final DestinationSignTopology manyRoutes = topology(60, 16);
 		final PacketUpdateDestinationSignConfigV2.Payload sparse = new PacketUpdateDestinationSignConfigV2.Payload(-10, Set.of(-20L), "", 3, 1, 2,
 				DestinationSignStyle.ARRIVAL_ORDER.ordinal(), true);
 		final PacketUpdateDestinationSignConfigV2.Payload dense = new PacketUpdateDestinationSignConfigV2.Payload(-10, Set.of(-20L), "", 3, 1, 4,
@@ -211,9 +211,14 @@ public final class DestinationSignConfigPacketTest {
 	}
 
 	private static DestinationSignTopology topology(int routeCount) {
+		return topology(routeCount, 2);
+	}
+
+	private static DestinationSignTopology topology(int routeCount, int languageSegments) {
 		final List<DestinationSignTopology.ServiceRoute> routes = new ArrayList<>();
 		for (int index = 0; index < routeCount; index++) {
-			routes.add(new DestinationSignTopology.ServiceRoute(-100 - index, index, "R" + index + "|Route " + index, 0x14755E + index, List.of(
+			final String routeName = String.join("|", java.util.Collections.nCopies(languageSegments, "R" + index));
+			routes.add(new DestinationSignTopology.ServiceRoute(-100 - index, index, routeName, 0x14755E + index, List.of(
 					new DestinationSignTopology.StopOccurrence(-1000 - index, -10, "U" + index, "Source", ""),
 					new DestinationSignTopology.StopOccurrence(-2000 - index, -20, "D" + index, "Target", ""))));
 		}

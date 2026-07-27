@@ -160,13 +160,19 @@ public final class DestinationSignAssetSnapshot {
 
 	private void validateRenderBounds() {
 		for (int resolution = 0; resolution <= 3; resolution++) {
+			renderResolution(resolution);
+		}
+	}
+
+	public int renderResolution(int requestedResolution) {
+		if (requestedResolution < 0 || requestedResolution > 3) throw new IllegalArgumentException("Invalid destination sign resolution");
+		for (int resolution = requestedResolution; resolution >= 0; resolution--) {
 			final int width = DestinationSignAtlasLayout.scaledSize(atlasWidth, resolution);
 			final int height = DestinationSignAtlasLayout.scaledSize(atlasHeight, resolution);
-			if (width > RouteAssetProtocol.MAX_PNG_AXIS || height > RouteAssetProtocol.MAX_PNG_AXIS
-					|| (long) width * height > RouteAssetProtocol.MAX_DESTINATION_SIGN_ATLAS_PIXELS) {
-				throw new IllegalArgumentException("Destination sign atlas exceeds the render limits");
-			}
+			if (width <= RouteAssetProtocol.MAX_PNG_AXIS && height <= RouteAssetProtocol.MAX_PNG_AXIS
+					&& (long) width * height <= RouteAssetProtocol.MAX_DESTINATION_SIGN_ATLAS_PIXELS) return resolution;
 		}
+		throw new IllegalArgumentException("Destination sign atlas exceeds the render limits");
 	}
 
 	public long getSourceStationId() { return sourceStationId; }
