@@ -3,12 +3,18 @@ package org.mtr.mod.packet;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mtr.mapping.holder.BlockPos;
+import org.mtr.mod.block.DestinationSignConfigResult;
+import org.mtr.mod.block.DestinationSignConfig;
 import org.mtr.mod.route.DestinationSignStyle;
 import org.mtr.mod.route.DestinationSignTopology;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
 
 public final class DestinationSignConfigPacketTest {
 
@@ -78,6 +84,92 @@ public final class DestinationSignConfigPacketTest {
 		final int writeEta = source.indexOf("sender.writeBoolean(payload.showEta)");
 		final int writeHeader = source.indexOf("sender.writeString(payload.customHeader)");
 		Assertions.assertTrue(writeWidth >= 0 && writeWidth < writeEta && writeEta < writeHeader);
+	}
+
+	@Test
+	public void legacyPacketSourceRemainsByteForByteUnchanged() throws Exception {
+		final byte[] source = Files.readAllBytes(project("fabric/src/main/java/org/mtr/mod/packet/PacketUpdateDestinationSignConfig.java"));
+		final byte[] hash = MessageDigest.getInstance("SHA-256").digest(source);
+		final StringBuilder hex = new StringBuilder();
+		for (final byte value : hash) hex.append(String.format("%02x", value));
+		Assertions.assertEquals("b2e0c35648fdfb111c5ce227e848f7978bb1c03a37eede52fc56dbe23063589a", hex.toString());
+	}
+
+	@Test
+	public void resultPacketWritesCorrelationHeaderBeforeBoundedResult() throws Exception {
+		final BlockPos anchor = new BlockPos(7, -8, 9);
+		final PacketDestinationSignConfigResult packet = new PacketDestinationSignConfigResult(
+				anchor, 123, DestinationSignConfigResult.FOOTPRINT_UNAVAILABLE);
+		Assertions.assertEquals(anchor, packet.getAnchor());
+		Assertions.assertEquals(123, packet.getRequestId());
+		Assertions.assertEquals(DestinationSignConfigResult.FOOTPRINT_UNAVAILABLE, packet.getResult());
+		Assertions.assertThrows(IllegalArgumentException.class,
+				() -> new PacketDestinationSignConfigResult(anchor, 0, DestinationSignConfigResult.SUCCESS));
+
+		final String source = Files.readString(project("fabric/src/main/java/org/mtr/mod/packet/PacketDestinationSignConfigResult.java"), StandardCharsets.UTF_8);
+		final int anchorWrite = source.indexOf("sender.writeLong(anchor.asLong())");
+		final int requestWrite = source.indexOf("sender.writeLong(requestId)");
+		final int resultWrite = source.indexOf("sender.writeInt(result.getWireCode())");
+		Assertions.assertTrue(anchorWrite >= 0 && anchorWrite < requestWrite && requestWrite < resultWrite);
+		Assertions.assertTrue(source.contains("InitClient.handleDestinationSignConfigResult(anchor, requestId, result)"));
+	}
+
+	@Test
+	public void newRequestAndResultPacketsAreRegistered() throws Exception {
+		final String init = Files.readString(project("fabric/src/main/java/org/mtr/mod/Init.java"), StandardCharsets.UTF_8);
+		Assertions.assertTrue(init.contains("REGISTRY.registerPacket(PacketUpdateDestinationSignConfigV2.class"));
+		Assertions.assertTrue(init.contains("REGISTRY.registerPacket(PacketDestinationSignConfigResult.class"));
+	}
+
+	@Test
+	public void v2RequestCarriesPositiveCorrelationHeaderAndCompleteDensityConfig() throws Exception {
+		final BlockPos anchor = new BlockPos(11, -12, 13);
+		final DestinationSignConfig config = DestinationSignConfig.configured(-10, Set.of(-20L, -30L), 5, 2,
+				DestinationSignStyle.PLATFORM_GROUPS, false, "Dense|Header", 4);
+		final PacketUpdateDestinationSignConfigV2 packet = new PacketUpdateDestinationSignConfigV2(anchor, 77, config);
+		Assertions.assertEquals(anchor, packet.getAnchor());
+		Assertions.assertEquals(77, packet.getRequestId());
+		Assertions.assertEquals(config, packet.getPayload().toConfig().orElseThrow());
+		Assertions.assertThrows(IllegalArgumentException.class, () -> new PacketUpdateDestinationSignConfigV2(anchor, 0, config));
+
+		final String source = Files.readString(project("fabric/src/main/java/org/mtr/mod/packet/PacketUpdateDestinationSignConfigV2.java"), StandardCharsets.UTF_8);
+		final int anchorWrite = source.indexOf("sender.writeLong(anchor.asLong())");
+		final int requestWrite = source.indexOf("sender.writeLong(requestId)");
+		final int sourceWrite = source.indexOf("sender.writeLong(payload.sourceStationId)");
+		final int densityWrite = source.indexOf("sender.writeInt(payload.routesPerBlockHeight)");
+		Assertions.assertTrue(anchorWrite >= 0 && anchorWrite < requestWrite && requestWrite < sourceWrite && sourceWrite < densityWrite);
+		Assertions.assertTrue(source.contains("catch (RuntimeException exception)"));
+		Assertions.assertTrue(source.contains("DestinationSignConfigResult.INVALID_LAYOUT"));
+	}
+
+	@Test
+	public void v2PayloadMapsLayoutAndTopologyFailuresToStableResults() {
+		final PacketUpdateDestinationSignConfigV2.Payload valid = v2Payload(-10, Set.of(-20L), 3);
+		Assertions.assertEquals(DestinationSignConfigResult.SUCCESS, valid.validateAgainst(-10, topology(2)).getResult());
+		Assertions.assertEquals(DestinationSignConfigResult.STALE_TARGET, valid.validateAgainst(-30, topology(2)).getResult());
+		Assertions.assertEquals(DestinationSignConfigResult.NO_DIRECT_SERVICE,
+				v2Payload(-10, Set.of(-30L), 3).validateAgainst(-10, topology(2)).getResult());
+		Assertions.assertTrue(v2Payload(-10, Set.of(-20L), 1).toConfig().isEmpty());
+		Assertions.assertTrue(v2Payload(-10, Set.of(-20L), 5).toConfig().isEmpty());
+	}
+
+	@Test
+	public void v2AcknowledgesAParsedRequestWithoutStationOwnership() throws Exception {
+		final String source = Files.readString(project("fabric/src/main/java/org/mtr/mod/packet/PacketUpdateDestinationSignConfigV2.java"), StandardCharsets.UTF_8);
+		Assertions.assertTrue(source.contains("nearby.getStations().isEmpty()"));
+		Assertions.assertTrue(source.contains("sendResultOnce.accept(DestinationSignConfigResult.STALE_TARGET)"));
+		Assertions.assertTrue(source.contains("DestinationSignServerTopology.resolveTopology(world"));
+		Assertions.assertFalse(source.contains("DestinationSignServerTopology.resolve(world, anchor"));
+	}
+
+	private static PacketUpdateDestinationSignConfigV2.Payload v2Payload(long source, Set<Long> destinations, int density) {
+		return new PacketUpdateDestinationSignConfigV2.Payload(source, destinations, "", 3, 2, density,
+				DestinationSignStyle.ARRIVAL_ORDER.ordinal(), true);
+	}
+
+	private static Path project(String path) {
+		final Path direct = Path.of(path);
+		return Files.exists(direct) ? direct : Path.of("..").resolve(path);
 	}
 
 	private static PacketUpdateDestinationSignConfig.Payload payload(long source, long destination, int width, int height) {

@@ -125,6 +125,8 @@ public final class Init implements Utilities {
 		REGISTRY.registerPacket(PacketTurnOnBlockEntity.class, PacketTurnOnBlockEntity::new);
 		REGISTRY.registerPacket(PacketUpdateData.class, PacketUpdateData::new);
 		REGISTRY.registerPacket(PacketUpdateDestinationSignConfig.class, PacketUpdateDestinationSignConfig::new);
+		REGISTRY.registerPacket(PacketUpdateDestinationSignConfigV2.class, PacketUpdateDestinationSignConfigV2::new);
+		REGISTRY.registerPacket(PacketDestinationSignConfigResult.class, PacketDestinationSignConfigResult::new);
 		REGISTRY.registerPacket(PacketUpdateEyeCandyConfig.class, PacketUpdateEyeCandyConfig::new);
 		REGISTRY.registerPacket(PacketUpdateLastRailStyles.class, PacketUpdateLastRailStyles::new);
 		REGISTRY.registerPacket(PacketUpdateLiftTrackFloorConfig.class, PacketUpdateLiftTrackFloorConfig::new);

@@ -16,11 +16,12 @@ import org.mtr.mod.Init;
 import org.mtr.mod.InitClient;
 import org.mtr.mod.block.BlockDestinationSign;
 import org.mtr.mod.block.DestinationSignConfig;
+import org.mtr.mod.block.DestinationSignConfigResult;
 import org.mtr.mod.client.IDrawing;
 import org.mtr.mod.client.MinecraftClientData;
 import org.mtr.mod.data.IGui;
 import org.mtr.mod.generated.lang.TranslationProvider;
-import org.mtr.mod.packet.PacketUpdateDestinationSignConfig;
+import org.mtr.mod.packet.PacketUpdateDestinationSignConfigV2;
 import org.mtr.mod.route.DestinationSignTopology;
 import org.mtr.mod.route.RouteAssetDataMirror;
 
@@ -36,10 +37,15 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 	private final ButtonWidgetExtension buttonWidthPlus;
 	private final ButtonWidgetExtension buttonHeightMinus;
 	private final ButtonWidgetExtension buttonHeightPlus;
+	private final ButtonWidgetExtension buttonDensity2;
+	private final ButtonWidgetExtension buttonDensity3;
+	private final ButtonWidgetExtension buttonDensity4;
 	private final CheckboxWidgetExtension checkboxEta;
 	private final ButtonWidgetExtension buttonStyle;
 	private final ButtonWidgetExtension buttonDone;
 	private boolean customHeaderValid = true;
+	private final DestinationSignSaveState saveState = new DestinationSignSaveState();
+	private String saveErrorTranslationKey;
 
 	public DestinationSignConfigScreen(BlockPos anchor) {
 		this.anchor = anchor;
@@ -72,6 +78,9 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 		buttonWidthPlus = stepButton("+", () -> model.adjustWidth(1));
 		buttonHeightMinus = stepButton("-", () -> model.adjustHeight(-1));
 		buttonHeightPlus = stepButton("+", () -> model.adjustHeight(1));
+		buttonDensity2 = densityButton(2);
+		buttonDensity3 = densityButton(3);
+		buttonDensity4 = densityButton(4);
 		checkboxEta = new CheckboxWidgetExtension(0, 0, 0, SQUARE_SIZE, true, checked -> {
 			if (model != null) model.setShowEta(checked);
 			updateControls();
@@ -94,17 +103,27 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 		IDrawing.setPositionAndWidth(buttonWidthPlus, x + panelWidth - SQUARE_SIZE, SQUARE_SIZE * 5, SQUARE_SIZE);
 		IDrawing.setPositionAndWidth(buttonHeightMinus, x, SQUARE_SIZE * 6, SQUARE_SIZE);
 		IDrawing.setPositionAndWidth(buttonHeightPlus, x + panelWidth - SQUARE_SIZE, SQUARE_SIZE * 6, SQUARE_SIZE);
+		final int densityX = x + panelWidth / 2;
+		final int densityWidth = panelWidth - panelWidth / 2;
+		final int densitySegmentWidth = densityWidth / 3;
+		IDrawing.setPositionAndWidth(buttonDensity2, densityX, SQUARE_SIZE * 7, densitySegmentWidth);
+		IDrawing.setPositionAndWidth(buttonDensity3, densityX + densitySegmentWidth, SQUARE_SIZE * 7, densitySegmentWidth);
+		IDrawing.setPositionAndWidth(buttonDensity4, densityX + densitySegmentWidth * 2, SQUARE_SIZE * 7, densityWidth - densitySegmentWidth * 2);
 		IDrawing.setPositionAndWidth(checkboxEta, x, SQUARE_SIZE * 8, panelWidth);
 		IDrawing.setPositionAndWidth(buttonStyle, x, SQUARE_SIZE * 10, panelWidth);
 		IDrawing.setPositionAndWidth(buttonDone, x, height - SQUARE_SIZE * 2, panelWidth);
-		for (final ClickableWidget widget : new ClickableWidget[] {new ClickableWidget(buttonDestination), new ClickableWidget(textFieldCustomHeader), new ClickableWidget(buttonWidthMinus), new ClickableWidget(buttonWidthPlus), new ClickableWidget(buttonHeightMinus), new ClickableWidget(buttonHeightPlus), new ClickableWidget(checkboxEta), new ClickableWidget(buttonStyle), new ClickableWidget(buttonDone)}) addChild(widget);
+		for (final ClickableWidget widget : new ClickableWidget[] {new ClickableWidget(buttonDestination), new ClickableWidget(textFieldCustomHeader), new ClickableWidget(buttonWidthMinus), new ClickableWidget(buttonWidthPlus), new ClickableWidget(buttonHeightMinus), new ClickableWidget(buttonHeightPlus), new ClickableWidget(buttonDensity2), new ClickableWidget(buttonDensity3), new ClickableWidget(buttonDensity4), new ClickableWidget(checkboxEta), new ClickableWidget(buttonStyle), new ClickableWidget(buttonDone)}) addChild(widget);
 		updateControls();
 	}
 
 	@Override
 	public void tick2() {
 		textFieldCustomHeader.tick2();
-		if (model != null && !textFieldCustomHeader.getText2().equals(model.getCustomHeader())) {
+		if (saveState.tick()) {
+			saveErrorTranslationKey = "gui.mtr.destination_sign_save_timeout";
+			updateControls();
+		}
+		if (!saveState.isPending() && model != null && !textFieldCustomHeader.getText2().equals(model.getCustomHeader())) {
 			try {
 				model.setCustomHeader(textFieldCustomHeader.getText2());
 				customHeaderValid = true;
@@ -127,9 +146,16 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 					(width - panelWidth) / 2 + panelWidth / 6, SQUARE_SIZE * 4 + TEXT_PADDING, ARGB_WHITE);
 			graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_width", model.getWidth()), width / 2, SQUARE_SIZE * 5 + TEXT_PADDING, ARGB_WHITE);
 			graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_height", model.getHeight()), width / 2, SQUARE_SIZE * 6 + TEXT_PADDING, ARGB_WHITE);
+			graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_density"),
+					(width - panelWidth) / 2 + panelWidth / 4, SQUARE_SIZE * 7 + TEXT_PADDING, ARGB_WHITE);
 			if (model.getDestinationStationId() != 0 && !model.canSave()) {
 				model.findMinimumFootprint(model.getStyle()).ifPresent(minimum ->
 						graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_minimum", minimum), width / 2, SQUARE_SIZE * 12, ARGB_WHITE));
+			}
+			if (saveState.isPending()) {
+				graphicsHolder.drawCenteredText(TextHelper.translatable("gui.mtr.destination_sign_saving"), width / 2, height - SQUARE_SIZE * 3, ARGB_WHITE);
+			} else if (saveErrorTranslationKey != null) {
+				graphicsHolder.drawCenteredText(TextHelper.translatable(saveErrorTranslationKey), width / 2, height - SQUARE_SIZE * 3, ARGB_WHITE);
 			}
 		}
 		super.render(graphicsHolder, mouseX, mouseY, delta);
@@ -137,9 +163,31 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 
 	@Override public boolean isPauseScreen2() { return false; }
 
+	public void handleConfigResult(BlockPos resultAnchor, long requestId, DestinationSignConfigResult result) {
+		final DestinationSignSaveState.ResultDisposition disposition = saveState.handleResult(resultAnchor, requestId, result);
+		if (disposition == DestinationSignSaveState.ResultDisposition.MATCHED_SUCCESS) onClose2();
+		else if (disposition == DestinationSignSaveState.ResultDisposition.MATCHED_FAILURE) {
+			saveErrorTranslationKey = getFailureTranslationKey(result);
+			updateControls();
+		}
+	}
+
+	@Override
+	public void onClose2() {
+		saveState.cancelPending();
+		super.onClose2();
+	}
+
 	private ButtonWidgetExtension stepButton(String text, Runnable action) {
 		return new ButtonWidgetExtension(0, 0, 0, SQUARE_SIZE, TextHelper.literal(text), button -> {
 			if (model != null) action.run();
+			updateControls();
+		});
+	}
+
+	private ButtonWidgetExtension densityButton(int density) {
+		return new ButtonWidgetExtension(0, 0, 0, SQUARE_SIZE, TextHelper.literal(Integer.toString(density)), button -> {
+			if (model != null) model.setRoutesPerBlockHeight(density);
 			updateControls();
 		});
 	}
@@ -157,24 +205,44 @@ public final class DestinationSignConfigScreen extends ScreenExtension implement
 
 	private void updateControls() {
 		final boolean available = model != null;
-		buttonDestination.active = available && !destinationItems.isEmpty();
-		buttonStyle.active = available;
-		checkboxEta.active = available;
-		textFieldCustomHeader.active = available;
+		final boolean mutable = available && !saveState.isPending();
+		buttonDestination.active = mutable && !destinationItems.isEmpty();
+		buttonStyle.active = mutable;
+		checkboxEta.active = mutable;
+		textFieldCustomHeader.active = mutable;
 		if (available) {
 			checkboxEta.setChecked(model.isShowEta());
-			buttonWidthMinus.active = model.canAdjustWidth(-1);
-			buttonWidthPlus.active = model.canAdjustWidth(1);
-			buttonHeightMinus.active = model.canAdjustHeight(-1);
-			buttonHeightPlus.active = model.canAdjustHeight(1);
-			buttonDone.active = customHeaderValid && model.canSave();
+			buttonWidthMinus.active = mutable && model.canAdjustWidth(-1);
+			buttonWidthPlus.active = mutable && model.canAdjustWidth(1);
+			buttonHeightMinus.active = mutable && model.canAdjustHeight(-1);
+			buttonHeightPlus.active = mutable && model.canAdjustHeight(1);
+			buttonDensity2.active = mutable && model.getRoutesPerBlockHeight() != 2;
+			buttonDensity3.active = mutable && model.getRoutesPerBlockHeight() != 3;
+			buttonDensity4.active = mutable && model.getRoutesPerBlockHeight() != 4;
+			buttonDone.active = mutable && customHeaderValid && model.canSave();
 		} else {
-			buttonWidthMinus.active = buttonWidthPlus.active = buttonHeightMinus.active = buttonHeightPlus.active = buttonDone.active = false;
+			buttonWidthMinus.active = buttonWidthPlus.active = buttonHeightMinus.active = buttonHeightPlus.active = false;
+			buttonDensity2.active = buttonDensity3.active = buttonDensity4.active = buttonDone.active = false;
 		}
 	}
 
 	private void saveAndClose() {
-		if (model != null && customHeaderValid && model.canSave()) InitClient.REGISTRY_CLIENT.sendPacketToServer(new PacketUpdateDestinationSignConfig(anchor, model.toConfig()));
-		onClose2();
+		if (model != null && customHeaderValid && model.canSave() && !saveState.isPending()) {
+			final long requestId = saveState.begin(anchor);
+			saveErrorTranslationKey = null;
+			updateControls();
+			InitClient.REGISTRY_CLIENT.sendPacketToServer(new PacketUpdateDestinationSignConfigV2(anchor, requestId, model.toConfig()));
+		}
+	}
+
+	private static String getFailureTranslationKey(DestinationSignConfigResult result) {
+		switch (result) {
+			case STALE_TARGET: return "gui.mtr.destination_sign_save_stale_target";
+			case TOO_FAR: return "gui.mtr.destination_sign_save_too_far";
+			case INVALID_LAYOUT: return "gui.mtr.destination_sign_save_invalid_layout";
+			case NO_DIRECT_SERVICE: return "gui.mtr.destination_sign_save_no_direct_service";
+			case FOOTPRINT_UNAVAILABLE: return "gui.mtr.destination_sign_save_footprint_unavailable";
+			default: return "gui.mtr.destination_sign_save_internal_rejected";
+		}
 	}
 }

@@ -36,6 +36,8 @@ import org.mtr.mod.item.ItemDriverKey;
 import org.mtr.mod.packet.ClientPacketHelper;
 import org.mtr.mod.packet.PacketRequestData;
 import org.mtr.mod.packet.PacketRequestInterchangeData;
+import org.mtr.mod.block.DestinationSignConfigResult;
+import org.mtr.mod.screen.DestinationSignConfigScreen;
 import org.mtr.mod.render.*;
 import org.mtr.mod.resource.CachedResource;
 import org.mtr.mod.screen.BetaWarningScreen;
@@ -66,6 +68,13 @@ public final class InitClient {
 	public static final RegistryClient REGISTRY_CLIENT = new RegistryClient(Init.REGISTRY);
 	public static final int MILLIS_PER_SPEED_SOUND = 200;
 	public static final LoopingSoundInstance TACTILE_MAP_SOUND_INSTANCE = new LoopingSoundInstance("tactile_map_music");
+
+	public static void handleDestinationSignConfigResult(BlockPos anchor, long requestId, DestinationSignConfigResult result) {
+		final Screen currentScreen = MinecraftClient.getInstance().getCurrentScreenMapped();
+		if (currentScreen != null && currentScreen.data instanceof DestinationSignConfigScreen) {
+			((DestinationSignConfigScreen) currentScreen.data).handleConfigResult(anchor, requestId, result);
+		}
+	}
 
 	static {
 		Init.createWebserverSetup(InitClient::setupWebserver);

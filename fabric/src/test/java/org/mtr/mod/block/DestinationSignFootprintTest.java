@@ -95,4 +95,32 @@ public final class DestinationSignFootprintTest {
 		Assertions.assertFalse(block.contains("current.data.isReplaceable()"));
 		Assertions.assertTrue(block.contains("state.canReplace(context)"));
 	}
+
+	@Test
+	public void interactionDistanceUsesTheNearestOwnedFootprintCell() throws Exception {
+		Path source = Path.of("src", "main", "java", "org", "mtr", "mod", "block", "BlockDestinationSign.java");
+		if (!Files.exists(source)) source = Path.of("fabric").resolve(source);
+		final String block = Files.readString(source);
+		Assertions.assertTrue(block.contains("if (isOwnedBy(world, cell.getPosition(), anchor)) ownedCells.add(cell.getPosition())"));
+		Assertions.assertTrue(block.contains("return withinInteractionDistance(ownedCells, playerX, playerY, playerZ)"));
+		Assertions.assertTrue(block.contains("if (x * x + y * y + z * z <= 64) return true"));
+	}
+
+	@Test
+	public void applyConfigReturnsTheBoundedResultType() throws Exception {
+		Assertions.assertEquals(DestinationSignConfigResult.class, BlockDestinationSign.class.getDeclaredMethod(
+				"applyConfig", org.mtr.mapping.holder.World.class, BlockPos.class,
+				org.mtr.mapping.holder.PlayerEntity.class, DestinationSignConfig.class).getReturnType());
+	}
+
+	@Test
+	public void applyConfigGuardsEveryRollbackSurfaceAndIndexesDensity() throws Exception {
+		Path source = Path.of("src", "main", "java", "org", "mtr", "mod", "block", "BlockDestinationSign.java");
+		if (!Files.exists(source)) source = Path.of("fabric").resolve(source);
+		final String block = Files.readString(source);
+		Assertions.assertTrue(block.contains("restoreWorldStateQuietly(world, originalStates)"));
+		Assertions.assertTrue(block.contains("restoreEntityConfigQuietly(entity, previous)"));
+		Assertions.assertTrue(block.contains("restoreConfiguredIndexQuietly(persistentState, anchor, previous)"));
+		Assertions.assertTrue(block.contains("config.isShowEta(), config.getRoutesPerBlockHeight())"));
+	}
 }

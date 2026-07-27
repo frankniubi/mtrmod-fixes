@@ -55,7 +55,7 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 
 	@Override
 	public void onPlaced2(World world, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack itemStack) {
-		if (!world.isClient() && !applyConfig(world, pos, placer != null && PlayerEntity.isInstance(placer) ? PlayerEntity.cast(placer) : null, DestinationSignConfig.unconfigured(DestinationSignConfig.DEFAULT_WIDTH, DestinationSignConfig.DEFAULT_HEIGHT))) {
+		if (!world.isClient() && applyConfig(world, pos, placer != null && PlayerEntity.isInstance(placer) ? PlayerEntity.cast(placer) : null, DestinationSignConfig.unconfigured(DestinationSignConfig.DEFAULT_WIDTH, DestinationSignConfig.DEFAULT_HEIGHT)) != DestinationSignConfigResult.SUCCESS) {
 			world.setBlockState(pos, Blocks.getAirMapped().getDefaultState(), 35);
 		}
 	}
@@ -118,10 +118,10 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 		properties.add(VERTICAL_OFFSET);
 	}
 
-	public static boolean applyConfig(World world, BlockPos anchor, @Nullable PlayerEntity player, DestinationSignConfig replacement) {
-		if (!isCanonicalAnchor(world, anchor)) return false;
+	public static DestinationSignConfigResult applyConfig(World world, BlockPos anchor, @Nullable PlayerEntity player, DestinationSignConfig replacement) {
+		if (!isCanonicalAnchor(world, anchor)) return DestinationSignConfigResult.STALE_TARGET;
 		final BlockEntity entity = getAnchorEntity(world, anchor);
-		if (entity == null) return false;
+		if (entity == null) return DestinationSignConfigResult.STALE_TARGET;
 		final BlockState anchorState = world.getBlockState(anchor);
 		final Direction facing = getFacing(anchorState);
 		final DestinationSignConfig previous = entity.getConfig();
@@ -134,7 +134,7 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 		newCells.forEach(cell -> touched.add(cell.getPosition()));
 
 		for (final BlockPos position : touched) {
-			if (!world.isRegionLoaded(position, position) || player != null && !world.canPlayerModifyAt(player, position)) return false;
+			if (!world.isRegionLoaded(position, position) || player != null && !world.canPlayerModifyAt(player, position)) return DestinationSignConfigResult.FOOTPRINT_UNAVAILABLE;
 			final BlockState originalState = world.getBlockState(position);
 			originalStates.put(position, originalState);
 			finalStates.put(position, originalState);
@@ -144,7 +144,7 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 		}
 		for (final DestinationSignFootprint.Cell cell : newCells) {
 			final BlockState current = world.getBlockState(cell.getPosition());
-			if (!isOwnedBy(world, cell.getPosition(), anchor) && !isReplaceable(current, world, cell.getPosition(), player)) return false;
+			if (!isOwnedBy(world, cell.getPosition(), anchor) && !isReplaceable(current, world, cell.getPosition(), player)) return DestinationSignConfigResult.FOOTPRINT_UNAVAILABLE;
 			finalStates.put(cell.getPosition(), state(facing, cell.getHorizontalOffset(), cell.getVerticalOffset()));
 		}
 
@@ -153,45 +153,77 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 		try {
 			indexChanged = updateConfiguredIndex(persistentState, anchor, replacement);
 		} catch (RuntimeException exception) {
-			return false;
+			restoreConfiguredIndexQuietly(persistentState, anchor, previous);
+			return DestinationSignConfigResult.INTERNAL_REJECTED;
 		}
 
 		final List<BlockPos> positions = new ArrayList<>(touched);
-		final boolean committed = DestinationSignFootprint.transact(positions, new DestinationSignFootprint.TransactionAccess<BlockState>() {
-			@Override
-			public BlockState capture(BlockPos position) {
-				return world.getBlockState(position);
-			}
+		final boolean committed;
+		try {
+			committed = DestinationSignFootprint.transact(positions, new DestinationSignFootprint.TransactionAccess<BlockState>() {
+				@Override
+				public BlockState capture(BlockPos position) {
+					return world.getBlockState(position);
+				}
 
-			@Override
-			public boolean write(BlockPos position) {
-				final BlockState target = finalStates.get(position);
-				return world.getBlockState(position).equals(target) || world.setBlockState(position, target, 2);
-			}
+				@Override
+				public boolean write(BlockPos position) {
+					final BlockState target = finalStates.get(position);
+					return world.getBlockState(position).equals(target) || world.setBlockState(position, target, 2);
+				}
 
-			@Override
-			public void restore(BlockPos position, BlockState value) {
-				world.setBlockState(position, value, 2);
-			}
-		});
+				@Override
+				public void restore(BlockPos position, BlockState value) {
+					world.setBlockState(position, value, 2);
+				}
+			});
+		} catch (RuntimeException exception) {
+			restoreWorldStateQuietly(world, originalStates);
+			restoreEntityConfigQuietly(entity, previous);
+			restoreConfiguredIndexQuietly(persistentState, anchor, previous);
+			return DestinationSignConfigResult.INTERNAL_REJECTED;
+		}
 		if (!committed) {
-			restoreConfiguredIndex(persistentState, anchor, previous);
-			return false;
+			restoreWorldStateQuietly(world, originalStates);
+			restoreEntityConfigQuietly(entity, previous);
+			restoreConfiguredIndexQuietly(persistentState, anchor, previous);
+			return DestinationSignConfigResult.INTERNAL_REJECTED;
 		}
 
 		try {
 			entity.setConfig(replacement);
 		} catch (RuntimeException exception) {
-			originalStates.forEach((position, originalState) -> world.setBlockState(position, originalState, 2));
-			entity.setConfig(previous);
-			restoreConfiguredIndex(persistentState, anchor, previous);
-			return false;
+			restoreWorldStateQuietly(world, originalStates);
+			restoreEntityConfigQuietly(entity, previous);
+			restoreConfiguredIndexQuietly(persistentState, anchor, previous);
+			return DestinationSignConfigResult.INTERNAL_REJECTED;
 		}
 		if (indexChanged) notifyConfiguredAssets(world, "destination-sign-config");
 		for (final BlockPos position : touched) {
 			world.updateNeighbors(position, org.mtr.mod.Blocks.DESTINATION_STATION_SIGN.get());
 		}
-		return true;
+		return DestinationSignConfigResult.SUCCESS;
+	}
+
+	public static boolean withinInteractionDistance(World world, BlockPos anchor, double playerX, double playerY, double playerZ) {
+		final BlockEntity entity = getAnchorEntity(world, anchor);
+		if (entity == null) return false;
+		final List<BlockPos> ownedCells = new ArrayList<>();
+		for (final DestinationSignFootprint.Cell cell : DestinationSignFootprint.cells(anchor, getFacing(world.getBlockState(anchor)),
+				entity.getConfig().getWidth(), entity.getConfig().getHeight())) {
+			if (isOwnedBy(world, cell.getPosition(), anchor)) ownedCells.add(cell.getPosition());
+		}
+		return withinInteractionDistance(ownedCells, playerX, playerY, playerZ);
+	}
+
+	public static boolean withinInteractionDistance(Iterable<BlockPos> cells, double playerX, double playerY, double playerZ) {
+		for (final BlockPos cell : cells) {
+			final double x = playerX - cell.getX() - 0.5;
+			final double y = playerY - cell.getY() - 0.5;
+			final double z = playerZ - cell.getZ() - 0.5;
+			if (x * x + y * y + z * z <= 64) return true;
+		}
+		return false;
 	}
 
 	private static boolean isReplaceable(BlockState state, World world, BlockPos position, @Nullable PlayerEntity player) {
@@ -266,9 +298,29 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 		else persistentState.removeConfiguredSign(anchor.asLong());
 	}
 
+	private static void restoreConfiguredIndexQuietly(PersistentStateData persistentState, BlockPos anchor, DestinationSignConfig previous) {
+		try {
+			restoreConfiguredIndex(persistentState, anchor, previous);
+		} catch (RuntimeException ignored) { }
+	}
+
+	private static void restoreWorldStateQuietly(World world, Map<BlockPos, BlockState> originalStates) {
+		originalStates.forEach((position, originalState) -> {
+			try {
+				world.setBlockState(position, originalState, 2);
+			} catch (RuntimeException ignored) { }
+		});
+	}
+
+	private static void restoreEntityConfigQuietly(BlockEntity entity, DestinationSignConfig previous) {
+		try {
+			entity.setConfig(previous);
+		} catch (RuntimeException ignored) { }
+	}
+
 	private static DestinationSignConfiguredEntry configuredEntry(DestinationSignConfig config) {
 		return new DestinationSignConfiguredEntry(config.getSourceStationId(), config.getDestinationStationIds(), config.getCustomHeader(),
-				config.getWidth(), config.getHeight(), config.getStyle(), config.isShowEta());
+				config.getWidth(), config.getHeight(), config.getStyle(), config.isShowEta(), config.getRoutesPerBlockHeight());
 	}
 
 	private static void notifyConfiguredAssets(World world, String cause) {
