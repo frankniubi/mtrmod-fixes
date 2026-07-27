@@ -16,15 +16,17 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 /** Resolves the authoritative anchor station and full route topology without requiring asset offload to be enabled. */
 public final class DestinationSignServerTopology {
 
 	private static final long CACHE_MILLIS = 5_000;
 	private static final Map<CacheKey, CacheEntry> CACHE = new HashMap<>();
-	private static final Map<CacheKey, List<java.util.function.Consumer<DestinationSignTopology>>> PENDING = new HashMap<>();
+	private static final Map<CacheKey, List<ResolutionCallback>> PENDING = new HashMap<>();
 	private static final Map<CacheKey, Long> GENERATIONS = new HashMap<>();
 	private static long lifecycleEpoch;
 	private static final SerializedDataBase EMPTY_REQUEST = new SerializedDataBase() {
@@ -35,47 +37,78 @@ public final class DestinationSignServerTopology {
 	private DestinationSignServerTopology() { }
 
 	public static void resolve(World world, BlockPos anchor, BiConsumer<Long, DestinationSignTopology> callback) {
-		Init.sendMessageC2S(OperationProcessor.NEARBY_STATIONS, world.getServer(), world,
-				new NearbyAreasRequest<>(Init.blockPosToPosition(anchor), 0), nearby -> {
-					if (nearby.getStations().isEmpty()) return;
-					final long sourceStationId = nearby.getStations().get(0).getId();
-					if (sourceStationId == 0) return;
-					resolveTopology(world, topology -> callback.accept(sourceStationId, topology));
-				}, NearbyAreasResponse.class);
+		resolve(world, anchor, callback, () -> { }, () -> { });
 	}
 
-	public static void resolveTopology(World world, java.util.function.Consumer<DestinationSignTopology> callback) {
+	public static void resolve(World world, BlockPos anchor, BiConsumer<Long, DestinationSignTopology> callback,
+			Runnable sourceUnavailable, Runnable resolutionFailed) {
+		final Runnable checkedSourceUnavailable = checkedFailure(sourceUnavailable);
+		final Runnable checkedResolutionFailed = checkedFailure(resolutionFailed);
+		try {
+			if (!Init.trySendMessageC2S(OperationProcessor.NEARBY_STATIONS, world.getServer(), world,
+					new NearbyAreasRequest<>(Init.blockPosToPosition(anchor), 0), nearby -> {
+						try {
+							if (nearby == null || nearby.getStations().isEmpty() || nearby.getStations().get(0).getId() == 0) {
+								checkedSourceUnavailable.run();
+								return;
+							}
+							final long sourceStationId = nearby.getStations().get(0).getId();
+							resolveTopology(world, topology -> callback.accept(sourceStationId, topology), checkedResolutionFailed);
+						} catch (RuntimeException exception) {
+							checkedResolutionFailed.run();
+						}
+				}, NearbyAreasResponse.class)) {
+				checkedResolutionFailed.run();
+			}
+		} catch (RuntimeException exception) {
+			checkedResolutionFailed.run();
+		}
+	}
+
+	public static void resolveTopology(World world, Consumer<DestinationSignTopology> callback) {
+		resolveTopology(world, callback, () -> { });
+	}
+
+	public static void resolveTopology(World world, Consumer<DestinationSignTopology> callback, Runnable resolutionFailed) {
+		final ResolutionCallback request = new ResolutionCallback(callback, resolutionFailed);
 		final String dimension = Init.getWorldId(world);
 		final RouteAssetServerManager manager = Init.getRouteAssetServerManager();
 		if (manager != null) {
 			final RouteAssetDataMirror.DimensionSnapshot snapshot = manager.getCurrentSnapshot().getDimensions().get(dimension);
 			if (snapshot != null) {
-				callback.accept(snapshot.getDestinationSignTopology());
+				request.succeed(snapshot.getDestinationSignTopology());
 				return;
 			}
 		}
 
 		final CacheKey key = new CacheKey(world.getServer().data, dimension);
 		final CallbackEpoch callbackEpoch;
+		final DestinationSignTopology cachedTopology;
 		synchronized (DestinationSignServerTopology.class) {
 			final CacheEntry cached = CACHE.get(key);
 			if (cached != null && System.currentTimeMillis() - cached.createdMillis < CACHE_MILLIS) {
-				callback.accept(cached.topology);
-				return;
+				cachedTopology = cached.topology;
+				callbackEpoch = null;
+			} else {
+				cachedTopology = null;
+				final List<ResolutionCallback> callbacks = PENDING.get(key);
+				if (callbacks != null) {
+					callbacks.add(request);
+					return;
+				}
+				final List<ResolutionCallback> first = new ArrayList<>();
+				first.add(request);
+				PENDING.put(key, first);
+				callbackEpoch = new CallbackEpoch(lifecycleEpoch, GENERATIONS.getOrDefault(key, 0L));
 			}
-			final List<java.util.function.Consumer<DestinationSignTopology>> callbacks = PENDING.get(key);
-			if (callbacks != null) {
-				callbacks.add(callback);
-				return;
-			}
-			final List<java.util.function.Consumer<DestinationSignTopology>> first = new ArrayList<>();
-			first.add(callback);
-			PENDING.put(key, first);
-			callbackEpoch = new CallbackEpoch(lifecycleEpoch, GENERATIONS.getOrDefault(key, 0L));
+		}
+		if (cachedTopology != null) {
+			request.succeed(cachedTopology);
+			return;
 		}
 
 		try {
-			Init.sendMessageC2S(OperationProcessor.LIST_DATA, world.getServer(), world, EMPTY_REQUEST, response -> {
+			if (!Init.trySendMessageC2S(OperationProcessor.LIST_DATA, world.getServer(), world, EMPTY_REQUEST, response -> {
 				DestinationSignTopology topology = DestinationSignTopology.empty();
 				try {
 					final RouteAssetDataMirror mirror = new RouteAssetDataMirror();
@@ -86,37 +119,63 @@ public final class DestinationSignServerTopology {
 				} catch (RuntimeException ignored) {
 				}
 				final DestinationSignTopology resolvedTopology = topology;
-				final List<java.util.function.Consumer<DestinationSignTopology>> callbacks;
+				final List<ResolutionCallback> callbacks;
 				synchronized (DestinationSignServerTopology.class) {
 					if (!isCurrent(key, callbackEpoch)) return;
 					CACHE.put(key, new CacheEntry(System.currentTimeMillis(), resolvedTopology));
 					callbacks = PENDING.remove(key);
 				}
-				if (callbacks != null) callbacks.forEach(consumer -> {
-					try { consumer.accept(resolvedTopology); } catch (RuntimeException ignored) { }
-				});
-			}, ListDataResponse.class);
-		} catch (RuntimeException ignored) {
-			synchronized (DestinationSignServerTopology.class) {
-				if (isCurrent(key, callbackEpoch)) PENDING.remove(key);
+				succeedCallbacks(callbacks, resolvedTopology);
+			}, ListDataResponse.class)) {
+				failCallbacks(failPending(key, callbackEpoch));
 			}
+		} catch (RuntimeException ignored) {
+			failCallbacks(failPending(key, callbackEpoch));
 		}
 	}
 
 	public static void invalidate(World world) {
 		final CacheKey key = new CacheKey(world.getServer().data, Init.getWorldId(world));
+		final List<ResolutionCallback> callbacks;
 		synchronized (DestinationSignServerTopology.class) {
 			GENERATIONS.put(key, GENERATIONS.getOrDefault(key, 0L) + 1);
 			CACHE.remove(key);
-			PENDING.remove(key);
+			callbacks = PENDING.remove(key);
+		}
+		failCallbacks(callbacks);
+	}
+
+	public static void clearServerState() {
+		final List<ResolutionCallback> callbacks = new ArrayList<>();
+		synchronized (DestinationSignServerTopology.class) {
+			lifecycleEpoch++;
+			CACHE.clear();
+			PENDING.values().forEach(callbacks::addAll);
+			PENDING.clear();
+			GENERATIONS.clear();
+		}
+		failCallbacks(callbacks);
+	}
+
+	private static List<ResolutionCallback> failPending(CacheKey key, CallbackEpoch callbackEpoch) {
+		synchronized (DestinationSignServerTopology.class) {
+			return isCurrent(key, callbackEpoch) ? PENDING.remove(key) : List.of();
 		}
 	}
 
-	public static synchronized void clearServerState() {
-		lifecycleEpoch++;
-		CACHE.clear();
-		PENDING.clear();
-		GENERATIONS.clear();
+	private static void succeedCallbacks(List<ResolutionCallback> callbacks, DestinationSignTopology topology) {
+		if (callbacks != null) callbacks.forEach(callback -> callback.succeed(topology));
+	}
+
+	private static void failCallbacks(List<ResolutionCallback> callbacks) {
+		if (callbacks != null) callbacks.forEach(ResolutionCallback::fail);
+	}
+
+	private static Runnable checkedFailure(Runnable failure) {
+		final Runnable checked = Objects.requireNonNull(failure, "failure");
+		return () -> {
+			try { checked.run(); } catch (RuntimeException ignored) { }
+		};
 	}
 
 	private static boolean isCurrent(CacheKey key, CallbackEpoch callbackEpoch) {
@@ -141,5 +200,18 @@ public final class DestinationSignServerTopology {
 		private final long lifecycleEpoch;
 		private final long generation;
 		private CallbackEpoch(long lifecycleEpoch, long generation) { this.lifecycleEpoch = lifecycleEpoch; this.generation = generation; }
+	}
+
+	private static final class ResolutionCallback {
+		private final Consumer<DestinationSignTopology> success;
+		private final Runnable failure;
+		private ResolutionCallback(Consumer<DestinationSignTopology> success, Runnable failure) {
+			this.success = Objects.requireNonNull(success, "success");
+			this.failure = checkedFailure(failure);
+		}
+		private void succeed(DestinationSignTopology topology) {
+			try { success.accept(topology); } catch (RuntimeException exception) { failure.run(); }
+		}
+		private void fail() { failure.run(); }
 	}
 }

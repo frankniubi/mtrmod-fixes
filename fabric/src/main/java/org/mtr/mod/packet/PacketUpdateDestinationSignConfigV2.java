@@ -1,8 +1,5 @@
 package org.mtr.mod.packet;
 
-import org.mtr.core.operation.NearbyAreasRequest;
-import org.mtr.core.operation.NearbyAreasResponse;
-import org.mtr.core.servlet.OperationProcessor;
 import org.mtr.mapping.holder.BlockPos;
 import org.mtr.mapping.holder.MinecraftServer;
 import org.mtr.mapping.holder.PlayerEntity;
@@ -96,31 +93,24 @@ public final class PacketUpdateDestinationSignConfigV2 extends PacketHandler {
 			return;
 		}
 		try {
-			Init.sendMessageC2S(OperationProcessor.NEARBY_STATIONS, server, world,
-					new NearbyAreasRequest<>(Init.blockPosToPosition(anchor), 0), nearby -> {
-						if (nearby.getStations().isEmpty() || nearby.getStations().get(0).getId() == 0) {
-							sendResultOnce.accept(DestinationSignConfigResult.STALE_TARGET);
-							return;
-						}
-						final long authoritativeSource = nearby.getStations().get(0).getId();
-						DestinationSignServerTopology.resolveTopology(world, topology -> {
-							try {
-								final DestinationSignConfigResult currentTargetResult = validateCurrentTarget(world, player);
-								if (currentTargetResult != DestinationSignConfigResult.SUCCESS) {
-									sendResultOnce.accept(currentTargetResult);
-									return;
-								}
-								final Validation validation = payload.validateAgainst(authoritativeSource, topology);
-								if (validation.result != DestinationSignConfigResult.SUCCESS || validation.config == null) {
-									sendResultOnce.accept(validation.result);
-									return;
-								}
-								sendResultOnce.accept(BlockDestinationSign.applyConfig(world, anchor, PlayerEntity.cast(player), validation.config));
-							} catch (RuntimeException exception) {
-								sendResultOnce.accept(DestinationSignConfigResult.INTERNAL_REJECTED);
-							}
-						});
-					}, NearbyAreasResponse.class);
+			DestinationSignServerTopology.resolve(world, anchor, (authoritativeSource, topology) -> {
+				try {
+					final DestinationSignConfigResult currentTargetResult = validateCurrentTarget(world, player);
+					if (currentTargetResult != DestinationSignConfigResult.SUCCESS) {
+						sendResultOnce.accept(currentTargetResult);
+						return;
+					}
+					final Validation validation = payload.validateAgainst(authoritativeSource, topology);
+					if (validation.result != DestinationSignConfigResult.SUCCESS || validation.config == null) {
+						sendResultOnce.accept(validation.result);
+						return;
+					}
+					sendResultOnce.accept(BlockDestinationSign.applyConfig(world, anchor, PlayerEntity.cast(player), validation.config));
+				} catch (RuntimeException exception) {
+					sendResultOnce.accept(DestinationSignConfigResult.INTERNAL_REJECTED);
+				}
+			}, () -> sendResultOnce.accept(DestinationSignConfigResult.STALE_TARGET),
+				() -> sendResultOnce.accept(DestinationSignConfigResult.INTERNAL_REJECTED));
 		} catch (RuntimeException exception) {
 			sendResultOnce.accept(DestinationSignConfigResult.INTERNAL_REJECTED);
 		}
@@ -190,7 +180,7 @@ public final class PacketUpdateDestinationSignConfigV2 extends PacketHandler {
 		}
 
 		public Optional<DestinationSignConfig> toConfig() {
-			if (styleOrdinal < 0 || styleOrdinal >= DestinationSignStyle.values().length) return Optional.empty();
+			if (width < 3 || styleOrdinal < 0 || styleOrdinal >= DestinationSignStyle.values().length) return Optional.empty();
 			try {
 				return Optional.of(DestinationSignConfig.configured(sourceStationId, destinationStationIds, width, height,
 						DestinationSignStyle.values()[styleOrdinal], showEta, customHeader, routesPerBlockHeight));

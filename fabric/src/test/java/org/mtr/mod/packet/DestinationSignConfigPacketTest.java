@@ -149,8 +149,23 @@ public final class DestinationSignConfigPacketTest {
 		Assertions.assertEquals(DestinationSignConfigResult.STALE_TARGET, valid.validateAgainst(-30, topology(2)).getResult());
 		Assertions.assertEquals(DestinationSignConfigResult.NO_DIRECT_SERVICE,
 				v2Payload(-10, Set.of(-30L), 3).validateAgainst(-10, topology(2)).getResult());
+		Assertions.assertTrue(new PacketUpdateDestinationSignConfigV2.Payload(-10, Set.of(-20L), "", 2, 2, 3,
+				DestinationSignStyle.ARRIVAL_ORDER.ordinal(), true).toConfig().isEmpty());
 		Assertions.assertTrue(v2Payload(-10, Set.of(-20L), 1).toConfig().isEmpty());
 		Assertions.assertTrue(v2Payload(-10, Set.of(-20L), 5).toConfig().isEmpty());
+	}
+
+	@Test
+	public void v2TopologyResolutionAcknowledgesEveryDeterministicFailurePath() throws Exception {
+		final String request = Files.readString(project("fabric/src/main/java/org/mtr/mod/packet/PacketUpdateDestinationSignConfigV2.java"), StandardCharsets.UTF_8);
+		final String topology = Files.readString(project("fabric/src/main/java/org/mtr/mod/route/DestinationSignServerTopology.java"), StandardCharsets.UTF_8);
+		final String init = Files.readString(project("fabric/src/main/java/org/mtr/mod/Init.java"), StandardCharsets.UTF_8);
+		Assertions.assertTrue(request.contains("() -> sendResultOnce.accept(DestinationSignConfigResult.STALE_TARGET)"));
+		Assertions.assertTrue(request.contains("() -> sendResultOnce.accept(DestinationSignConfigResult.INTERNAL_REJECTED)"));
+		Assertions.assertTrue(topology.contains("Runnable sourceUnavailable, Runnable resolutionFailed"));
+		Assertions.assertTrue(topology.contains("failPending(key, callbackEpoch)"));
+		Assertions.assertTrue(topology.contains("Init.trySendMessageC2S("));
+		Assertions.assertTrue(init.contains("boolean trySendMessageC2S("));
 	}
 
 	@Test
