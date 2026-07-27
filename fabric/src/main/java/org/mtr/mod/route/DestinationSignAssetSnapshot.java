@@ -13,6 +13,7 @@ import java.util.TreeSet;
 public final class DestinationSignAssetSnapshot {
 
 	public static final String LEAVING_TEXT = "\u5c06\u79bb|Leaving";
+	public static final String CURRENT_TEXT = "\u672c\u7ad9|HERE";
 	public static final String NO_DIRECT_SERVICE_TEXT = "\u5f53\u524d\u65e0\u76f4\u8fbe\u670d\u52a1|No direct service";
 	public static final String NO_SERVICE_TEXT = "\u6682\u65e0\u73ed\u6b21|No service";
 
@@ -25,15 +26,18 @@ public final class DestinationSignAssetSnapshot {
 	private final DestinationSignStyle style;
 	private final int widthBlocks;
 	private final int heightBlocks;
+	private final int routesPerBlockHeight;
 	private final boolean showEta;
 	private final DestinationSignDirectServiceModel.Model model;
 	private final DestinationSignAtlasLayout.Layout layout;
+	private final List<RouteStripRecord> routeStrips;
 	private final List<Sprite> sprites;
 	private final int atlasWidth;
 	private final int atlasHeight;
 
 	private DestinationSignAssetSnapshot(long sourceStationId, String sourceStationName, Set<Long> destinationStationIds, String customHeader, String destinationStationName,
-			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta, DestinationSignDirectServiceModel.Model model) {
+			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta, int routesPerBlockHeight,
+			DestinationSignDirectServiceModel.Model model) {
 		this.sourceStationId = sourceStationId;
 		this.sourceStationName = validateField(sourceStationName);
 		this.destinationStationIds = Collections.unmodifiableSortedSet(new TreeSet<>(destinationStationIds));
@@ -43,31 +47,41 @@ public final class DestinationSignAssetSnapshot {
 		this.style = Objects.requireNonNull(style, "style");
 		this.widthBlocks = widthBlocks;
 		this.heightBlocks = heightBlocks;
+		this.routesPerBlockHeight = routesPerBlockHeight;
 		this.showEta = showEta;
 		this.model = Objects.requireNonNull(model, "model");
-		layout = DestinationSignAtlasLayout.create(model, style, widthBlocks, heightBlocks, showEta);
+		layout = DestinationSignAtlasLayout.create(model, style, widthBlocks, heightBlocks, showEta, routesPerBlockHeight);
 		atlasWidth = layout.getSurfaceWidth();
+		final DestinationSignRouteStripLayout.RowMetrics rowMetrics = DestinationSignRouteStripLayout.rowMetrics(widthBlocks, layout.getRowHeight(), showEta);
+		final List<RouteStripRecord> mutableRouteStrips = new ArrayList<>();
+		for (final DestinationSignDirectServiceModel.Option option : model.getOptions()) {
+			mutableRouteStrips.add(new RouteStripRecord(option.getKey(), validateField(option.getRoute().getDisplayName()), option.getRoute().getColor(),
+					validateField(option.getSource().getPlatformDisplayName()), rowMetrics, DestinationSignRouteStripLayout.project(option, rowMetrics)));
+		}
+		routeStrips = Collections.unmodifiableList(mutableRouteStrips);
 		final List<Sprite> mutableSprites = new ArrayList<>();
 		int y = 0;
 		final int headerCycles = Math.max(2, segmentCount(this.destinationStationName));
 		for (int phase = 0; phase < headerCycles; phase++) {
-			mutableSprites.add(new Sprite(SpriteKind.HEADER, null, phase, y, DestinationSignAtlasLayout.HEADER_HEIGHT));
-			y = Math.addExact(y, DestinationSignAtlasLayout.HEADER_HEIGHT);
+			mutableSprites.add(new Sprite(SpriteKind.HEADER, null, null, phase, y, layout.getHeaderHeight()));
+			y = Math.addExact(y, layout.getHeaderHeight());
 		}
-		for (final DestinationSignDirectServiceModel.Option option : model.getOptions()) {
-			validateField(option.getRoute().getDisplayName());
-			validateField(option.getSource().getPlatformDisplayName());
-			validateField(option.getDestination().getStationDisplayName());
-			final int cycles = Math.max(segmentCount(option.getRoute().getDisplayName()), segmentCount(option.getSource().getPlatformDisplayName()));
+		for (int optionIndex = 0; optionIndex < model.getOptions().size(); optionIndex++) {
+			final DestinationSignDirectServiceModel.Option option = model.getOptions().get(optionIndex);
+			final RouteStripRecord routeStrip = routeStrips.get(optionIndex);
+			int cycles = Math.max(segmentCount(routeStrip.routeName), segmentCount(routeStrip.platformName));
+			for (final DestinationSignRouteStripLayout.LabelSlot label : routeStrip.routeStrip.getLabels()) {
+				cycles = Math.max(cycles, segmentCount(label.getRole() == DestinationSignRouteStripLayout.MarkerRole.CURRENT ? CURRENT_TEXT : validateField(label.getStationName())));
+			}
 			for (int phase = 0; phase < cycles; phase++) {
-				mutableSprites.add(new Sprite(SpriteKind.ROW, option, phase, y, style.getRowHeight()));
-				y = Math.addExact(y, style.getRowHeight());
+				mutableSprites.add(new Sprite(SpriteKind.ROW, option, routeStrip, phase, y, layout.getRowHeight()));
+				y = Math.addExact(y, layout.getRowHeight());
 			}
 		}
 		for (final SpriteKind label : List.of(SpriteKind.LEAVING, SpriteKind.NO_DIRECT_SERVICE, SpriteKind.NO_SERVICE)) {
 			for (int phase = 0; phase < 2; phase++) {
-				mutableSprites.add(new Sprite(label, null, phase, y, style.getRowHeight()));
-				y = Math.addExact(y, style.getRowHeight());
+				mutableSprites.add(new Sprite(label, null, null, phase, y, layout.getRowHeight()));
+				y = Math.addExact(y, layout.getRowHeight());
 			}
 		}
 		if (mutableSprites.size() > RouteAssetProtocol.MAX_DESTINATION_SIGN_ATLAS_SPRITES) throw new IllegalArgumentException("Destination sign atlas has too many sprites");
@@ -78,11 +92,23 @@ public final class DestinationSignAssetSnapshot {
 
 	public static DestinationSignAssetSnapshot create(DestinationSignTopology topology, long sourceStationId, long destinationStationId,
 			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
-		return create(topology, sourceStationId, Set.of(destinationStationId), "", style, widthBlocks, heightBlocks, showEta);
+		return create(topology, sourceStationId, Set.of(destinationStationId), "", style, widthBlocks, heightBlocks, showEta,
+				RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT);
+	}
+
+	public static DestinationSignAssetSnapshot create(DestinationSignTopology topology, long sourceStationId, long destinationStationId,
+			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta, int routesPerBlockHeight) {
+		return create(topology, sourceStationId, Set.of(destinationStationId), "", style, widthBlocks, heightBlocks, showEta, routesPerBlockHeight);
 	}
 
 	public static DestinationSignAssetSnapshot create(DestinationSignTopology topology, long sourceStationId, Set<Long> destinationStationIds,
 			String customHeader, DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
+		return create(topology, sourceStationId, destinationStationIds, customHeader, style, widthBlocks, heightBlocks, showEta,
+				RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT);
+	}
+
+	public static DestinationSignAssetSnapshot create(DestinationSignTopology topology, long sourceStationId, Set<Long> destinationStationIds,
+			String customHeader, DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta, int routesPerBlockHeight) {
 		final DestinationSignTopology checkedTopology = Objects.requireNonNull(topology, "topology");
 		final DestinationSignTopology.StationZone source = checkedTopology.getStation(sourceStationId).orElseThrow(() -> new IllegalArgumentException("Unknown destination sign source station"));
 		final TreeSet<Long> sortedDestinations = new TreeSet<>(Objects.requireNonNull(destinationStationIds, "destinationStationIds"));
@@ -94,7 +120,8 @@ public final class DestinationSignAssetSnapshot {
 		final String checkedHeader = Objects.requireNonNull(customHeader, "customHeader");
 		final String header = checkedHeader.isEmpty() ? automaticHeader(destinations) : checkedHeader;
 		return new DestinationSignAssetSnapshot(sourceStationId, source.getDisplayName(), sortedDestinations, checkedHeader, header,
-				style, widthBlocks, heightBlocks, showEta, DestinationSignDirectServiceModel.project(checkedTopology, sourceStationId, sortedDestinations));
+				style, widthBlocks, heightBlocks, showEta, routesPerBlockHeight,
+				DestinationSignDirectServiceModel.project(checkedTopology, sourceStationId, sortedDestinations));
 	}
 
 	private static String automaticHeader(List<DestinationSignTopology.StationZone> destinations) {
@@ -150,9 +177,11 @@ public final class DestinationSignAssetSnapshot {
 	public DestinationSignStyle getStyle() { return style; }
 	public int getWidthBlocks() { return widthBlocks; }
 	public int getHeightBlocks() { return heightBlocks; }
+	public int getRoutesPerBlockHeight() { return routesPerBlockHeight; }
 	public boolean isShowEta() { return showEta; }
 	public DestinationSignDirectServiceModel.Model getModel() { return model; }
 	public DestinationSignAtlasLayout.Layout getLayout() { return layout; }
+	public List<RouteStripRecord> getRouteStrips() { return routeStrips; }
 	public List<Sprite> getSprites() { return sprites; }
 	public int getAtlasWidth() { return atlasWidth; }
 	public int getAtlasHeight() { return atlasHeight; }
@@ -162,13 +191,15 @@ public final class DestinationSignAssetSnapshot {
 	public static final class Sprite {
 		private final SpriteKind kind;
 		private final DestinationSignDirectServiceModel.Option option;
+		private final RouteStripRecord routeStrip;
 		private final int segmentIndex;
 		private final int y;
 		private final int height;
 
-		private Sprite(SpriteKind kind, DestinationSignDirectServiceModel.Option option, int segmentIndex, int y, int height) {
+		private Sprite(SpriteKind kind, DestinationSignDirectServiceModel.Option option, RouteStripRecord routeStrip, int segmentIndex, int y, int height) {
 			this.kind = kind;
 			this.option = option;
+			this.routeStrip = routeStrip;
 			this.segmentIndex = segmentIndex;
 			this.y = y;
 			this.height = height;
@@ -176,8 +207,35 @@ public final class DestinationSignAssetSnapshot {
 
 		public SpriteKind getKind() { return kind; }
 		public DestinationSignDirectServiceModel.Option getOption() { return option; }
+		public RouteStripRecord getRouteStrip() { return routeStrip; }
 		public int getSegmentIndex() { return segmentIndex; }
 		public int getY() { return y; }
 		public int getHeight() { return height; }
+	}
+
+	public static final class RouteStripRecord {
+		private final DestinationSignDirectServiceModel.OptionKey optionKey;
+		private final String routeName;
+		private final int routeColor;
+		private final String platformName;
+		private final DestinationSignRouteStripLayout.RowMetrics rowMetrics;
+		private final DestinationSignRouteStripLayout.RouteStrip routeStrip;
+
+		private RouteStripRecord(DestinationSignDirectServiceModel.OptionKey optionKey, String routeName, int routeColor, String platformName,
+				DestinationSignRouteStripLayout.RowMetrics rowMetrics, DestinationSignRouteStripLayout.RouteStrip routeStrip) {
+			this.optionKey = Objects.requireNonNull(optionKey);
+			this.routeName = routeName;
+			this.routeColor = routeColor;
+			this.platformName = platformName;
+			this.rowMetrics = Objects.requireNonNull(rowMetrics);
+			this.routeStrip = Objects.requireNonNull(routeStrip);
+		}
+
+		public DestinationSignDirectServiceModel.OptionKey getOptionKey() { return optionKey; }
+		public String getRouteName() { return routeName; }
+		public int getRouteColor() { return routeColor; }
+		public String getPlatformName() { return platformName; }
+		public DestinationSignRouteStripLayout.RowMetrics getRowMetrics() { return rowMetrics; }
+		public DestinationSignRouteStripLayout.RouteStrip getRouteStrip() { return routeStrip; }
 	}
 }

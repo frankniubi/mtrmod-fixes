@@ -24,6 +24,70 @@ public interface RouteAssetTextRasterizer {
 
 	RasterizedText rasterize(String text, int maxWidth, int maxHeight, int fontSizeCjk, int fontSizeLatin, int padding, Alignment alignment, String language);
 
+	default RasterizedText rasterizeSized(String value, int maxWidth, int maxHeight, int fontSize) {
+		if (maxWidth <= 0 || maxHeight <= 0 || fontSize <= 0) return new RasterizedText(new byte[0], 0, 0);
+		final String original = value == null ? "" : value;
+		RasterizedText result = rasterizeSingleLine(original, maxWidth, maxHeight, fontSize);
+		if (result.width <= maxWidth) return result;
+		final String ellipsis = "...";
+		String prefix = original;
+		do {
+			if (!prefix.isEmpty()) prefix = prefix.substring(0, prefix.offsetByCodePoints(0, prefix.codePointCount(0, prefix.length()) - 1));
+			result = rasterizeSingleLine(prefix + ellipsis, maxWidth, maxHeight, fontSize);
+		} while (result.width > maxWidth && !prefix.isEmpty());
+		if (result.width <= maxWidth) return result;
+		String boundedEllipsis = ellipsis;
+		while (!boundedEllipsis.isEmpty()) {
+			boundedEllipsis = boundedEllipsis.substring(0, boundedEllipsis.length() - 1);
+			result = rasterizeSingleLine(boundedEllipsis, maxWidth, maxHeight, fontSize);
+			if (result.width <= maxWidth) return result;
+		}
+		return new RasterizedText(new byte[0], 0, 0);
+	}
+
+	default RasterizedText rasterizeSingleLine(String value, int maxWidth, int maxHeight, int fontSize) {
+		if (value.isEmpty()) return new RasterizedText(new byte[0], 0, 0);
+		final RasterizedText source = rasterize(value, maxWidth, maxHeight, fontSize, fontSize, 0, null, "NORMAL");
+		int left = source.width;
+		int top = source.height;
+		int right = -1;
+		int bottom = -1;
+		for (int y = 0; y < source.height; y++) {
+			for (int x = 0; x < source.width; x++) {
+				if (source.pixels[y * source.width + x] != 0) {
+					left = Math.min(left, x);
+					top = Math.min(top, y);
+					right = Math.max(right, x);
+					bottom = Math.max(bottom, y);
+				}
+			}
+		}
+		if (right < left || bottom < top) return new RasterizedText(new byte[0], 0, 0);
+		final int width = right - left + 1;
+		final int height = bottom - top + 1;
+		final byte[] pixels = new byte[width * height];
+		for (int y = 0; y < height; y++) {
+			System.arraycopy(source.pixels, (top + y) * source.width + left, pixels, y * width, width);
+		}
+		return new RasterizedText(pixels, width, height);
+	}
+
+	default void drawSized(RouteAssetImage target, String value, int x, int y, int width, int height, int fontSize, int abgr, Alignment alignment) {
+		if (width <= 0 || height <= 0) return;
+		final RasterizedText text = rasterizeSized(value, width, height, fontSize);
+		final int drawX = alignment == Alignment.RIGHT ? x + width - text.width : alignment == Alignment.CENTER ? x + (width - text.width) / 2 : x;
+		final int drawY = y + (height - text.height) / 2;
+		for (int textY = 0; textY < text.height; textY++) {
+			for (int textX = 0; textX < text.width; textX++) {
+				final int targetX = drawX + textX;
+				final int targetY = drawY + textY;
+				if (targetX >= x && targetX < x + width && targetY >= y && targetY < y + height) {
+					blend(target, targetX, targetY, ((text.pixels[textY * text.width + textX] & 0xFF) << 24) | (abgr & 0xFFFFFF));
+				}
+			}
+		}
+	}
+
 	default void draw(RouteAssetImage target, String value, int x, int y, int width, int height, int abgr, Alignment alignment) {
 		final RasterizedText text = rasterize(value, width, height, Math.max(1, height * 4 / 5), Math.max(1, height * 2 / 5), 0, alignment, "NORMAL");
 		for (int drawY = 0; drawY < text.height; drawY++) {

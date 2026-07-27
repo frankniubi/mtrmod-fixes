@@ -21,11 +21,29 @@ public final class DestinationSignAtlasLayoutTest {
 			final Set<DestinationSignDirectServiceModel.OptionKey> identities = new HashSet<>();
 			layout.getPages().forEach(page -> page.getRows().forEach(row -> {
 				Assertions.assertTrue(identities.add(row.getOption().getKey()));
-				Assertions.assertTrue(row.getY() >= DestinationSignAtlasLayout.HEADER_HEIGHT);
+				Assertions.assertTrue(row.getY() >= layout.getHeaderHeight());
 				Assertions.assertTrue(row.getY() + row.getHeight() <= layout.getSurfaceHeight());
 			}));
 			Assertions.assertEquals(model.getOptions().size(), identities.size());
 		}
+	}
+
+	@Test
+	public void densityConservesTheSurfaceAndCompatibilityDefaultsToThree() {
+		final DestinationSignDirectServiceModel.Model model = model(9);
+		for (final int density : List.of(2, 3, 4)) {
+			final DestinationSignAtlasLayout.Layout layout = DestinationSignAtlasLayout.create(
+					model, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true, density);
+			Assertions.assertEquals(2 * density, layout.getRowsPerPage());
+			Assertions.assertEquals(240 / (2 * density + 1), layout.getRowHeight());
+			Assertions.assertEquals(240 - layout.getRowsPerPage() * layout.getRowHeight(), layout.getHeaderHeight());
+			Assertions.assertEquals(240, layout.getHeaderHeight() + layout.getRowsPerPage() * layout.getRowHeight());
+			Assertions.assertEquals(density, layout.getRoutesPerBlockHeight());
+		}
+		final DestinationSignAtlasLayout.Layout compatibility = DestinationSignAtlasLayout.create(
+				model, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		Assertions.assertEquals(3, compatibility.getRoutesPerBlockHeight());
+		Assertions.assertEquals(6, compatibility.getRowsPerPage());
 	}
 
 	@Test
@@ -37,14 +55,14 @@ public final class DestinationSignAtlasLayoutTest {
 			Assertions.assertEquals(120, DestinationSignAtlasLayout.create(small, style, 1, 2, true).getSurfaceWidth());
 			final DestinationSignAtlasLayout.Layout landscape = DestinationSignAtlasLayout.create(small, style, 2, 1, true);
 			Assertions.assertEquals(120, landscape.getSurfaceHeight());
-			Assertions.assertEquals(1, landscape.getRowsPerPage());
-			Assertions.assertEquals(2, landscape.getPages().size());
+			Assertions.assertEquals(3, landscape.getRowsPerPage());
+			Assertions.assertEquals(1, landscape.getPages().size());
 		}
 		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignAtlasLayout.create(small, DestinationSignStyle.ARRIVAL_ORDER, 1, 1, true));
 		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignAtlasLayout.create(small, DestinationSignStyle.ARRIVAL_ORDER, 17, 2, true));
 		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignAtlasLayout.create(small, DestinationSignStyle.ARRIVAL_ORDER, 2, 9, true));
-		Assertions.assertFalse(DestinationSignAtlasLayout.fitsOnePage(model(5), DestinationSignStyle.DESTINATION_FLAG, 3, 2, true));
-		Assertions.assertTrue(DestinationSignAtlasLayout.fitsOnePage(model(5), DestinationSignStyle.DESTINATION_FLAG, 3, 4, true));
+		Assertions.assertFalse(DestinationSignAtlasLayout.fitsOnePage(model(7), DestinationSignStyle.DESTINATION_FLAG, 3, 2, true));
+		Assertions.assertTrue(DestinationSignAtlasLayout.fitsOnePage(model(7), DestinationSignStyle.DESTINATION_FLAG, 3, 3, true));
 	}
 
 	@Test

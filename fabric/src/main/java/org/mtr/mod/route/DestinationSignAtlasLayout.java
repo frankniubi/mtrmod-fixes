@@ -21,12 +21,23 @@ public final class DestinationSignAtlasLayout {
 	}
 
 	public static Layout create(DestinationSignDirectServiceModel.Model model, DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
+		return create(model, style, widthBlocks, heightBlocks, showEta, RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT);
+	}
+
+	public static Layout create(DestinationSignDirectServiceModel.Model model, DestinationSignStyle style, int widthBlocks, int heightBlocks,
+			boolean showEta, int routesPerBlockHeight) {
 		final DestinationSignDirectServiceModel.Model checkedModel = Objects.requireNonNull(model, "model");
 		final DestinationSignStyle checkedStyle = Objects.requireNonNull(style, "style");
 		validateFootprint(checkedStyle, widthBlocks, heightBlocks);
+		if (routesPerBlockHeight < RouteAssetProtocol.MIN_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT
+				|| routesPerBlockHeight > RouteAssetProtocol.MAX_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT) {
+			throw new IllegalArgumentException("Invalid destination sign density");
+		}
 		final int surfaceWidth = Math.multiplyExact(widthBlocks, LOGICAL_PIXELS_PER_BLOCK);
 		final int surfaceHeight = Math.multiplyExact(heightBlocks, LOGICAL_PIXELS_PER_BLOCK);
-		final int capacity = Math.max(1, (surfaceHeight - HEADER_HEIGHT - CONTENT_INSET) / checkedStyle.getRowHeight());
+		final int capacity = Math.multiplyExact(heightBlocks, routesPerBlockHeight);
+		final int rowHeight = surfaceHeight / (capacity + 1);
+		final int headerHeight = surfaceHeight - capacity * rowHeight;
 		final List<DestinationSignDirectServiceModel.Option> ordered = new ArrayList<>(checkedModel.getOptions());
 		if (checkedStyle == DestinationSignStyle.PLATFORM_GROUPS) {
 			ordered.sort(Comparator.comparing((DestinationSignDirectServiceModel.Option option) -> option.getSource().getPlatformDisplayName())
@@ -44,19 +55,25 @@ public final class DestinationSignAtlasLayout {
 				for (int index = start; index < end; index++) {
 					final DestinationSignDirectServiceModel.Option option = ordered.get(index);
 					final int rowIndex = index - start;
-					rows.add(new Row(option, CONTENT_INSET, HEADER_HEIGHT + rowIndex * checkedStyle.getRowHeight(), surfaceWidth - CONTENT_INSET * 2, checkedStyle.getRowHeight()));
+					rows.add(new Row(option, 0, headerHeight + rowIndex * rowHeight, surfaceWidth, rowHeight));
 					languageCycleCount = Math.max(languageCycleCount, pipeSegmentCount(option.getRoute().getDisplayName()));
 					languageCycleCount = Math.max(languageCycleCount, pipeSegmentCount(option.getSource().getPlatformDisplayName()));
 				}
 				pages.add(new Page(pages.size(), rows, languageCycleCount));
 			}
 		}
-		return new Layout(checkedStyle, widthBlocks, heightBlocks, surfaceWidth, surfaceHeight, showEta, capacity, pages);
+		return new Layout(checkedStyle, widthBlocks, heightBlocks, routesPerBlockHeight, surfaceWidth, surfaceHeight,
+				showEta, capacity, headerHeight, rowHeight, pages);
 	}
 
 	public static boolean fitsOnePage(DestinationSignDirectServiceModel.Model model, DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
+		return fitsOnePage(model, style, widthBlocks, heightBlocks, showEta, RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT);
+	}
+
+	public static boolean fitsOnePage(DestinationSignDirectServiceModel.Model model, DestinationSignStyle style, int widthBlocks, int heightBlocks,
+			boolean showEta, int routesPerBlockHeight) {
 		try {
-			return create(model, style, widthBlocks, heightBlocks, showEta).pages.size() == 1;
+			return create(model, style, widthBlocks, heightBlocks, showEta, routesPerBlockHeight).pages.size() == 1;
 		} catch (IllegalArgumentException exception) {
 			return false;
 		}
@@ -189,30 +206,40 @@ public final class DestinationSignAtlasLayout {
 		private final DestinationSignStyle style;
 		private final int widthBlocks;
 		private final int heightBlocks;
+		private final int routesPerBlockHeight;
 		private final int surfaceWidth;
 		private final int surfaceHeight;
 		private final boolean showEta;
 		private final int rowsPerPage;
+		private final int headerHeight;
+		private final int rowHeight;
 		private final List<Page> pages;
 
-		private Layout(DestinationSignStyle style, int widthBlocks, int heightBlocks, int surfaceWidth, int surfaceHeight, boolean showEta, int rowsPerPage, List<Page> pages) {
+		private Layout(DestinationSignStyle style, int widthBlocks, int heightBlocks, int routesPerBlockHeight, int surfaceWidth,
+				int surfaceHeight, boolean showEta, int rowsPerPage, int headerHeight, int rowHeight, List<Page> pages) {
 			this.style = style;
 			this.widthBlocks = widthBlocks;
 			this.heightBlocks = heightBlocks;
+			this.routesPerBlockHeight = routesPerBlockHeight;
 			this.surfaceWidth = surfaceWidth;
 			this.surfaceHeight = surfaceHeight;
 			this.showEta = showEta;
 			this.rowsPerPage = rowsPerPage;
+			this.headerHeight = headerHeight;
+			this.rowHeight = rowHeight;
 			this.pages = Collections.unmodifiableList(new ArrayList<>(pages));
 		}
 
 		public DestinationSignStyle getStyle() { return style; }
 		public int getWidthBlocks() { return widthBlocks; }
 		public int getHeightBlocks() { return heightBlocks; }
+		public int getRoutesPerBlockHeight() { return routesPerBlockHeight; }
 		public int getSurfaceWidth() { return surfaceWidth; }
 		public int getSurfaceHeight() { return surfaceHeight; }
 		public boolean isShowEta() { return showEta; }
 		public int getRowsPerPage() { return rowsPerPage; }
+		public int getHeaderHeight() { return headerHeight; }
+		public int getRowHeight() { return rowHeight; }
 		public List<Page> getPages() { return pages; }
 	}
 

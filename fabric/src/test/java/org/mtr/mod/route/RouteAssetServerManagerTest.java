@@ -238,6 +238,21 @@ public final class RouteAssetServerManagerTest {
 	}
 
 	@Test
+	public void configuredDestinationDensityIsPublishedInEveryServerKey() throws Exception {
+		try (final RouteAssetServerManager manager = manager(1, (key, snapshot) -> image(key.toString().hashCode()))) {
+			final ConfiguredSignAssetIndex index = new ConfiguredSignAssetIndex();
+			index.configureDestinationSign(1, new DestinationSignConfiguredEntry(
+					1, 2, 3, 2, DestinationSignStyle.ARRIVAL_ORDER, true, 4));
+			manager.submitSnapshot(destinationSnapshot("Density"), index.snapshot("minecraft/overworld"), "destination-density");
+			Assertions.assertTrue(manager.awaitIdle(10_000));
+			final List<RouteAssetKey> keys = manager.getRepository().loadManifest(manager.getRepository().loadHead().getRevision())
+					.getEntries().keySet().stream().filter(key -> key.getType() == RouteAssetType.DESTINATION_SIGN_ATLAS).toList();
+			Assertions.assertEquals(4, keys.size());
+			Assertions.assertTrue(keys.stream().allMatch(key -> "4".equals(key.getVariant().getParameters().get("rpb"))));
+		}
+	}
+
+	@Test
 	public void failedConfiguredAtlasRetainsPriorEntriesWhileOtherChangesPublish() throws Exception {
 		final AtomicBoolean failDestination = new AtomicBoolean();
 		try (final RouteAssetServerManager manager = manager(1, (key, snapshot) -> {

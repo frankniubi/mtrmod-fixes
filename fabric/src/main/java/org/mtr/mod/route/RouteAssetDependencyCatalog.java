@@ -143,7 +143,7 @@ public final class RouteAssetDependencyCatalog {
 		try {
 			final DestinationSignAssetSnapshot destination = DestinationSignAssetSnapshot.create(
 					dimension.getDestinationSignTopology(), key.getPrimaryId(), parameters.destinationStationIds, parameters.customHeader,
-					parameters.style, parameters.widthBlocks, parameters.heightBlocks, parameters.showEta);
+					parameters.style, parameters.widthBlocks, parameters.heightBlocks, parameters.showEta, parameters.routesPerBlockHeight);
 			final RouteAssetRenderSnapshot snapshot = RouteAssetRenderSnapshot.builder()
 					.aspectRatio((float) parameters.widthBlocks / parameters.heightBlocks)
 					.destinationSignAssetSnapshot(destination)
@@ -269,21 +269,81 @@ public final class RouteAssetDependencyCatalog {
 		canonical.writeInt(snapshot.getStyle().ordinal());
 		canonical.writeInt(snapshot.getWidthBlocks());
 		canonical.writeInt(snapshot.getHeightBlocks());
+		canonical.writeInt(snapshot.getRoutesPerBlockHeight());
 		canonical.writeBoolean(snapshot.isShowEta());
+		canonical.writeInt(snapshot.getLayout().getHeaderHeight());
+		canonical.writeInt(snapshot.getLayout().getRowHeight());
+		canonical.writeInt(snapshot.getLayout().getRowsPerPage());
 		writeString(canonical, DestinationSignAssetSnapshot.LEAVING_TEXT);
+		writeString(canonical, DestinationSignAssetSnapshot.CURRENT_TEXT);
 		writeString(canonical, DestinationSignAssetSnapshot.NO_DIRECT_SERVICE_TEXT);
 		writeString(canonical, DestinationSignAssetSnapshot.NO_SERVICE_TEXT);
-		canonical.writeInt(snapshot.getModel().getOptions().size());
-		for (final DestinationSignDirectServiceModel.Option option : snapshot.getModel().getOptions()) {
-			final DestinationSignDirectServiceModel.OptionKey key = option.getKey();
+		canonical.writeInt(snapshot.getRouteStrips().size());
+		for (final DestinationSignAssetSnapshot.RouteStripRecord record : snapshot.getRouteStrips()) {
+			final DestinationSignDirectServiceModel.OptionKey key = record.getOptionKey();
 			canonical.writeLong(key.getRouteId());
 			canonical.writeLong(key.getSourcePlatformId());
 			canonical.writeInt(key.getSourceOccurrenceIndex());
 			canonical.writeInt(key.getDestinationOccurrenceIndex());
-			canonical.writeInt(option.getRoute().getRouteOrder());
-			writeString(canonical, option.getRoute().getDisplayName());
-			canonical.writeInt(option.getRoute().getColor());
-			writeString(canonical, option.getSource().getPlatformDisplayName());
+			writeString(canonical, record.getRouteName());
+			canonical.writeInt(record.getRouteColor());
+			writeString(canonical, record.getPlatformName());
+			final DestinationSignRouteStripLayout.RowMetrics metrics = record.getRowMetrics();
+			canonical.writeBoolean(metrics.isDense());
+			canonical.writeInt(metrics.getIdentityX());
+			canonical.writeInt(metrics.getIdentityWidth());
+			canonical.writeInt(metrics.getRouteStripX());
+			canonical.writeInt(metrics.getRouteStripRight());
+			canonical.writeInt(metrics.getEtaX());
+			canonical.writeInt(metrics.getEtaWidth());
+			canonical.writeInt(metrics.getRowFontSize());
+			canonical.writeInt(metrics.getTargetFontSize());
+			canonical.writeInt(metrics.getNormalMarkerDiameter());
+			canonical.writeInt(metrics.getCurrentMarkerDiameter());
+			canonical.writeInt(metrics.getTargetOuterDiameter());
+			canonical.writeInt(metrics.getTargetInnerDiameter());
+			canonical.writeInt(metrics.getRailThickness());
+			canonical.writeInt(metrics.getIdentityTextTop());
+			final DestinationSignRouteStripLayout.RouteStrip strip = record.getRouteStrip();
+			canonical.writeInt(strip.getRail().getStartX());
+			canonical.writeInt(strip.getRail().getEndX());
+			canonical.writeInt(strip.getRail().getCenterY());
+			canonical.writeInt(strip.getRail().getThickness());
+			canonical.writeBoolean(strip.getContinuationArrow().isPresent());
+			if (strip.getContinuationArrow().isPresent()) {
+				final DestinationSignRouteStripLayout.ContinuationArrow arrow = strip.getContinuationArrow().orElseThrow();
+				canonical.writeInt(arrow.getBaseX());
+				canonical.writeInt(arrow.getTopY());
+				canonical.writeInt(arrow.getWidth());
+				canonical.writeInt(arrow.getHeight());
+			}
+			canonical.writeInt(strip.getMarkers().size());
+			for (final DestinationSignRouteStripLayout.Marker marker : strip.getMarkers()) {
+				canonical.writeInt(marker.getOccurrenceIndex());
+				canonical.writeLong(marker.getStationId());
+				writeString(canonical, marker.getStationName());
+				canonical.writeInt(marker.getRole().ordinal());
+				canonical.writeInt(marker.getCenterX());
+				canonical.writeInt(marker.getCenterY());
+				canonical.writeInt(marker.getOuterDiameter());
+				canonical.writeInt(marker.getInnerDiameter());
+				canonical.writeLong(Double.doubleToLongBits(marker.getOpacity()));
+			}
+			canonical.writeInt(strip.getLabels().size());
+			for (final DestinationSignRouteStripLayout.LabelSlot label : strip.getLabels()) {
+				canonical.writeInt(label.getOccurrenceIndex());
+				canonical.writeLong(label.getStationId());
+				writeString(canonical, label.getStationName());
+				canonical.writeInt(label.getRole().ordinal());
+				canonical.writeInt(label.getLane());
+				canonical.writeInt(label.getX());
+				canonical.writeInt(label.getY());
+				canonical.writeInt(label.getWidth());
+				canonical.writeInt(label.getHeight());
+				canonical.writeInt(label.getFontSize());
+				canonical.writeBoolean(label.isMandatory());
+				canonical.writeBoolean(label.isSemibold());
+			}
 		}
 	}
 

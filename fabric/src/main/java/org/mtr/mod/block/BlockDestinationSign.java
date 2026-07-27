@@ -416,7 +416,7 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 			}
 			final RouteAssetKey replacement = RouteAssetCanonicalKeyFactory.destinationSign(
 					checkedDimension, checkedConfig.getSourceStationId(), checkedConfig.getDestinationStationIds(), checkedConfig.getCustomHeader(), resolution,
-					checkedConfig.getStyle(), checkedConfig.getWidth(), checkedConfig.getHeight(), checkedConfig.isShowEta());
+					checkedConfig.getStyle(), checkedConfig.getWidth(), checkedConfig.getHeight(), checkedConfig.isShowEta(), checkedConfig.getRoutesPerBlockHeight());
 			cachedConfig = checkedConfig;
 			cachedKey = replacement;
 			return replacement;

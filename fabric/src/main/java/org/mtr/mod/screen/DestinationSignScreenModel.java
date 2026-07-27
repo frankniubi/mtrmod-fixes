@@ -136,7 +136,8 @@ public final class DestinationSignScreenModel {
 	private DestinationSignAssetSnapshot projectedSnapshot(DestinationSignStyle candidateStyle, int candidateWidth, int candidateHeight) {
 		if (destinationStationIds.isEmpty()) return null;
 		try {
-			return DestinationSignAssetSnapshot.create(topology, sourceStationId, destinationStationIds, customHeader, candidateStyle, candidateWidth, candidateHeight, showEta);
+			return DestinationSignAssetSnapshot.create(topology, sourceStationId, destinationStationIds, customHeader, candidateStyle,
+					candidateWidth, candidateHeight, showEta, routesPerBlockHeight);
 		} catch (IllegalArgumentException exception) {
 			return null;
 		}

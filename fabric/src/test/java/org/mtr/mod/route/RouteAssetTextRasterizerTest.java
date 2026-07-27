@@ -62,6 +62,29 @@ public final class RouteAssetTextRasterizerTest {
 		Assertions.assertEquals(RouteAssetHash.sha256(first.getPixels()), RouteAssetHash.sha256(second.getPixels()));
 	}
 
+	@Test
+	public void explicitSizeUsesEqualCjkLatinMetricsAndCodePointSafeEllipsis() {
+		final String supplementary = "AB" + new String(Character.toChars(0x20000)) + "CD";
+		final RouteAssetTextRasterizer.RasterizedText bounded = rasterizer.rasterizeSized(supplementary, 32, 20, 13);
+		Assertions.assertTrue(bounded.getWidth() <= 32);
+		Assertions.assertTrue(bounded.getHeight() <= 20);
+		Assertions.assertArrayEquals(bounded.getPixels(), rasterizer.rasterizeSized(supplementary, 32, 20, 13).getPixels());
+		final RouteAssetTextRasterizer.RasterizedText latin = rasterizer.rasterizeSized("HERE", 128, 20, 13);
+		final RouteAssetTextRasterizer.RasterizedText cjk = rasterizer.rasterizeSized("\u672c\u7ad9", 128, 20, 13);
+		Assertions.assertTrue(latin.getHeight() > 0);
+		Assertions.assertTrue(cjk.getHeight() > 0);
+	}
+
+	@Test
+	public void explicitSizeReturnsTightGlyphBounds() {
+		final RouteAssetTextRasterizer.RasterizedText value = rasterizer.rasterizeSized("Route 9", 256, 32, 18);
+		final byte[] pixels = value.getPixels();
+		Assertions.assertTrue(hasInkInColumn(pixels, value.getWidth(), value.getHeight(), 0));
+		Assertions.assertTrue(hasInkInColumn(pixels, value.getWidth(), value.getHeight(), value.getWidth() - 1));
+		Assertions.assertTrue(hasInkInRow(pixels, value.getWidth(), 0));
+		Assertions.assertTrue(hasInkInRow(pixels, value.getWidth(), value.getHeight() - 1));
+	}
+
 	private static void assertSameRaster(String actualValue, String expectedValue) {
 		final RouteAssetTextRasterizer.RasterizedText actual = rasterize(actualValue);
 		final RouteAssetTextRasterizer.RasterizedText expected = rasterize(expectedValue);
@@ -72,6 +95,16 @@ public final class RouteAssetTextRasterizerTest {
 
 	private static RouteAssetTextRasterizer.RasterizedText rasterize(String value) {
 		return rasterizer.rasterize(value, 512, 128, 32, 16, 2, RouteAssetTextRasterizer.Alignment.LEFT, "NORMAL");
+	}
+
+	private static boolean hasInkInColumn(byte[] pixels, int width, int height, int x) {
+		for (int y = 0; y < height; y++) if (pixels[y * width + x] != 0) return true;
+		return false;
+	}
+
+	private static boolean hasInkInRow(byte[] pixels, int width, int y) {
+		for (int x = 0; x < width; x++) if (pixels[y * width + x] != 0) return true;
+		return false;
 	}
 
 	private static Path resourceAssetsPath() {

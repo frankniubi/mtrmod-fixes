@@ -124,6 +124,22 @@ public final class RouteAssetDependencyCatalogTest {
 		}
 	}
 
+	@Test
+	public void destinationDensityChangesDependenciesButPhysicalTerminalDoesNot() {
+		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
+		final RouteAssetKey sparse = RouteAssetCanonicalKeyFactory.destinationSign(
+				DIMENSION, 100, 300, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true, 2);
+		final RouteAssetKey dense = RouteAssetCanonicalKeyFactory.destinationSign(
+				DIMENSION, 100, 300, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true, 4);
+		final RouteAssetDependencyCatalog.Entry sparseEntry = catalog.resolveDestinationSign(sparse, destinationSnapshot("Physical A"), RESOURCE_FINGERPRINT).orElseThrow();
+		final RouteAssetDependencyCatalog.Entry denseEntry = catalog.resolveDestinationSign(dense, destinationSnapshot("Physical A"), RESOURCE_FINGERPRINT).orElseThrow();
+		final RouteAssetDependencyCatalog.Entry renamedTerminal = catalog.resolveDestinationSign(dense, destinationSnapshot("Physical B"), RESOURCE_FINGERPRINT).orElseThrow();
+
+		Assertions.assertNotEquals(sparseEntry.getDependencyFingerprint(), denseEntry.getDependencyFingerprint());
+		Assertions.assertEquals(denseEntry.getDependencyFingerprint(), renamedTerminal.getDependencyFingerprint());
+		Assertions.assertEquals(4, denseEntry.getSnapshot().getDestinationSignAssetSnapshot().orElseThrow().getRoutesPerBlockHeight());
+	}
+
 	private static void assertChanged(Map<RouteAssetKey, RouteAssetDependencyCatalog.Entry> first, Map<RouteAssetKey, RouteAssetDependencyCatalog.Entry> second, RouteAssetKey... keys) {
 		for (final RouteAssetKey key : keys) Assertions.assertNotEquals(first.get(key).getDependencyFingerprint(), second.get(key).getDependencyFingerprint(), key.toString());
 	}
@@ -167,6 +183,21 @@ public final class RouteAssetDependencyCatalogTest {
 
 	private static RouteAssetDataMirror.PlatformSnapshot platform(RouteAssetDataMirror.Snapshot snapshot) {
 		return snapshot.getDimensions().get(DIMENSION).getPlatforms().get(PLATFORM_ID);
+	}
+
+	private static RouteAssetDataMirror.Snapshot destinationSnapshot(String physicalTerminal) {
+		final DestinationSignTopology topology = new DestinationSignTopology(List.of(
+				new DestinationSignTopology.ServiceRoute(900, 0, "R9|Route Nine", 0x14755E, List.of(
+						new DestinationSignTopology.StopOccurrence(90, 100, "U1", "Source|Source EN", physicalTerminal),
+						new DestinationSignTopology.StopOccurrence(91, 200, "M1", "Middle|Middle EN", ""),
+						new DestinationSignTopology.StopOccurrence(92, 300, "D1", "Target|Target EN", ""),
+						new DestinationSignTopology.StopOccurrence(93, 400, "F1", "Following|Following EN", "")))),
+				List.of(new DestinationSignTopology.StationZone(100, "Source|Source EN"),
+						new DestinationSignTopology.StationZone(200, "Middle|Middle EN"),
+						new DestinationSignTopology.StationZone(300, "Target|Target EN"),
+						new DestinationSignTopology.StationZone(400, "Following|Following EN")));
+		return new RouteAssetDataMirror.Snapshot(1, Map.of(DIMENSION,
+				new RouteAssetDataMirror.DimensionSnapshot(DIMENSION, 1, Map.of(), topology)));
 	}
 
 	private static RouteAssetKey routeSign(RouteSignStyleMode styleMode) {

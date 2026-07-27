@@ -449,7 +449,7 @@ public final class RouteAssetServerManager implements AutoCloseable {
 					for (int resolution = 0; resolution <= 3; resolution++) {
 						final RouteAssetKey key = RouteAssetCanonicalKeyFactory.destinationSign(configured.getDimension(), destination.getSourceStationId(),
 								destination.getDestinationStationIds(), destination.getCustomHeader(), resolution,
-								destination.getStyle(), destination.getWidthBlocks(), destination.getHeightBlocks(), destination.isShowEta());
+								destination.getStyle(), destination.getWidthBlocks(), destination.getHeightBlocks(), destination.isShowEta(), destination.getRoutesPerBlockHeight());
 						catalog.resolveDestinationSign(key, request.snapshot, resourceFingerprint).ifPresent(entry -> {
 							entries.put(entry.getKey(), entry);
 							configuredAssetKeys.add(entry.getKey());

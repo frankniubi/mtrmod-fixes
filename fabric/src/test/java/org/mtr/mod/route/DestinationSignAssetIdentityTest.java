@@ -68,15 +68,41 @@ public final class DestinationSignAssetIdentityTest {
 	}
 
 	@Test
-	public void namesThatAreNotDrawnDoNotChangeSpritesOrDependencies() {
+	public void snapshotsAndFingerprintsIncludeDensityMetricsAndSelectedStripRecords() {
+		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
+		final RouteAssetKey sparseKey = RouteAssetCanonicalKeyFactory.destinationSign(
+				DIMENSION, 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true, 2);
+		final RouteAssetKey denseKey = RouteAssetCanonicalKeyFactory.destinationSign(
+				DIMENSION, 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true, 4);
+		final RouteAssetDependencyCatalog.Entry sparse = catalog.resolveDestinationSign(sparseKey, snapshot(), FINGERPRINT).orElseThrow();
+		final RouteAssetDependencyCatalog.Entry dense = catalog.resolveDestinationSign(denseKey, snapshot(), FINGERPRINT).orElseThrow();
+		final DestinationSignAssetSnapshot resolved = dense.getSnapshot().getDestinationSignAssetSnapshot().orElseThrow();
+
+		Assertions.assertEquals(4, resolved.getRoutesPerBlockHeight());
+		Assertions.assertEquals(26, resolved.getLayout().getRowHeight());
+		Assertions.assertEquals(resolved.getModel().getOptions().size(), resolved.getRouteStrips().size());
+		final DestinationSignAssetSnapshot.RouteStripRecord strip = resolved.getRouteStrips().get(0);
+		Assertions.assertEquals(List.of(
+				DestinationSignRouteStripLayout.MarkerRole.CURRENT,
+				DestinationSignRouteStripLayout.MarkerRole.TARGET,
+				DestinationSignRouteStripLayout.MarkerRole.FOLLOWING),
+				strip.getRouteStrip().getMarkers().stream().map(DestinationSignRouteStripLayout.Marker::getRole).toList());
+		Assertions.assertEquals(List.of(0, 1, 2), strip.getRouteStrip().getMarkers().stream()
+				.map(DestinationSignRouteStripLayout.Marker::getOccurrenceIndex).toList());
+		Assertions.assertThrows(UnsupportedOperationException.class, () -> resolved.getRouteStrips().clear());
+		Assertions.assertNotEquals(sparse.getDependencyFingerprint(), dense.getDependencyFingerprint());
+	}
+
+	@Test
+	public void renderedStationNamesChangeDependenciesAndRowLanguageCycles() {
 		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
 		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
 		final RouteAssetDependencyCatalog.Entry first = catalog.resolveDestinationSign(key, snapshot("Source A", "Unused A|Unused B|Unused C"), FINGERPRINT).orElseThrow();
 		final RouteAssetDependencyCatalog.Entry second = catalog.resolveDestinationSign(key, snapshot("Source B", "Changed A|Changed B|Changed C|Changed D"), FINGERPRINT).orElseThrow();
-		Assertions.assertEquals(first.getDependencyFingerprint(), second.getDependencyFingerprint());
+		Assertions.assertNotEquals(first.getDependencyFingerprint(), second.getDependencyFingerprint());
 		final long rowSprites = first.getSnapshot().getDestinationSignAssetSnapshot().orElseThrow().getSprites().stream()
 				.filter(sprite -> sprite.getKind() == DestinationSignAssetSnapshot.SpriteKind.ROW).count();
-		Assertions.assertEquals(2, rowSprites, "only route and platform language segments control row sprite cycles");
+		Assertions.assertEquals(3, rowSprites, "selected station labels participate in every static language phase");
 	}
 
 	@Test

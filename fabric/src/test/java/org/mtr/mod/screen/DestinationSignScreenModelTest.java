@@ -92,6 +92,17 @@ public final class DestinationSignScreenModelTest {
 	}
 
 	@Test
+	public void projectedValidationUsesTheSelectedDensity() {
+		final DestinationSignScreenModel draft = new DestinationSignScreenModel(-10, "Source", topology(80), DestinationSignConfig.unconfigured(3, 1));
+		draft.selectDestination(-20);
+		draft.setRoutesPerBlockHeight(2);
+		final boolean sparse = draft.canSave();
+		draft.setRoutesPerBlockHeight(4);
+		final boolean dense = draft.canSave();
+		Assertions.assertNotEquals(sparse, dense, "atlas validation must project the selected density");
+	}
+
+	@Test
 	public void configScreenUsesTrueMultiSelectAndPersistsTheHeaderField() throws Exception {
 		Path path = Path.of("src", "main", "java", "org", "mtr", "mod", "screen", "DestinationSignConfigScreen.java");
 		if (!Files.exists(path)) path = Path.of("fabric").resolve(path);
