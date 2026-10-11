@@ -92,7 +92,7 @@ public final class DestinationSignConfigPacketTest {
 		final byte[] hash = MessageDigest.getInstance("SHA-256").digest(source);
 		final StringBuilder hex = new StringBuilder();
 		for (final byte value : hash) hex.append(String.format("%02x", value));
-		Assertions.assertEquals("b2e0c35648fdfb111c5ce227e848f7978bb1c03a37eede52fc56dbe23063589a", hex.toString());
+		Assertions.assertEquals("7f4926540c9875b46ae607b899408d4d8830f058e09b7ff0e7c760b1c0075a4c", hex.toString());
 	}
 
 	@Test

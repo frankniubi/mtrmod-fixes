@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import org.mtr.mod.data.JavaCompat;
 
 /** World-scoped identities for signs which require proactive server assets. */
 public final class ConfiguredSignAssetIndex {
@@ -33,7 +34,7 @@ public final class ConfiguredSignAssetIndex {
 	private long revision;
 
 	public synchronized boolean configureRouteSign(long anchorPosition, long platformId, RouteSignStyleMode styleMode) {
-		return configureRouteSign(anchorPosition, platformId == 0 ? Collections.emptySet() : Set.of(platformId), styleMode, "");
+		return configureRouteSign(anchorPosition, platformId == 0 ? Collections.emptySet() : JavaCompat.setOf(platformId), styleMode, "");
 	}
 
 	public synchronized boolean configureRouteSign(long anchorPosition, Set<Long> platformIds, RouteSignStyleMode styleMode, String customPlatformHeader) {
@@ -250,7 +251,7 @@ public final class ConfiguredSignAssetIndex {
 	}
 
 	private static void clearEntry(CompoundTag tag, String prefix) {
-		for (final String field : List.of("type", "anchor", "primary_id", "platform_ids_count", "custom_platform_header", "source_id", "destination_id", "destination_ids_count", "custom_header", "width", "height", "routes_per_block_height", "style", "eta")) tag.remove(prefix + field);
+		for (final String field : JavaCompat.listOf("type", "anchor", "primary_id", "platform_ids_count", "custom_platform_header", "source_id", "destination_id", "destination_ids_count", "custom_header", "width", "height", "routes_per_block_height", "style", "eta")) tag.remove(prefix + field);
 		for (int index = 0; index < RouteAssetProtocol.MAX_ROUTE_SIGN_PLATFORMS; index++) tag.remove(prefix + "platform_id_" + index);
 		for (int index = 0; index < RouteAssetProtocol.MAX_DESTINATION_SIGN_DESTINATIONS; index++) tag.remove(prefix + "destination_id_" + index);
 	}

@@ -13,6 +13,7 @@ import java.util.NavigableMap;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeMap;
+import org.mtr.mod.data.JavaCompat;
 
 /** The legacy RouteMapGenerator raster algorithms with no client or GPU linkage. */
 public final class RouteAssetRenderer {
@@ -453,7 +454,7 @@ public final class RouteAssetRenderer {
 		private List<RouteAssetRenderSnapshot.Route> routes() {
 			if (!snapshot.getRoutes().isEmpty()) return snapshot.getRoutes();
 			if (snapshot.getStations().isEmpty()) return Collections.emptyList();
-			return List.of(new RouteAssetRenderSnapshot.Route(0, snapshot.getRouteName(), snapshot.getRouteColor(), RouteAssetRenderSnapshot.CircularState.NONE, snapshot.isDense() ? RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED : RouteAssetRenderSnapshot.RouteKind.METRO, legacyCurrent(snapshot.getStations()), snapshot.getStations()));
+			return JavaCompat.listOf(new RouteAssetRenderSnapshot.Route(0, snapshot.getRouteName(), snapshot.getRouteColor(), RouteAssetRenderSnapshot.CircularState.NONE, snapshot.isDense() ? RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED : RouteAssetRenderSnapshot.RouteKind.METRO, legacyCurrent(snapshot.getStations()), snapshot.getStations()));
 		}
 		private static int legacyCurrent(List<RouteAssetRenderSnapshot.Station> stations) { for (int index = 0; index < stations.size(); index++) if (stations.get(index).isCurrent()) return index; return 0; }
 	}

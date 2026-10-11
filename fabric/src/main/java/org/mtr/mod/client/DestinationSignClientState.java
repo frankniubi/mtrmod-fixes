@@ -24,6 +24,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.function.LongSupplier;
+import org.mtr.mod.data.JavaCompat;
 
 /** Bounded anchor cache for immutable Destination Sign topology and packed atlas metadata. */
 public final class DestinationSignClientState {
@@ -233,15 +234,15 @@ public final class DestinationSignClientState {
 					default: mutableLabels.computeIfAbsent(sprite.getKind(), ignored -> new ArrayList<>()).add(sprite);
 				}
 			}
-			headers = List.copyOf(mutableHeaders);
+			headers = JavaCompat.listCopyOf(mutableHeaders);
 			final Map<DestinationSignDirectServiceModel.OptionKey, List<DestinationSignAssetSnapshot.Sprite>> immutableRows = new LinkedHashMap<>();
-			mutableRows.forEach((key, value) -> immutableRows.put(key, List.copyOf(value)));
+			mutableRows.forEach((key, value) -> immutableRows.put(key, JavaCompat.listCopyOf(value)));
 			rows = Collections.unmodifiableMap(immutableRows);
 			final Map<DestinationSignDirectServiceModel.OptionKey, Integer> mutableOptionCycles = new LinkedHashMap<>();
 			rows.forEach((key, value) -> mutableOptionCycles.put(key, value.size()));
 			optionCycles = Collections.unmodifiableMap(mutableOptionCycles);
 			final Map<DestinationSignAssetSnapshot.SpriteKind, List<DestinationSignAssetSnapshot.Sprite>> immutableLabels = new EnumMap<>(DestinationSignAssetSnapshot.SpriteKind.class);
-			mutableLabels.forEach((key, value) -> immutableLabels.put(key, List.copyOf(value)));
+			mutableLabels.forEach((key, value) -> immutableLabels.put(key, JavaCompat.listCopyOf(value)));
 			labels = Collections.unmodifiableMap(immutableLabels);
 			if (headers.isEmpty()) throw new IllegalArgumentException("Destination sign atlas has no header sprites");
 			headerCycles = headers.size();
@@ -281,7 +282,7 @@ public final class DestinationSignClientState {
 		private final List<Integer> languageCyclesByPage;
 		private RenderRows(DestinationSignRows.Snapshot rows, List<Integer> languageCyclesByPage) {
 			this.rows = Objects.requireNonNull(rows, "rows");
-			this.languageCyclesByPage = List.copyOf(languageCyclesByPage);
+			this.languageCyclesByPage = JavaCompat.listCopyOf(languageCyclesByPage);
 		}
 		public DestinationSignRows.Snapshot getRows() { return rows; }
 		public List<Integer> getLanguageCyclesByPage() { return languageCyclesByPage; }

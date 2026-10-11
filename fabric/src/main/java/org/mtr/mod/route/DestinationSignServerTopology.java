@@ -20,6 +20,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import org.mtr.mod.data.JavaCompat;
 
 /** Resolves the authoritative anchor station and full route topology without requiring asset offload to be enabled. */
 public final class DestinationSignServerTopology {
@@ -130,7 +131,7 @@ public final class DestinationSignServerTopology {
 				DestinationSignTopology topology = DestinationSignTopology.empty();
 				try {
 					final RouteAssetDataMirror mirror = new RouteAssetDataMirror();
-					final long generation = mirror.beginGeneration(Set.of(dimension));
+					final long generation = mirror.beginGeneration(JavaCompat.setOf(dimension));
 					if (mirror.acceptListJson(generation, dimension, Utilities.getJsonObjectFromData(response))) {
 						topology = mirror.snapshot(generation).map(snapshot -> snapshot.getDimensions().get(dimension).getDestinationSignTopology()).orElse(DestinationSignTopology.empty());
 					}
@@ -220,7 +221,7 @@ public final class DestinationSignServerTopology {
 
 	private static List<ResolutionCallback> failPending(CacheKey key, CallbackEpoch callbackEpoch) {
 		synchronized (DestinationSignServerTopology.class) {
-			return isCurrent(key, callbackEpoch) ? PENDING.remove(key) : List.of();
+			return isCurrent(key, callbackEpoch) ? PENDING.remove(key) : JavaCompat.listOf();
 		}
 	}
 

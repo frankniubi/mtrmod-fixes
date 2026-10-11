@@ -16,9 +16,11 @@ loom {
 }
 
 // The 1.16.5 mappings lack MTR's internal render API; without GlRailMeshBackend the rail mesh cache stays off and rails use the legacy renderer.
+// 1.16.5 also compiles at Java 8, which the tests (text blocks etc.) do not target; they run on every other version against the same sources.
 if (minecraftVersion == "1.16.5") {
 	sourceSets.main.java.exclude "org/mtr/mod/render/GlRailMeshBackend.java"
-	sourceSets.test.java.exclude "org/mtr/mod/render/DefaultRailMeshCacheTest.java"
+	tasks.named("compileTestJava") { enabled = false }
+	tasks.named("test") { enabled = false }
 }
 
 dependencies {

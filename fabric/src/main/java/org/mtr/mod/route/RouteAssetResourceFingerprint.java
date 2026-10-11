@@ -5,11 +5,12 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
+import org.mtr.mod.data.JavaCompat;
 
 /** Computes the renderer-resource identity shared by the dedicated server and the active client resource pack. */
 public final class RouteAssetResourceFingerprint {
 
-	private static final List<String> SOURCE_IMAGES = List.of(
+	private static final List<String> SOURCE_IMAGES = JavaCompat.listOf(
 			"textures/block/sign/arrow.png",
 			"textures/block/sign/circle.png",
 			"textures/block/sign/railway_interchange.png",

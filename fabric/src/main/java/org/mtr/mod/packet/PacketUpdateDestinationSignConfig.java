@@ -21,6 +21,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import org.mtr.mod.data.JavaCompat;
 
 public final class PacketUpdateDestinationSignConfig extends PacketHandler {
 
@@ -67,7 +68,7 @@ public final class PacketUpdateDestinationSignConfig extends PacketHandler {
 
 	@Override
 	public void runServer(MinecraftServer server, ServerPlayerEntity player) {
-		if (payload.toConfig().isEmpty()) return;
+		if (!payload.toConfig().isPresent()) return;
 		final World world = player.getEntityWorld();
 		if (!isCurrentTarget(world, player, payload.anchor)) return;
 		DestinationSignServerTopology.resolve(world, payload.anchor, (authoritativeSource, topology) -> {
@@ -101,7 +102,7 @@ public final class PacketUpdateDestinationSignConfig extends PacketHandler {
 		private final boolean showEta;
 
 		public Payload(BlockPos anchor, long sourceStationId, long destinationStationId, int width, int height, int styleOrdinal, boolean showEta) {
-			this(anchor, sourceStationId, Set.of(destinationStationId), "", width, height, styleOrdinal, showEta);
+			this(anchor, sourceStationId, JavaCompat.setOf(destinationStationId), "", width, height, styleOrdinal, showEta);
 		}
 
 		public Payload(BlockPos anchor, long sourceStationId, Set<Long> destinationStationIds, String customHeader,
@@ -129,7 +130,7 @@ public final class PacketUpdateDestinationSignConfig extends PacketHandler {
 		public Optional<DestinationSignConfig> validateAgainst(long authoritativeSource, DestinationSignTopology topology) {
 			if (sourceStationId != authoritativeSource) return Optional.empty();
 			final Optional<DestinationSignConfig> config = toConfig();
-			if (config.isEmpty()) return Optional.empty();
+			if (!config.isPresent()) return Optional.empty();
 			try {
 				final java.util.HashSet<Long> reachableDestinationIds = new java.util.HashSet<>();
 				DestinationSignDirectServiceModel.reachableDestinations(topology, sourceStationId)

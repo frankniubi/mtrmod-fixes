@@ -22,6 +22,7 @@ import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.mtr.mod.data.JavaCompat;
 
 public final class RouteAssetRepository {
 
@@ -76,7 +77,7 @@ public final class RouteAssetRepository {
 			return RouteAssetHead.empty(serverId, rendererVersion);
 		}
 		try {
-			final JsonObject object = JsonParser.parseString(Files.readString(headPath, StandardCharsets.UTF_8)).getAsJsonObject();
+			final JsonObject object = JsonParser.parseString(JavaCompat.readString(headPath, StandardCharsets.UTF_8)).getAsJsonObject();
 			final RouteAssetHead head = RouteAssetHead.fromJson(object);
 			if (!serverId.equals(head.serverId) || rendererVersion != head.rendererVersion) {
 				throw new IOException("Route asset HEAD identity mismatch");
@@ -98,7 +99,7 @@ public final class RouteAssetRepository {
 			throw new IOException("Route asset manifest renderer version mismatch");
 		}
 		for (final RouteAssetManifest.Entry entry : next.getEntries().values()) {
-			if (cas.find(entry.getHash(), RouteAssetCas.MediaType.PNG).isEmpty()) {
+			if (!cas.find(entry.getHash(), RouteAssetCas.MediaType.PNG).isPresent()) {
 				throw new IOException("Missing route asset PNG object: " + entry.getHash());
 			}
 		}
@@ -180,7 +181,7 @@ public final class RouteAssetRepository {
 			throw new IOException("Invalid route asset dependency state size");
 		}
 		try {
-			final JsonObject root = JsonParser.parseString(Files.readString(dependencyStatePath, StandardCharsets.UTF_8)).getAsJsonObject();
+			final JsonObject root = JsonParser.parseString(JavaCompat.readString(dependencyStatePath, StandardCharsets.UTF_8)).getAsJsonObject();
 			if (root.get("rendererVersion").getAsInt() != rendererVersion) throw new IOException("Route asset dependency renderer version mismatch");
 			final JsonArray entries = root.getAsJsonArray("entries");
 			if (entries == null || entries.size() > RouteAssetProtocol.MAX_MANIFEST_ENTRIES) throw new IOException("Invalid route asset dependency entry count");
@@ -220,7 +221,7 @@ public final class RouteAssetRepository {
 	private String loadOrCreateServerId() throws IOException {
 		if (Files.isRegularFile(serverIdPath)) {
 			try {
-				return UUID.fromString(Files.readString(serverIdPath, StandardCharsets.UTF_8).trim()).toString();
+				return UUID.fromString(JavaCompat.readString(serverIdPath, StandardCharsets.UTF_8).trim()).toString();
 			} catch (IllegalArgumentException exception) {
 				throw new IOException("Invalid route asset server ID", exception);
 			}
@@ -237,7 +238,7 @@ public final class RouteAssetRepository {
 			retained.add(revision);
 			final Path metadataPath = revisionsPath.resolve(revision + ".json");
 			if (!Files.isRegularFile(metadataPath)) break;
-			final JsonObject metadata = JsonParser.parseString(Files.readString(metadataPath, StandardCharsets.UTF_8)).getAsJsonObject();
+			final JsonObject metadata = JsonParser.parseString(JavaCompat.readString(metadataPath, StandardCharsets.UTF_8)).getAsJsonObject();
 			revision = metadata.get("parent").getAsString();
 		}
 		try (final Stream<Path> paths = Files.list(revisionsPath)) {

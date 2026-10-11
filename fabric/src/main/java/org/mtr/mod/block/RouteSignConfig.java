@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import org.mtr.mod.data.JavaCompat;
 
 /** Immutable route-sign selection stored on both halves of the sign. */
 public final class RouteSignConfig {
@@ -47,7 +48,7 @@ public final class RouteSignConfig {
 	}
 
 	public static RouteSignConfig create(long platformId, RouteSignStyleMode styleMode) {
-		return create(platformId == 0 ? Collections.emptySet() : Set.of(platformId), styleMode, "");
+		return create(platformId == 0 ? Collections.emptySet() : JavaCompat.setOf(platformId), styleMode, "");
 	}
 
 	public static RouteSignConfig empty() {

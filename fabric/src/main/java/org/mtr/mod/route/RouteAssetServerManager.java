@@ -45,6 +45,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.mtr.mod.data.JavaCompat;
 
 public final class RouteAssetServerManager implements AutoCloseable {
 
@@ -94,7 +95,7 @@ public final class RouteAssetServerManager implements AutoCloseable {
 	private static final AtomicInteger THREAD_COUNTER = new AtomicInteger();
 	private static final int MAX_TRACKED_PACKET_FALLBACK_TRANSFERS = 1024;
 	private static final int MAX_CONFIGURED_ASSET_DIAGNOSTICS = 64;
-	private static final Set<String> FIXED_ASSET_LANGUAGES = Set.of("NORMAL", "CJK", "LATIN");
+	private static final Set<String> FIXED_ASSET_LANGUAGES = JavaCompat.setOf("NORMAL", "CJK", "LATIN");
 	private static final long PERIODIC_REFRESH_MILLIS = 60_000;
 	private static final int FULL_CAS_VERIFY_INTERVAL = 10;
 	private static final int WORKER_QUEUE_MULTIPLIER = 4;
@@ -493,7 +494,7 @@ public final class RouteAssetServerManager implements AutoCloseable {
 	}
 	public List<String> getConfiguredAssetDiagnostics() {
 		synchronized (stateLock) {
-			return List.copyOf(configuredAssetDiagnostics);
+			return JavaCompat.listCopyOf(configuredAssetDiagnostics);
 		}
 	}
 

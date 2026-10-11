@@ -9,6 +9,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import org.mtr.mod.data.JavaCompat;
 
 public final class DestinationSignDirectServiceModel {
 
@@ -20,7 +21,7 @@ public final class DestinationSignDirectServiceModel {
 	}
 
 	public static Model project(DestinationSignTopology topology, long sourceStationId, long destinationStationId) {
-		return project(topology, sourceStationId, Set.of(destinationStationId));
+		return project(topology, sourceStationId, JavaCompat.setOf(destinationStationId));
 	}
 
 	public static Model project(DestinationSignTopology topology, long sourceStationId, Set<Long> destinationStationIds) {

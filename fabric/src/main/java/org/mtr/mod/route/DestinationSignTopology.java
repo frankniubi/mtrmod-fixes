@@ -14,6 +14,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.function.Function;
+import org.mtr.mod.data.JavaCompat;
 
 /** Immutable ordered route occurrences used by Destination Station Signs. */
 public final class DestinationSignTopology {
@@ -41,7 +42,7 @@ public final class DestinationSignTopology {
 
 	public List<ServiceRoute> getRoutes() { return routes; }
 	public Optional<StationZone> getStation(long stationZoneId) { return Optional.ofNullable(stations.get(stationZoneId)); }
-	public List<StationZone> getStations() { return List.copyOf(stations.values()); }
+	public List<StationZone> getStations() { return JavaCompat.listCopyOf(stations.values()); }
 
 	public static DestinationSignTopology empty() {
 		return new DestinationSignTopology(Collections.emptyList(), Collections.emptyList());

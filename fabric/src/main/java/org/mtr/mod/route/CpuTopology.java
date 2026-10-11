@@ -6,6 +6,8 @@ import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.OptionalInt;
 import java.util.Set;
+import org.mtr.mod.data.JavaCompat;
+import java.nio.file.Paths;
 
 /**
  * Small, dependency-free CPU topology helper used only for choosing a safe default
@@ -25,7 +27,7 @@ final class CpuTopology {
 		final int logical = Math.max(1, Runtime.getRuntime().availableProcessors());
 		if (System.getProperty("os.name", "").toLowerCase().contains("linux")) {
 			try {
-				final OptionalInt parsedPhysical = parsePhysicalCores(Files.readString(Path.of("/proc/cpuinfo")));
+				final OptionalInt parsedPhysical = parsePhysicalCores(JavaCompat.readString(Paths.get("/proc/cpuinfo")));
 				if (parsedPhysical.isPresent()) return new CpuTopology(logical, parsedPhysical.getAsInt());
 			} catch (IOException | RuntimeException ignored) {
 				// The logical/quota-aware fallback below is deliberately conservative.

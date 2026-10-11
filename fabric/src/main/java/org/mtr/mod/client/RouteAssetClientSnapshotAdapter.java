@@ -13,6 +13,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.SortedSet;
 import java.util.TreeMap;
+import org.mtr.mod.data.JavaCompat;
 
 /** Client-only bridge from live Core data to the immutable shared render model. */
 public final class RouteAssetClientSnapshotAdapter {
@@ -29,7 +30,7 @@ public final class RouteAssetClientSnapshotAdapter {
 		Objects.requireNonNull(resourceFingerprint, "resourceFingerprint");
 		if (key.getType() == org.mtr.mod.route.RouteAssetType.DESTINATION_SIGN_ATLAS) {
 			return MinecraftClientData.getDestinationSignDimensionSnapshot(key.getDimension()).flatMap(dimension -> {
-				final RouteAssetDataMirror.Snapshot snapshot = new RouteAssetDataMirror.Snapshot(0, Map.of(key.getDimension(), dimension));
+				final RouteAssetDataMirror.Snapshot snapshot = new RouteAssetDataMirror.Snapshot(0, JavaCompat.mapOf(key.getDimension(), dimension));
 				return CATALOG.resolveDestinationSign(key, snapshot, resourceFingerprint)
 						.map(entry -> new ResolvedSnapshot(entry.getSnapshot(), entry.getDependencyFingerprint()));
 			});
@@ -50,7 +51,7 @@ public final class RouteAssetClientSnapshotAdapter {
 			for (final long selectedPlatformId : routeSignPlatformIds) platforms.put(selectedPlatformId, materializePlatform(data, selectedPlatformId));
 		}
 		final RouteAssetDataMirror.DimensionSnapshot dimension = new RouteAssetDataMirror.DimensionSnapshot(key.getDimension(), 0, platforms);
-		final RouteAssetDataMirror.Snapshot snapshot = new RouteAssetDataMirror.Snapshot(0, Map.of(key.getDimension(), dimension));
+		final RouteAssetDataMirror.Snapshot snapshot = new RouteAssetDataMirror.Snapshot(0, JavaCompat.mapOf(key.getDimension(), dimension));
 		return CATALOG.resolveObserved(key, snapshot, resourceFingerprint).map(entry -> new ResolvedSnapshot(entry.getSnapshot(), entry.getDependencyFingerprint()));
 	}
 

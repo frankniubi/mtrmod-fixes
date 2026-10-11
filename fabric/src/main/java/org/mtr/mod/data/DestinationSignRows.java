@@ -133,7 +133,7 @@ public final class DestinationSignRows {
 	public static final class Snapshot {
 		private final List<Row> rows;
 		private final long nextStateBoundaryMillis;
-		private Snapshot(List<Row> rows, long nextStateBoundaryMillis) { this.rows = List.copyOf(rows); this.nextStateBoundaryMillis = nextStateBoundaryMillis; }
+		private Snapshot(List<Row> rows, long nextStateBoundaryMillis) { this.rows = JavaCompat.listCopyOf(rows); this.nextStateBoundaryMillis = nextStateBoundaryMillis; }
 		public List<Row> getRows() { return rows; }
 		public long getNextStateBoundaryMillis() { return nextStateBoundaryMillis; }
 	}

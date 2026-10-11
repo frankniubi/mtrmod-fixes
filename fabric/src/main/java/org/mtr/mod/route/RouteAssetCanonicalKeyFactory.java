@@ -10,6 +10,7 @@ import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
+import org.mtr.mod.data.JavaCompat;
 
 public final class RouteAssetCanonicalKeyFactory {
 
@@ -19,12 +20,12 @@ public final class RouteAssetCanonicalKeyFactory {
 	private static final float MAX_PADDING_SCALE = 0.5F;
 	private static final int MAX_READABLE_DENOMINATOR = 4096;
 	private static final int MAX_CONTINUED_FRACTION_STEPS = 32;
-	private static final Set<String> ROUTE_MAP_PARAMETERS = Set.of("a", "f", "p", "t", "v");
-	private static final Set<String> ROUTE_SIGN_MAP_PARAMETERS = Set.of("a", "f", "hdr", "p", "ps", "s", "t", "v");
-	private static final Set<String> DIRECTION_ARROW_PARAMETERS = Set.of("a", "align", "bg", "left", "pad", "right", "show", "text", "transparent");
-	private static final Set<String> ROUTE_SQUARE_PARAMETERS = Set.of("align");
-	private static final Set<String> ROUTE_COLOR_STRIP_PARAMETERS = Set.of("style");
-	private static final Set<String> DESTINATION_SIGN_PARAMETERS = Set.of("d", "eta", "h", "hdr", "rpb", "s", "v", "w");
+	private static final Set<String> ROUTE_MAP_PARAMETERS = JavaCompat.setOf("a", "f", "p", "t", "v");
+	private static final Set<String> ROUTE_SIGN_MAP_PARAMETERS = JavaCompat.setOf("a", "f", "hdr", "p", "ps", "s", "t", "v");
+	private static final Set<String> DIRECTION_ARROW_PARAMETERS = JavaCompat.setOf("a", "align", "bg", "left", "pad", "right", "show", "text", "transparent");
+	private static final Set<String> ROUTE_SQUARE_PARAMETERS = JavaCompat.setOf("align");
+	private static final Set<String> ROUTE_COLOR_STRIP_PARAMETERS = JavaCompat.setOf("style");
+	private static final Set<String> DESTINATION_SIGN_PARAMETERS = JavaCompat.setOf("d", "eta", "h", "hdr", "rpb", "s", "v", "w");
 
 	private RouteAssetCanonicalKeyFactory() {
 	}
@@ -40,7 +41,7 @@ public final class RouteAssetCanonicalKeyFactory {
 		final RouteMapPurpose checkedPurpose = Objects.requireNonNull(purpose, "purpose");
 		final RouteSignStyleMode checkedStyleMode = Objects.requireNonNull(styleMode, "styleMode");
 		if (checkedPurpose == RouteMapPurpose.ROUTE_SIGN) {
-			return routeSignMap(dimension, Set.of(platformId), resolution, language, checkedStyleMode, "",
+			return routeSignMap(dimension, JavaCompat.setOf(platformId), resolution, language, checkedStyleMode, "",
 					vertical, flip, aspectRatio, transparentWhite);
 		}
 		if (checkedStyleMode != RouteSignStyleMode.AUTO) throw new IllegalArgumentException("Generic route maps cannot override Route Sign style");
@@ -64,7 +65,7 @@ public final class RouteAssetCanonicalKeyFactory {
 				|| checkedStyleMode != RouteSignStyleMode.RAILWAY && (checkedPlatformIds.size() > 1 || !checkedHeader.isEmpty())) {
 			throw new IllegalArgumentException("Invalid Route Sign key");
 		}
-		return key(dimension, RouteAssetType.ROUTE_MAP, checkedPlatformIds.first(), resolution, language, Map.of(
+		return key(dimension, RouteAssetType.ROUTE_MAP, checkedPlatformIds.first(), resolution, language, JavaCompat.mapOf(
 				"a", encodeAspect(aspectRatio),
 				"f", encodeBoolean(flip),
 				"hdr", encodeHeader(checkedHeader),
@@ -77,7 +78,7 @@ public final class RouteAssetCanonicalKeyFactory {
 	}
 
 	public static RouteAssetKey directionArrow(String dimension, long platformId, int resolution, String language, boolean hasLeft, boolean hasRight, RouteAssetTextRasterizer.Alignment alignment, boolean showToString, float paddingScale, float aspectRatio, int backgroundColor, int textColor, int transparentColor) {
-		return key(dimension, RouteAssetType.DIRECTION_ARROW, platformId, resolution, language, Map.of(
+		return key(dimension, RouteAssetType.DIRECTION_ARROW, platformId, resolution, language, JavaCompat.mapOf(
 				"a", encodeAspect(aspectRatio),
 				"align", Objects.requireNonNull(alignment, "alignment").name(),
 				"bg", encodeColor(backgroundColor),
@@ -91,11 +92,11 @@ public final class RouteAssetCanonicalKeyFactory {
 	}
 
 	public static RouteAssetKey routeSquare(String dimension, long routeId, int resolution, String language, RouteAssetTextRasterizer.Alignment alignment) {
-		return key(dimension, RouteAssetType.ROUTE_SQUARE, routeId, resolution, language, Map.of("align", Objects.requireNonNull(alignment, "alignment").name()));
+		return key(dimension, RouteAssetType.ROUTE_SQUARE, routeId, resolution, language, JavaCompat.mapOf("align", Objects.requireNonNull(alignment, "alignment").name()));
 	}
 
 	public static RouteAssetKey routeColorStrip(String dimension, long platformId, int resolution, String language) {
-		return key(dimension, RouteAssetType.ROUTE_COLOR_STRIP, platformId, resolution, language, Map.of("style", "DEFAULT"));
+		return key(dimension, RouteAssetType.ROUTE_COLOR_STRIP, platformId, resolution, language, JavaCompat.mapOf("style", "DEFAULT"));
 	}
 
 	public static RouteAssetKey destinationSign(String dimension, long sourceStationId, long destinationStationId, int resolution,
@@ -106,7 +107,7 @@ public final class RouteAssetCanonicalKeyFactory {
 
 	public static RouteAssetKey destinationSign(String dimension, long sourceStationId, long destinationStationId, int resolution,
 			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta, int routesPerBlockHeight) {
-		return destinationSign(dimension, sourceStationId, Set.of(destinationStationId), "", resolution, style, widthBlocks, heightBlocks, showEta, routesPerBlockHeight);
+		return destinationSign(dimension, sourceStationId, JavaCompat.setOf(destinationStationId), "", resolution, style, widthBlocks, heightBlocks, showEta, routesPerBlockHeight);
 	}
 
 	public static RouteAssetKey destinationSign(String dimension, long sourceStationId, Set<Long> destinationStationIds, String customHeader, int resolution,
@@ -127,7 +128,7 @@ public final class RouteAssetCanonicalKeyFactory {
 				|| !DestinationSignAtlasLayout.isValidFootprint(checkedStyle, widthBlocks, heightBlocks)) {
 			throw new IllegalArgumentException("Invalid destination sign key");
 		}
-		return key(dimension, RouteAssetType.DESTINATION_SIGN_ATLAS, sourceStationId, resolution, "MULTI", Map.of(
+		return key(dimension, RouteAssetType.DESTINATION_SIGN_ATLAS, sourceStationId, resolution, "MULTI", JavaCompat.mapOf(
 				"d", encodeIds(checkedDestinations),
 				"eta", encodeBoolean(showEta),
 				"h", Integer.toString(heightBlocks),

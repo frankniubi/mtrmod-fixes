@@ -37,6 +37,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
+import org.mtr.mod.data.JavaCompat;
 
 public class DynamicTextureCache implements IGui {
 
@@ -198,7 +199,7 @@ public class DynamicTextureCache implements IGui {
 	}
 
 	public DynamicResource getRouteSignMap(long platformId, RouteSignStyleMode styleMode, float aspectRatio) {
-		return getRouteSignMap(Set.of(platformId), styleMode, "", aspectRatio);
+		return getRouteSignMap(JavaCompat.setOf(platformId), styleMode, "", aspectRatio);
 	}
 
 	public DynamicResource getRouteSignMap(Set<Long> platformIds, RouteSignStyleMode styleMode, String customPlatformHeader, float aspectRatio) {

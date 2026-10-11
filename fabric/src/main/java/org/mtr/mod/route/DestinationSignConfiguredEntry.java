@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import org.mtr.mod.data.JavaCompat;
 
 public final class DestinationSignConfiguredEntry {
 
@@ -23,7 +24,7 @@ public final class DestinationSignConfiguredEntry {
 
 	public DestinationSignConfiguredEntry(long sourceStationId, long destinationStationId, int widthBlocks, int heightBlocks,
 			DestinationSignStyle style, boolean showEta, int routesPerBlockHeight) {
-		this(sourceStationId, Set.of(destinationStationId), "", widthBlocks, heightBlocks, style, showEta, routesPerBlockHeight);
+		this(sourceStationId, JavaCompat.setOf(destinationStationId), "", widthBlocks, heightBlocks, style, showEta, routesPerBlockHeight);
 	}
 
 	public DestinationSignConfiguredEntry(long sourceStationId, Set<Long> destinationStationIds, String customHeader,

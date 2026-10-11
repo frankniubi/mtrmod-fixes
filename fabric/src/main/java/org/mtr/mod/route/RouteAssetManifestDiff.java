@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
+import org.mtr.mod.data.JavaCompat;
 
 public final class RouteAssetManifestDiff {
 
@@ -136,20 +137,20 @@ public final class RouteAssetManifestDiff {
 		}
 
 		static Change add(RouteAssetKey key, RouteAssetManifest.Entry entry) {
-			return new Change(Operation.ADD, key, null, null, "", entry.getHash(), entry.getDependencyFingerprint(), List.of(entry.getDependencyFingerprint()));
+			return new Change(Operation.ADD, key, null, null, "", entry.getHash(), entry.getDependencyFingerprint(), JavaCompat.listOf(entry.getDependencyFingerprint()));
 		}
 
 		static Change modify(RouteAssetKey key, RouteAssetManifest.Entry oldEntry, RouteAssetManifest.Entry newEntry) {
-			return new Change(Operation.MODIFY, key, null, null, oldEntry.getHash(), newEntry.getHash(), newEntry.getDependencyFingerprint(), List.of(newEntry.getDependencyFingerprint()));
+			return new Change(Operation.MODIFY, key, null, null, oldEntry.getHash(), newEntry.getHash(), newEntry.getDependencyFingerprint(), JavaCompat.listOf(newEntry.getDependencyFingerprint()));
 		}
 
 		static Change delete(RouteAssetKey key, RouteAssetManifest.Entry entry) {
-			return new Change(Operation.DELETE, key, null, null, entry.getHash(), "", "", List.of(entry.getDependencyFingerprint()));
+			return new Change(Operation.DELETE, key, null, null, entry.getHash(), "", "", JavaCompat.listOf(entry.getDependencyFingerprint()));
 		}
 
 		static Change move(RouteAssetKey oldKey, RouteAssetKey newKey, RouteAssetManifest.Entry oldEntry, RouteAssetManifest.Entry newEntry) {
 			if (!oldEntry.getHash().equals(newEntry.getHash())) throw new IllegalArgumentException("MOVE content hash changed");
-			return new Change(Operation.MOVE, null, oldKey, newKey, oldEntry.getHash(), newEntry.getHash(), newEntry.getDependencyFingerprint(), List.of(newEntry.getDependencyFingerprint()));
+			return new Change(Operation.MOVE, null, oldKey, newKey, oldEntry.getHash(), newEntry.getHash(), newEntry.getDependencyFingerprint(), JavaCompat.listOf(newEntry.getDependencyFingerprint()));
 		}
 
 		private void validateShape() {

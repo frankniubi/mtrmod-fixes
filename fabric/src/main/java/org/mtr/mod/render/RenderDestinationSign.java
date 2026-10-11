@@ -37,6 +37,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.mtr.mod.data.JavaCompat;
 
 public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEntity> extends BlockEntityRenderer<T> implements IBlock, IGui {
 
@@ -383,9 +384,9 @@ public final class RenderDestinationSign<T extends BlockDestinationSign.BlockEnt
 			this.heightBlocks = heightBlocks;
 			this.neutralPlaceholder = neutralPlaceholder;
 			this.atlasRequestCount = atlasRequestCount;
-			this.atlasQuads = List.copyOf(atlasQuads);
-			this.dynamicQuads = List.copyOf(dynamicQuads);
-			this.solidQuads = List.copyOf(solidQuads);
+			this.atlasQuads = JavaCompat.listCopyOf(atlasQuads);
+			this.dynamicQuads = JavaCompat.listCopyOf(dynamicQuads);
+			this.solidQuads = JavaCompat.listCopyOf(solidQuads);
 		}
 		public RouteAssetKey getStaticKey() { return staticKey; }
 		public int getWidthBlocks() { return widthBlocks; }

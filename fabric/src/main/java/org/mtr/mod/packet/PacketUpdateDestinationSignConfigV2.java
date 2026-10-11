@@ -192,7 +192,7 @@ public final class PacketUpdateDestinationSignConfigV2 extends PacketHandler {
 		public Validation validateAgainst(long authoritativeSource, DestinationSignTopology topology) {
 			if (sourceStationId != authoritativeSource) return Validation.failure(DestinationSignConfigResult.STALE_TARGET);
 			final Optional<DestinationSignConfig> config = toConfig();
-			if (config.isEmpty()) return Validation.failure(DestinationSignConfigResult.INVALID_LAYOUT);
+			if (!config.isPresent()) return Validation.failure(DestinationSignConfigResult.INVALID_LAYOUT);
 			try {
 				final Set<Long> reachableDestinationIds = new TreeSet<>();
 				DestinationSignDirectServiceModel.reachableDestinations(topology, sourceStationId)

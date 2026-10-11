@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import org.mtr.mod.data.JavaCompat;
 
 /**
  * Canonical 320 by 538 Route Sign layout. Each route row leads with its terminal in large type and lists every
@@ -48,7 +49,7 @@ public final class RouteSignCorridorLayout {
 
 	private static final int BADGE_TEXT_PADDING_X = 4;
 	private static final int MEASURE_SCALE = 4;
-	private static final List<FontPreset> FONT_PRESETS = List.of(
+	private static final List<FontPreset> FONT_PRESETS = JavaCompat.listOf(
 			new FontPreset(17, 10, 13, 9, 16),
 			new FontPreset(16, 9, 12, 8, 15),
 			new FontPreset(15, 9, 11, 8, 14),
@@ -93,7 +94,7 @@ public final class RouteSignCorridorLayout {
 			int rowsHeight = 0;
 			for (final RouteSignCorridorModel.RouteRow row : corridor.getRows()) {
 				final Optional<RowDraft> rowDraft = fitRow(model, row, text, language, preset, viaStops);
-				if (rowDraft.isEmpty()) return Optional.empty();
+				if (!rowDraft.isPresent()) return Optional.empty();
 				rows.add(rowDraft.get());
 				rowsHeight += rowDraft.get().height;
 			}
@@ -373,7 +374,7 @@ public final class RouteSignCorridorLayout {
 			tokens.add(token(terminal, terminalSize, textX, y + (ROUTE_ROW_BASE_HEIGHT - terminalHeight) / 2, terminalHeight,
 					y + (ROUTE_ROW_BASE_HEIGHT - TOKEN_ICON_SIZE) / 2, 0, -1, preset.terminalCjkSize, preset.terminalLatinSize));
 			final int countHeight = Math.min(ROUTE_ROW_BASE_HEIGHT, countSize.height);
-			tokens.add(new DisplayToken(DisplayToken.Kind.COUNT, count, count, List.of(terminal.stop), "",
+			tokens.add(new DisplayToken(DisplayToken.Kind.COUNT, count, count, JavaCompat.listOf(terminal.stop), "",
 					textX + textWidth - countSize.width, y + (ROUTE_ROW_BASE_HEIGHT - countHeight) / 2, countSize.width, countHeight,
 					countSize.width, 0, textX + textWidth, y, 0, 0, -1, COUNT_CJK_SIZE, COUNT_LATIN_SIZE, -1));
 			for (final MeasuredToken measured : via) {
@@ -391,7 +392,7 @@ public final class RouteSignCorridorLayout {
 				int dotX, int cjkSize, int latinSize) {
 			final int barX = size.barWidth == 0 ? -1 : x + size.textWidth + ICON_GAP;
 			final int iconX = x + size.textWidth + size.barWidth + (size.iconCount == 0 ? 0 : ICON_GAP);
-			return new DisplayToken(seed.kind, seed.displayText, seed.semanticLabel, List.of(seed.stop), seed.platformLabel,
+			return new DisplayToken(seed.kind, seed.displayText, seed.semanticLabel, JavaCompat.listOf(seed.stop), seed.platformLabel,
 					x, y, size.textWidth, height, size.width, size.iconCount, iconX, iconY, size.iconsWidth, line,
 					dotX, cjkSize, latinSize, barX);
 		}

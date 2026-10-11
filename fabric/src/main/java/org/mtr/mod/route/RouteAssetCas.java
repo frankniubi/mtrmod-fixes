@@ -37,6 +37,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import org.mtr.mod.data.JavaCompat;
 
 public final class RouteAssetCas {
 
@@ -450,7 +451,7 @@ public final class RouteAssetCas {
 	private void loadPersistedIndex() {
 		if (!Files.isRegularFile(verifiedIndexPath)) return;
 		try {
-			final String text = Files.readString(verifiedIndexPath, StandardCharsets.UTF_8);
+			final String text = JavaCompat.readString(verifiedIndexPath, StandardCharsets.UTF_8);
 			final JsonObject root = JsonParser.parseString(text).getAsJsonObject();
 			final JsonArray arr = root.has("entries") && root.get("entries").isJsonArray() ? root.getAsJsonArray("entries") : new JsonArray();
 			for (final JsonElement el : arr) {

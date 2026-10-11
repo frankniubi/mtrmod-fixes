@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.mtr.mod.data.JavaCompat;
 
 /** Canonical geometry for a sign whose anchor is the readable face's lower-left cell. */
 public final class DestinationSignFootprint {
@@ -59,7 +60,7 @@ public final class DestinationSignFootprint {
 	}
 
 	public static Mutation removal(BlockPos anchor, Direction facing, int width, int height) {
-		return new Mutation(List.of(), cells(anchor, facing, width, height), List.of());
+		return new Mutation(JavaCompat.listOf(), cells(anchor, facing, width, height), JavaCompat.listOf());
 	}
 
 	public static <T> boolean transact(List<BlockPos> positions, TransactionAccess<T> access) {
@@ -127,9 +128,9 @@ public final class DestinationSignFootprint {
 		private final List<Cell> added;
 
 		private Mutation(List<Cell> retained, List<Cell> removed, List<Cell> added) {
-			this.retained = List.copyOf(retained);
-			this.removed = List.copyOf(removed);
-			this.added = List.copyOf(added);
+			this.retained = JavaCompat.listCopyOf(retained);
+			this.removed = JavaCompat.listCopyOf(removed);
+			this.added = JavaCompat.listCopyOf(added);
 		}
 
 		public List<Cell> getRetained() { return retained; }

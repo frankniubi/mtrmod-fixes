@@ -71,7 +71,7 @@ public final class PacketUpdateRouteSignConfig extends PacketHandler {
 	@Override
 	public void runServer(MinecraftServer minecraftServer, ServerPlayerEntity serverPlayerEntity) {
 		final Optional<RouteSignConfig> resolvedConfig = payload.toConfig();
-		if (resolvedConfig.isEmpty()) return;
+		if (!resolvedConfig.isPresent()) return;
 		final RouteSignConfig config = resolvedConfig.get();
 		final BlockPos blockPos = payload.blockPos;
 		final World world = serverPlayerEntity.getEntityWorld();
@@ -131,7 +131,7 @@ public final class PacketUpdateRouteSignConfig extends PacketHandler {
 
 		public Optional<RouteSignConfig> toConfig() {
 			final Optional<RouteSignStyleMode> styleMode = RouteSignStyleMode.fromNetworkOrdinal(styleOrdinal);
-			if (styleMode.isEmpty()) return Optional.empty();
+			if (!styleMode.isPresent()) return Optional.empty();
 			try {
 				return Optional.of(RouteSignConfig.create(platformIds, styleMode.get(), customPlatformHeader));
 			} catch (IllegalArgumentException exception) {

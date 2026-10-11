@@ -14,10 +14,11 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import org.mtr.mod.data.JavaCompat;
 
 public final class RouteAssetDependencyCatalog {
 
-	private static final Set<String> LANGUAGES = Set.of("NORMAL", "CJK", "LATIN");
+	private static final Set<String> LANGUAGES = JavaCompat.setOf("NORMAL", "CJK", "LATIN");
 
 	public Map<RouteAssetKey, Entry> enumerateFixed(RouteAssetDataMirror.Snapshot data, String resourceFingerprint, String language) {
 		final String fingerprint = RouteAssetHash.requireValid(resourceFingerprint);
@@ -312,7 +313,7 @@ public final class RouteAssetDependencyCatalog {
 			canonical.writeInt(strip.getRail().getThickness());
 			canonical.writeBoolean(strip.getContinuationArrow().isPresent());
 			if (strip.getContinuationArrow().isPresent()) {
-				final DestinationSignRouteStripLayout.ContinuationArrow arrow = strip.getContinuationArrow().orElseThrow();
+				final DestinationSignRouteStripLayout.ContinuationArrow arrow = strip.getContinuationArrow().get();
 				canonical.writeInt(arrow.getBaseX());
 				canonical.writeInt(arrow.getTopY());
 				canonical.writeInt(arrow.getWidth());

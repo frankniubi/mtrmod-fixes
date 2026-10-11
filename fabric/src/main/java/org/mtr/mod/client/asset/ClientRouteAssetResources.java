@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.mtr.mod.data.JavaCompat;
 
 /** Retains one validated immutable resource set for resolved local route rendering. */
 public final class ClientRouteAssetResources {
@@ -26,10 +27,10 @@ public final class ClientRouteAssetResources {
 	static final String AIRPLANE_IMAGE = "textures/block/sign/airplane.png";
 	static final String LATIN_FONT = "font/noto-sans-semibold.ttf";
 	static final String CJK_FONT = "font/noto-serif-cjk-tc-semibold.ttf";
-	static final List<String> IMAGE_PATHS = List.of(ARROW_IMAGE, CIRCLE_IMAGE, RAILWAY_INTERCHANGE_IMAGE, AIRPLANE_IMAGE);
-	static final List<String> RESOURCE_PATHS = List.of(ARROW_IMAGE, CIRCLE_IMAGE, RAILWAY_INTERCHANGE_IMAGE, AIRPLANE_IMAGE, LATIN_FONT, CJK_FONT);
+	static final List<String> IMAGE_PATHS = JavaCompat.listOf(ARROW_IMAGE, CIRCLE_IMAGE, RAILWAY_INTERCHANGE_IMAGE, AIRPLANE_IMAGE);
+	static final List<String> RESOURCE_PATHS = JavaCompat.listOf(ARROW_IMAGE, CIRCLE_IMAGE, RAILWAY_INTERCHANGE_IMAGE, AIRPLANE_IMAGE, LATIN_FONT, CJK_FONT);
 
-	private static final String INVALID_FINGERPRINT = "0".repeat(64);
+	private static final String INVALID_FINGERPRINT = JavaCompat.repeat("0", 64);
 	private static final State INITIAL_STATE = new State(RouteAssetProtocol.BUNDLED_RESOURCE_FINGERPRINT, null);
 	private static final State FAILED_STATE = new State(INVALID_FINGERPRINT, null);
 	private static final Store GLOBAL = new Store();

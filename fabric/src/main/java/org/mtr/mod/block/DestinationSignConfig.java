@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import org.mtr.mod.data.JavaCompat;
 
 /** Immutable configuration stored only on the lower-left destination sign anchor. */
 public final class DestinationSignConfig {
@@ -68,7 +69,7 @@ public final class DestinationSignConfig {
 
 	public static DestinationSignConfig configured(long sourceStationId, long destinationStationId, int width, int height,
 			DestinationSignStyle style, boolean showEta, int routesPerBlockHeight) {
-		return configured(sourceStationId, Set.of(destinationStationId), width, height, style, showEta, "", routesPerBlockHeight);
+		return configured(sourceStationId, JavaCompat.setOf(destinationStationId), width, height, style, showEta, "", routesPerBlockHeight);
 	}
 
 	public static DestinationSignConfig configured(long sourceStationId, Set<Long> destinationStationIds, int width, int height,

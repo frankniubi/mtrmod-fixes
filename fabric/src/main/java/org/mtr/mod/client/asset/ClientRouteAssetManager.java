@@ -62,6 +62,8 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
+import org.mtr.mod.data.JavaCompat;
+import java.nio.file.Paths;
 
 public final class ClientRouteAssetManager {
 
@@ -924,7 +926,7 @@ public final class ClientRouteAssetManager {
 			if (storedSize <= 0 || storedSize > RouteAssetProtocol.MAX_PNG_BYTES) throw new IOException("Route asset PNG exceeds its byte limit");
 			final byte[] bytes;
 			try (final InputStream inputStream = Files.newInputStream(pngPath)) {
-				bytes = inputStream.readNBytes(RouteAssetProtocol.MAX_PNG_BYTES + 1);
+				bytes = JavaCompat.readNBytes(inputStream, RouteAssetProtocol.MAX_PNG_BYTES + 1);
 			}
 			requireCurrentGeneration(expectedGeneration);
 			if (bytes.length == 0 || bytes.length > RouteAssetProtocol.MAX_PNG_BYTES) throw new IOException("Route asset PNG exceeds its byte limit");
@@ -1026,7 +1028,7 @@ public final class ClientRouteAssetManager {
 		final Executor clientExecutor = MinecraftClient.getInstance()::execute;
 		final ClientRouteAssetManager manager = createResilient(
 				() -> {
-					final Path cacheRoot = MinecraftClient.getInstance().getRunDirectoryMapped().toPath().resolve(Path.of("cache", "mtr", "route-textures"));
+					final Path cacheRoot = MinecraftClient.getInstance().getRunDirectoryMapped().toPath().resolve(Paths.get("cache", "mtr", "route-textures"));
 					return new ClientRouteAssetDiskCache(cacheRoot, RouteAssetProtocol.RENDERER_VERSION);
 				},
 				ClientRouteAssetResourceFingerprint::get,

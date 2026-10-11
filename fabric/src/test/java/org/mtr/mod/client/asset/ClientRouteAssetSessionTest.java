@@ -1,6 +1,7 @@
 package org.mtr.mod.client.asset;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mtr.mapping.holder.Identifier;
@@ -248,6 +249,7 @@ public final class ClientRouteAssetSessionTest {
 
 	@Test
 	public void productionDiskDecoderTransitionsMappedLookupFromPendingToReady() throws Exception {
+		Assumptions.assumeTrue(lwjglNativesAvailable(), "the NativeImage decoder needs LWJGL natives, which older Minecraft versions leave off the test classpath");
 		final String address = "decode-ready.example.com";
 		final String serverId = "09620fd4-28dc-4055-a649-2293999730df";
 		final ClientRouteAssetDiskCache cache = new ClientRouteAssetDiskCache(temporaryDirectory, RouteAssetProtocol.RENDERER_VERSION);
@@ -926,6 +928,15 @@ public final class ClientRouteAssetSessionTest {
 		manager.tick(clock.get());
 		Assertions.assertEquals(ClientRouteAssetSession.State.READY, manager.getState());
 		Assertions.assertEquals(ClientRouteAssetManager.RouteTextureState.PENDING, manager.lookupRouteTexture(manifest.getEntries().firstKey()).getState());
+	}
+
+	private static boolean lwjglNativesAvailable() {
+		try {
+			Class.forName("org.lwjgl.system.MemoryUtil");
+			return true;
+		} catch (ClassNotFoundException | LinkageError exception) {
+			return false;
+		}
 	}
 
 	private static ClientRouteAssetManager manager(ClientRouteAssetDiskCache cache, AtomicLong clock, int resolution, String fingerprint, List<org.mtr.mod.route.RouteAssetHello> hellos, List<ClientRouteAssetManager.DocumentRequest> requests) {

@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import org.mtr.mod.data.JavaCompat;
+import java.util.stream.Collectors;
 
 public final class DestinationSignRouteStripLayout {
 
@@ -111,7 +113,7 @@ public final class DestinationSignRouteStripLayout {
 		spread(allTokens, leftInset, Math.max(0, metrics.getRouteStripWidth() - leftInset - rightInset));
 		final int centerY = metrics.rowHeight / 2;
 		final List<Marker> markers = createMarkers(allTokens, metrics, centerY);
-		return new RouteStrip(markers, List.of(), new Rail(markers.get(0).centerX,
+		return new RouteStrip(markers, JavaCompat.listOf(), new Rail(markers.get(0).centerX,
 				markers.get(markers.size() - 1).centerX, centerY, metrics.railThickness), null, intermediateCapacity);
 	}
 
@@ -130,11 +132,11 @@ public final class DestinationSignRouteStripLayout {
 	}
 
 	private static List<Token> selectIntermediate(List<Token> candidates, int capacity) {
-		if (capacity <= 0 || candidates.isEmpty()) return List.of();
+		if (capacity <= 0 || candidates.isEmpty()) return JavaCompat.listOf();
 		if (candidates.size() <= capacity) return new ArrayList<>(candidates);
 		if (capacity == 1) {
 			final Token ellipsis = ellipsis(candidates.get(0).occurrenceIndex);
-			return new ArrayList<>(List.of(ellipsis));
+			return new ArrayList<>(JavaCompat.listOf(ellipsis));
 		}
 		final int realSlots = capacity - 1;
 		final int prefixCount = (realSlots + 1) / 2;
@@ -200,7 +202,7 @@ public final class DestinationSignRouteStripLayout {
 
 	private static List<LabelSlot> allocateLabels(List<Marker> markers, int sourceIndex, RowMetrics metrics) {
 		final List<Marker> mandatory = markers.stream().filter(marker -> marker.role != MarkerRole.INTERMEDIATE && marker.role != MarkerRole.ELLIPSIS)
-				.sorted(Comparator.comparingInt(marker -> marker.occurrenceIndex)).toList();
+				.sorted(Comparator.comparingInt(marker -> marker.occurrenceIndex)).collect(Collectors.toList());
 		final List<LabelSlot> labels = new ArrayList<>();
 		for (int mandatoryIndex = 0; mandatoryIndex < mandatory.size(); mandatoryIndex++) {
 			final Marker marker = mandatory.get(mandatoryIndex);
@@ -217,7 +219,7 @@ public final class DestinationSignRouteStripLayout {
 		}
 
 		for (final Marker marker : markers.stream().filter(value -> value.role == MarkerRole.INTERMEDIATE)
-				.sorted(Comparator.comparingInt(value -> value.occurrenceIndex)).toList()) {
+				.sorted(Comparator.comparingInt(value -> value.occurrenceIndex)).collect(Collectors.toList())) {
 			final int x = marker.centerX - 24;
 			if (x < 0 || x + 48 > metrics.getRouteStripWidth()) continue;
 			final int preferredLane = Math.floorMod(marker.occurrenceIndex - sourceIndex, 2);

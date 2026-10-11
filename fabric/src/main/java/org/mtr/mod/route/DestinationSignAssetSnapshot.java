@@ -8,6 +8,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import org.mtr.mod.data.JavaCompat;
 
 /** Static-only atlas input. Live train state is intentionally not representable here. */
 public final class DestinationSignAssetSnapshot {
@@ -79,7 +80,7 @@ public final class DestinationSignAssetSnapshot {
 				y = Math.addExact(y, layout.getRowHeight());
 			}
 		}
-		for (final SpriteKind label : List.of(SpriteKind.LEAVING, SpriteKind.NO_DIRECT_SERVICE, SpriteKind.NO_SERVICE, SpriteKind.UNAVAILABLE)) {
+		for (final SpriteKind label : JavaCompat.listOf(SpriteKind.LEAVING, SpriteKind.NO_DIRECT_SERVICE, SpriteKind.NO_SERVICE, SpriteKind.UNAVAILABLE)) {
 			for (int phase = 0; phase < 2; phase++) {
 				mutableSprites.add(new Sprite(label, null, null, phase, y, layout.getRowHeight()));
 				y = Math.addExact(y, layout.getRowHeight());
@@ -93,13 +94,13 @@ public final class DestinationSignAssetSnapshot {
 
 	public static DestinationSignAssetSnapshot create(DestinationSignTopology topology, long sourceStationId, long destinationStationId,
 			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta) {
-		return create(topology, sourceStationId, Set.of(destinationStationId), "", style, widthBlocks, heightBlocks, showEta,
+		return create(topology, sourceStationId, JavaCompat.setOf(destinationStationId), "", style, widthBlocks, heightBlocks, showEta,
 				RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT);
 	}
 
 	public static DestinationSignAssetSnapshot create(DestinationSignTopology topology, long sourceStationId, long destinationStationId,
 			DestinationSignStyle style, int widthBlocks, int heightBlocks, boolean showEta, int routesPerBlockHeight) {
-		return create(topology, sourceStationId, Set.of(destinationStationId), "", style, widthBlocks, heightBlocks, showEta, routesPerBlockHeight);
+		return create(topology, sourceStationId, JavaCompat.setOf(destinationStationId), "", style, widthBlocks, heightBlocks, showEta, routesPerBlockHeight);
 	}
 
 	public static DestinationSignAssetSnapshot create(DestinationSignTopology topology, long sourceStationId, Set<Long> destinationStationIds,

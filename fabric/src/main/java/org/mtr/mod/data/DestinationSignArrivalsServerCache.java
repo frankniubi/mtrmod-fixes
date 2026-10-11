@@ -117,7 +117,7 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 	private void collectLaunches(Map<Integer, List<Long>> platformsByLimit, int maximumPlatformsPerQuery, List<QueryBatch> launches) {
 		platformsByLimit.forEach((limit, platforms) -> {
 			for (int start = 0; start < platforms.size(); start += maximumPlatformsPerQuery) {
-				final List<Long> batchPlatforms = List.copyOf(platforms.subList(start, Math.min(platforms.size(), start + maximumPlatformsPerQuery)));
+				final List<Long> batchPlatforms = JavaCompat.listCopyOf(platforms.subList(start, Math.min(platforms.size(), start + maximumPlatformsPerQuery)));
 				final Map<Long, Long> generations = new HashMap<>();
 				batchPlatforms.forEach(platform -> generations.put(platform, flightsByPlatform.get(platform).generation));
 				launches.add(new QueryBatch(batchPlatforms, generations, limit));
@@ -132,7 +132,7 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 			expireCache(now);
 			final List<QueryBatch> expired = new ArrayList<>();
 			flightsByPlatform.forEach((platform, flight) -> {
-				if (now - flight.startedMillis >= QUERY_TIMEOUT_MILLIS) expired.add(new QueryBatch(List.of(platform), Map.of(platform, flight.generation), flight.limit));
+				if (now - flight.startedMillis >= QUERY_TIMEOUT_MILLIS) expired.add(new QueryBatch(JavaCompat.listOf(platform), JavaCompat.mapOf(platform, flight.generation), flight.limit));
 			});
 			expired.forEach(batch -> collectFailure(batch, now, completions));
 		}
@@ -237,7 +237,7 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 			if (closed) return;
 			closed = true;
 			final List<QueryBatch> flights = new ArrayList<>();
-			flightsByPlatform.forEach((platform, flight) -> flights.add(new QueryBatch(List.of(platform), Map.of(platform, flight.generation), flight.limit)));
+			flightsByPlatform.forEach((platform, flight) -> flights.add(new QueryBatch(JavaCompat.listOf(platform), JavaCompat.mapOf(platform, flight.generation), flight.limit)));
 			flights.forEach(batch -> collectFailure(batch, now, completions));
 			new ArrayList<>(waitersByKey.keySet()).forEach(key -> collectKeyCompletion(key, null, saturatingAdd(now, serverMillisOffset), completions));
 			flightsByPlatform.clear(); pendingWaiterReferences = 0;
@@ -287,7 +287,7 @@ public final class DestinationSignArrivalsServerCache implements AutoCloseable {
 	public static final class QueryResponse {
 		private final long responseTimeMillis;
 		private final List<Candidate> candidates;
-		public QueryResponse(long responseTimeMillis, List<Candidate> candidates) { this.responseTimeMillis = responseTimeMillis; this.candidates = List.copyOf(candidates); }
+		public QueryResponse(long responseTimeMillis, List<Candidate> candidates) { this.responseTimeMillis = responseTimeMillis; this.candidates = JavaCompat.listCopyOf(candidates); }
 	}
 
 	public static final class Response {
