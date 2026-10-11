@@ -3,8 +3,8 @@ package org.mtr.mod.resource;
 import org.mtr.mapping.mapper.GraphicsHolder;
 import org.mtr.mapping.mapper.OptimizedModel;
 import org.mtr.mapping.mapper.OptimizedRenderer;
-import org.mtr.mapping.render.tool.GlStateTracker;
 import org.mtr.mod.data.IGui;
+import org.mtr.mod.render.RailMeshBackend;
 
 import javax.annotation.Nullable;
 import java.util.function.Supplier;
@@ -63,7 +63,7 @@ public final class OptimizedRendererWrapper implements IGui {
 		if (initializeShaders) {
 			beginReload();
 		} else {
-			GlStateTracker.capture();
+			captureGlState();
 		}
 		try {
 			return uploader.get();
@@ -71,8 +71,22 @@ public final class OptimizedRendererWrapper implements IGui {
 			if (initializeShaders) {
 				finishReload();
 			} else {
-				GlStateTracker.restore();
+				restoreGlState();
 			}
+		}
+	}
+
+	private static void captureGlState() {
+		final RailMeshBackend backend = RailMeshBackend.get();
+		if (backend != null) {
+			backend.captureGlState();
+		}
+	}
+
+	private static void restoreGlState() {
+		final RailMeshBackend backend = RailMeshBackend.get();
+		if (backend != null) {
+			backend.restoreGlState();
 		}
 	}
 

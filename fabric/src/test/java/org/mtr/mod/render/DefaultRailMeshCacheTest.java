@@ -6,8 +6,6 @@ import org.mtr.core.data.Rail;
 import org.mtr.core.data.TransportMode;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import org.mtr.mapping.holder.ClientWorld;
-import org.mtr.mapping.mapper.OptimizedModel;
-import org.mtr.mapping.render.model.Mesh;
 import org.mtr.mapping.render.vertex.Vertex;
 import org.mtr.mapping.render.vertex.VertexAttributeMapping;
 import org.mtr.mapping.render.vertex.VertexAttributeSource;
@@ -25,7 +23,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Future;
-import java.util.function.Consumer;
 
 public final class DefaultRailMeshCacheTest {
 
@@ -136,7 +133,7 @@ public final class DefaultRailMeshCacheTest {
 
 	@Test
 	public void cachedVertexLayoutKeepsPerVertexLightmap() {
-		final VertexAttributeMapping mapping = (VertexAttributeMapping) requireStaticField("RAIL_MAPPING");
+		final VertexAttributeMapping mapping = GlRailMeshBackend.RAIL_MAPPING;
 		Assertions.assertEquals(28, mapping.strideVertex);
 		Assertions.assertEquals(VertexAttributeSource.VERTEX_BUFFER, mapping.sources.get(VertexAttributeType.POSITION));
 		Assertions.assertEquals(VertexAttributeSource.GLOBAL, mapping.sources.get(VertexAttributeType.COLOR));
@@ -151,7 +148,7 @@ public final class DefaultRailMeshCacheTest {
 	public void writesLegacyDoubleSidedNonDegenerateRailQuadWithSignedTextureOffsets() {
 		final Method appendSegmentVertices = requirePackageApi(
 				"appendSegmentVertices",
-				Consumer.class,
+				RailMeshBackend.VertexSink.class,
 				double.class, double.class, double.class,
 				double.class, double.class, double.class, double.class,
 				double.class, double.class, double.class, double.class,
@@ -164,7 +161,7 @@ public final class DefaultRailMeshCacheTest {
 		// x1 + z1 = 301, so the legacy texture offset is +0.25.
 		invoke(
 				appendSegmentVertices,
-				(Consumer<Vertex>) vertices::add,
+				sink(vertices),
 				100D, 60D, 200D,
 				101D, 200D, 103D, 200D,
 				103D, 204D, 101D, 204D,
@@ -177,7 +174,7 @@ public final class DefaultRailMeshCacheTest {
 		// x1 + z1 = -301, so Java's signed remainder gives a -0.25 offset.
 		invoke(
 				appendSegmentVertices,
-				(Consumer<Vertex>) vertices::add,
+				sink(vertices),
 				-102D, 60D, -200D,
 				-101D, -200D, -99D, -200D,
 				-99D, -196D, -101D, -196D,
@@ -191,7 +188,7 @@ public final class DefaultRailMeshCacheTest {
 	public void keepsPageLocalFloatPrecisionNearBothWorldBorders() {
 		final Method appendSegmentVertices = requirePackageApi(
 				"appendSegmentVertices",
-				Consumer.class,
+				RailMeshBackend.VertexSink.class,
 				double.class, double.class, double.class,
 				double.class, double.class, double.class, double.class,
 				double.class, double.class, double.class, double.class,
@@ -356,9 +353,9 @@ public final class DefaultRailMeshCacheTest {
 		Assertions.assertFalse(invokeInstanceBoolean(hasMissingVisiblePages, offscreenEntry), "an offscreen null page must not block already visible cached pages");
 		Assertions.assertTrue(invokeInstanceBoolean(hasMissingPages, offscreenEntry), "an offscreen null page must still be discovered by proactive background upload");
 
-		final java.lang.reflect.Constructor<?> uploadedPageConstructor = uploadedPageClass.getDeclaredConstructor(preparedPageClass, Mesh.class, OptimizedModel.class);
+		final java.lang.reflect.Constructor<?> uploadedPageConstructor = uploadedPageClass.getDeclaredConstructor(preparedPageClass, RailMeshBackend.UploadedMesh.class);
 		uploadedPageConstructor.setAccessible(true);
-		final Object uploadedPage = uploadedPageConstructor.newInstance(visiblePage, null, null);
+		final Object uploadedPage = uploadedPageConstructor.newInstance(visiblePage, null);
 		final Field pagesField = cacheEntryClass.getDeclaredField("pages");
 		pagesField.setAccessible(true);
 		((ObjectArrayList<Object>) pagesField.get(visibleEntry)).set(0, uploadedPage);
@@ -370,7 +367,7 @@ public final class DefaultRailMeshCacheTest {
 	public void identicalGeometryAndUvsRemainDistinctAcrossLightValues() {
 		final Method appendSegmentVertices = requirePackageApi(
 				"appendSegmentVertices",
-				Consumer.class,
+				RailMeshBackend.VertexSink.class,
 				double.class, double.class, double.class,
 				double.class, double.class, double.class, double.class,
 				double.class, double.class, double.class, double.class,
@@ -379,8 +376,8 @@ public final class DefaultRailMeshCacheTest {
 		);
 		final List<Vertex> first = new ArrayList<>();
 		final List<Vertex> second = new ArrayList<>();
-		invoke(appendSegmentVertices, (Consumer<Vertex>) first::add, 0D, 0D, 0D, -1D, 0D, 1D, 0D, 1D, 0.5D, -1D, 0.5D, 0D, 0D, 0.065625F, 0x00F000A0);
-		invoke(appendSegmentVertices, (Consumer<Vertex>) second::add, 0D, 0D, 0D, -1D, 0D, 1D, 0D, 1D, 0.5D, -1D, 0.5D, 0D, 0D, 0.065625F, 0x00A000F0);
+		invoke(appendSegmentVertices, sink(first), 0D, 0D, 0D, -1D, 0D, 1D, 0D, 1D, 0.5D, -1D, 0.5D, 0D, 0D, 0.065625F, 0x00F000A0);
+		invoke(appendSegmentVertices, sink(second), 0D, 0D, 0D, -1D, 0D, 1D, 0D, 1D, 0.5D, -1D, 0.5D, 0D, 0D, 0.065625F, 0x00A000F0);
 
 		Assertions.assertEquals(8, first.size());
 		Assertions.assertEquals(first.size(), second.size());
@@ -399,6 +396,10 @@ public final class DefaultRailMeshCacheTest {
 					() -> Assertions.assertTrue(Math.abs(secondVertex.normal.getX()) < Float.MIN_NORMAL && Math.abs(secondVertex.normal.getZ()) < Float.MIN_NORMAL, "encoded normal must remain visually equivalent to UP")
 			);
 		}
+	}
+
+	private static RailMeshBackend.VertexSink sink(List<Vertex> vertices) {
+		return (x, y, z, u, v, light) -> vertices.add(GlRailMeshBackend.vertex(x, y, z, u, v, light));
 	}
 
 	private static Class<?> requireCacheClass() {
@@ -441,16 +442,6 @@ public final class DefaultRailMeshCacheTest {
 			return Assertions.fail(name + " must be numeric");
 		} catch (NoSuchFieldException | IllegalAccessException exception) {
 			return Assertions.fail("Missing default rail mesh cache constant: " + name, exception);
-		}
-	}
-
-	private static Object requireStaticField(String name) {
-		try {
-			final Field field = requireCacheClass().getDeclaredField(name);
-			field.setAccessible(true);
-			return field.get(null);
-		} catch (NoSuchFieldException | IllegalAccessException exception) {
-			return Assertions.fail("Missing default rail mesh cache field: " + name, exception);
 		}
 	}
 
@@ -497,7 +488,7 @@ public final class DefaultRailMeshCacheTest {
 		final List<Vertex> vertices = new ArrayList<>();
 		invoke(
 				appendSegmentVertices,
-				(Consumer<Vertex>) vertices::add,
+				sink(vertices),
 				worldOrigin, 64D, worldOrigin,
 				worldOrigin + 0.125D, worldOrigin + 0.25D,
 				worldOrigin + 1.875D, worldOrigin + 0.25D,

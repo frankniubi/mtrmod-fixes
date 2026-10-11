@@ -234,7 +234,7 @@ public final class BlockDestinationSign extends BlockExtension implements Direct
 		if (state.isAir()) return true;
 		if (player == null) return false;
 		final Hand hand = Hand.MAIN_HAND;
-		final ItemPlacementContext context = new ItemPlacementContext(world, player, hand, player.getStackInHand(hand),
+		final ItemPlacementContext context = new ItemPlacementContext(player, hand, player.getStackInHand(hand),
 				new BlockHitResult(new Vector3d(position.getX() + 0.5, position.getY() + 0.5, position.getZ() + 0.5), Direction.UP, position, false));
 		return state.canReplace(context);
 	}

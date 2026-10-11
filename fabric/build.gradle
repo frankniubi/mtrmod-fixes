@@ -15,6 +15,12 @@ loom {
 	mixin { setDefaultRefmapName("mtr.refmap.json") }
 }
 
+// The 1.16.5 mappings lack MTR's internal render API; without GlRailMeshBackend the rail mesh cache stays off and rails use the legacy renderer.
+if (minecraftVersion == "1.16.5") {
+	sourceSets.main.java.exclude "org/mtr/mod/render/GlRailMeshBackend.java"
+	sourceSets.test.java.exclude "org/mtr/mod/render/DefaultRailMeshCacheTest.java"
+}
+
 dependencies {
 	minecraft "com.mojang:minecraft:${minecraftVersion}"
 	mappings "net.fabricmc:yarn:${buildTools.getYarnVersion()}:v2"

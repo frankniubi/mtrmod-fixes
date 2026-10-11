@@ -71,6 +71,10 @@ tasks.register("setupFiles") {
 		from "../fabric/src/main/java/org/mtr/mod"
 		into "src/main/java/org/mtr/mod"
 		exclude "mixin/ClientChunkLightUpdateMixin.java"
+		exclude "mixin/CameraSeatedMixin.java"
+		if (minecraftVersion == "1.16.5") {
+			exclude "render/GlRailMeshBackend.java"
+		}
 	}
 
 	copy {

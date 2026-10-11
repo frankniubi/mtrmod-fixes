@@ -8,16 +8,6 @@ import org.mtr.mapping.holder.*;
 import org.mtr.mapping.mapper.GraphicsHolder;
 import org.mtr.mapping.mapper.OptimizedModel;
 import org.mtr.mapping.mapper.OptimizedRenderer;
-import org.mtr.mapping.render.batch.MaterialProperties;
-import org.mtr.mapping.render.model.Mesh;
-import org.mtr.mapping.render.model.RawMesh;
-import org.mtr.mapping.render.object.IndexBuffer;
-import org.mtr.mapping.render.object.VertexArray;
-import org.mtr.mapping.render.object.VertexBuffer;
-import org.mtr.mapping.render.vertex.Vertex;
-import org.mtr.mapping.render.vertex.VertexAttributeMapping;
-import org.mtr.mapping.render.vertex.VertexAttributeSource;
-import org.mtr.mapping.render.vertex.VertexAttributeType;
 import org.mtr.mapping.mapper.MinecraftClientHelper;
 import org.mtr.mod.Init;
 import org.mtr.mod.client.CustomResourceLoader;
@@ -54,16 +44,6 @@ public final class DefaultRailMeshCache implements IGui {
 	private static final long ESTIMATED_BYTES_PER_SEGMENT = 352;
 	private static final float RAIL_Y_OFFSET = 0.065625F;
 	private static final double LIGHT_REFERENCE_OFFSET = 0.1;
-	static final VertexAttributeMapping RAIL_MAPPING = new VertexAttributeMapping.Builder()
-			.set(VertexAttributeType.POSITION, VertexAttributeSource.VERTEX_BUFFER)
-			.set(VertexAttributeType.COLOR, VertexAttributeSource.GLOBAL)
-			.set(VertexAttributeType.UV_TEXTURE, VertexAttributeSource.VERTEX_BUFFER)
-			.set(VertexAttributeType.UV_OVERLAY, VertexAttributeSource.GLOBAL)
-			.set(VertexAttributeType.UV_LIGHTMAP, VertexAttributeSource.VERTEX_BUFFER)
-			.set(VertexAttributeType.NORMAL, VertexAttributeSource.VERTEX_BUFFER)
-			.set(VertexAttributeType.MATRIX_MODEL, VertexAttributeSource.GLOBAL)
-			.build();
-	private static final MaterialProperties RAIL_MATERIAL = new MaterialProperties(OptimizedModel.ShaderType.CUTOUT, new Identifier("textures/block/rail.png"), null);
 	private static final LinkedHashMap<String, CacheEntry> CACHE = new LinkedHashMap<>(256, 0.75F, false);
 	private static final Map<String, PreparingEntry> PREPARING = new HashMap<>();
 	private static final Map<String, Rail> FAILED_RAILS = new HashMap<>();
@@ -140,8 +120,12 @@ public final class DefaultRailMeshCache implements IGui {
 		pitchSin = MathHelper.sin(pitch);
 	}
 
+	private static boolean isAvailable() {
+		return OptimizedRenderer.hasOptimizedRendering() && RailMeshBackend.get() != null;
+	}
+
 	static boolean tryRender(ClientWorld clientWorld, Rail rail, boolean normalRenderState, float railWidth) {
-		if (currentWorld == null || !currentWorld.equals(clientWorld) || !OptimizedRenderer.hasOptimizedRendering() ||
+		if (currentWorld == null || !currentWorld.equals(clientWorld) || !isAvailable() ||
 				!isEligible(normalRenderState, rail.getTransportMode(), rail.getStyles(), Config.getClient().getDefaultRail3D())) {
 			return false;
 		}
@@ -363,7 +347,7 @@ public final class DefaultRailMeshCache implements IGui {
 	}
 
 	static void appendSegmentVertices(
-			Consumer<Vertex> consumer,
+			RailMeshBackend.VertexSink consumer,
 			double originX, double originY, double originZ,
 			double x1, double z1, double x2, double z2,
 			double x3, double z3, double x4, double z4,
@@ -384,14 +368,14 @@ public final class DefaultRailMeshCache implements IGui {
 		final float relativeZ3 = (float) (z3 - originZ);
 		final float relativeZ4 = (float) (z4 - originZ);
 
-		consumer.accept(vertex(relativeX1, relativeY1, relativeZ1, 0, v2, light));
-		consumer.accept(vertex(relativeX2, relativeY1 + IGui.SMALL_OFFSET, relativeZ2, 1, v2, light));
-		consumer.accept(vertex(relativeX3, relativeY2, relativeZ3, 1, v1, light));
-		consumer.accept(vertex(relativeX4, relativeY2 + IGui.SMALL_OFFSET, relativeZ4, 0, v1, light));
-		consumer.accept(vertex(relativeX2, relativeY1 + IGui.SMALL_OFFSET, relativeZ2, 0, v2, light));
-		consumer.accept(vertex(relativeX1, relativeY1, relativeZ1, 1, v2, light));
-		consumer.accept(vertex(relativeX4, relativeY2 + IGui.SMALL_OFFSET, relativeZ4, 1, v1, light));
-		consumer.accept(vertex(relativeX3, relativeY2, relativeZ3, 0, v1, light));
+		consumer.accept(relativeX1, relativeY1, relativeZ1, 0, v2, light);
+		consumer.accept(relativeX2, relativeY1 + IGui.SMALL_OFFSET, relativeZ2, 1, v2, light);
+		consumer.accept(relativeX3, relativeY2, relativeZ3, 1, v1, light);
+		consumer.accept(relativeX4, relativeY2 + IGui.SMALL_OFFSET, relativeZ4, 0, v1, light);
+		consumer.accept(relativeX2, relativeY1 + IGui.SMALL_OFFSET, relativeZ2, 0, v2, light);
+		consumer.accept(relativeX1, relativeY1, relativeZ1, 1, v2, light);
+		consumer.accept(relativeX4, relativeY2 + IGui.SMALL_OFFSET, relativeZ4, 1, v1, light);
+		consumer.accept(relativeX3, relativeY2, relativeZ3, 0, v1, light);
 	}
 
 	static boolean isPageVisible(
@@ -465,7 +449,7 @@ public final class DefaultRailMeshCache implements IGui {
 		for (final UploadedPage page : VISIBLE_PAGES) {
 			graphicsHolder.push();
 			graphicsHolder.translate(page.originX - offset.getXMapped(), page.originY - offset.getYMapped(), page.originZ - offset.getZMapped());
-			CustomResourceLoader.OPTIMIZED_RENDERER_WRAPPER.queue(page.model, graphicsHolder, ARGB_WHITE, GraphicsHolder.getDefaultLight());
+			CustomResourceLoader.OPTIMIZED_RENDERER_WRAPPER.queue(page.mesh.getModel(), graphicsHolder, ARGB_WHITE, GraphicsHolder.getDefaultLight());
 			graphicsHolder.pop();
 		}
 	}
@@ -509,7 +493,7 @@ public final class DefaultRailMeshCache implements IGui {
 	}
 
 	private static PrewarmScan prewarmNearbyRails() {
-		if (!OptimizedRenderer.hasOptimizedRendering() || estimatedCacheBytes >= MAX_CACHE_BYTES) {
+		if (!isAvailable() || estimatedCacheBytes >= MAX_CACHE_BYTES) {
 			return PrewarmScan.EXHAUSTED;
 		}
 		int proactiveOutstanding = 0;
@@ -595,17 +579,6 @@ public final class DefaultRailMeshCache implements IGui {
 
 	private static long mix(long hash, long value) {
 		return (hash ^ value) * 0x100000001B3L;
-	}
-
-	private static Vertex vertex(float x, float y, float z, float u, float v, int light) {
-		final Vertex vertex = new Vertex();
-		vertex.position = new Vector3f(x, y, z);
-		// Vertex equality omits light; subnormal components keep differently lit vertices distinct without changing the rendered normal.
-		vertex.normal = new Vector3f((light & 0xFFFF) * Float.MIN_VALUE, 1, ((light >>> 16) & 0xFFFF) * Float.MIN_VALUE);
-		vertex.u = u;
-		vertex.v = v;
-		vertex.light = light;
-		return vertex;
 	}
 
 	private static final class PreparedPageBuilder {
@@ -772,11 +745,10 @@ public final class DefaultRailMeshCache implements IGui {
 		private final double maxX;
 		private final double maxY;
 		private final double maxZ;
-		private final Mesh mesh;
-		private final OptimizedModel model;
+		private final RailMeshBackend.UploadedMesh mesh;
 		private boolean closed;
 
-		private UploadedPage(PreparedPage page, Mesh mesh, OptimizedModel model) {
+		private UploadedPage(PreparedPage page, RailMeshBackend.UploadedMesh mesh) {
 			originX = page.originX;
 			originY = page.originY;
 			originZ = page.originZ;
@@ -787,12 +759,13 @@ public final class DefaultRailMeshCache implements IGui {
 			maxY = page.maxY;
 			maxZ = page.maxZ;
 			this.mesh = mesh;
-			this.model = model;
 		}
 
-		private static UploadedPage upload(ClientWorld clientWorld, PreparedPage page) {
-			final RawMesh rawMesh = new RawMesh(RAIL_MATERIAL);
-			final Consumer<Vertex> vertexConsumer = rawMesh::addVertex;
+		private static UploadedPage upload(RailMeshBackend backend, ClientWorld clientWorld, PreparedPage page) {
+			return new UploadedPage(page, backend.upload(vertexConsumer -> appendPageVertices(vertexConsumer, clientWorld, page)));
+		}
+
+		private static void appendPageVertices(RailMeshBackend.VertexSink vertexConsumer, ClientWorld clientWorld, PreparedPage page) {
 			for (int offset = 0; offset < page.segments.length; offset += 10) {
 				final double x1 = page.segments[offset];
 				final double z1 = page.segments[offset + 1];
@@ -809,21 +782,6 @@ public final class DefaultRailMeshCache implements IGui {
 						y1, page.segments[offset + 9], RAIL_Y_OFFSET, light
 				);
 			}
-			rawMesh.distinct();
-			rawMesh.triangulate();
-			final Mesh mesh = new Mesh(new VertexBuffer(), new IndexBuffer(rawMesh.faces.size(), 0x1405), RAIL_MATERIAL);
-			VertexArray vertexArray = null;
-			try {
-				rawMesh.upload(mesh, RAIL_MAPPING);
-				vertexArray = new VertexArray(mesh, RAIL_MAPPING);
-				return new UploadedPage(page, mesh, new OptimizedModel(Collections.singletonList(vertexArray)));
-			} catch (RuntimeException | Error exception) {
-				if (vertexArray != null) {
-					vertexArray.close();
-				}
-				mesh.close();
-				throw exception;
-			}
 		}
 
 		private boolean isVisible() {
@@ -834,7 +792,6 @@ public final class DefaultRailMeshCache implements IGui {
 		public void close() {
 			if (!closed) {
 				closed = true;
-				model.close();
 				mesh.close();
 			}
 		}
@@ -891,6 +848,10 @@ public final class DefaultRailMeshCache implements IGui {
 		}
 
 		private int uploadMissingPages(ClientWorld clientWorld, int maximumPages, long deadlineNanos, boolean visibleOnly, boolean loadedOnly) {
+			final RailMeshBackend backend = RailMeshBackend.get();
+			if (backend == null) {
+				return 0;
+			}
 			final int[] uploadedCount = {0};
 			final Boolean uploaded = CustomResourceLoader.OPTIMIZED_RENDERER_WRAPPER.upload(() -> {
 				for (int i = 0; i < pages.size(); i++) {
@@ -898,7 +859,7 @@ public final class DefaultRailMeshCache implements IGui {
 						if (uploadedCount[0] >= maximumPages || (uploadedCount[0] > 0 && System.nanoTime() >= deadlineNanos)) {
 							break;
 						}
-						pages.set(i, UploadedPage.upload(clientWorld, preparedRail.pages.get(i)));
+						pages.set(i, UploadedPage.upload(backend, clientWorld, preparedRail.pages.get(i)));
 						uploadedCount[0]++;
 					}
 				}
