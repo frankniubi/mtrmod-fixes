@@ -1,6 +1,6 @@
 # MTR 4.0.5 — FrankRail performance & route-sign fork
 
-A fork of [Minecraft Transit Railway](https://github.com/Minecraft-Transit-Railway/Minecraft-Transit-Railway) (4.0.x, **Fabric 1.20.1**) as it runs on the FrankRail server. It keeps the MTR data format and network protocol, and adds:
+A fork of [Minecraft Transit Railway](https://github.com/Minecraft-Transit-Railway/Minecraft-Transit-Railway) 4.0.x as it runs on the FrankRail server (Fabric 1.20.1), built for **every Minecraft version and loader upstream MTR supports**. It keeps the MTR data format and network protocol, and adds:
 
 - client render-thread performance fixes (rail GPU mesh cache, allocation-light culling, safer dynamic textures),
 - **server-side pre-rendered route textures** served over HTTP/CDN instead of being drawn on every client,
