@@ -39,9 +39,20 @@ Details, method and limits: [`PERFORMANCE_HOTFIX.md`](PERFORMANCE_HOTFIX.md), [`
 
 Server and client must use the same renderer version (`ROUTE_MAP_RENDERER_VERSION` 6, `RENDERER_VERSION` 3). If they differ, or the client's resource pack changes the sign fonts/icons, the client silently renders locally.
 
+## Supported versions
+
+GitHub Actions builds the same matrix as upstream MTR on every push: **Minecraft 1.16.5, 1.17.1, 1.18.2, 1.19.2, 1.19.4, 1.20.1 and 1.20.4, each for Fabric and Forge**, plus server-only (`-server`) jars. Download them from the workflow run's artifacts or from a release; pushing a `v*` tag publishes all jars and `SHA256SUMS.txt` to a GitHub release.
+
+| | Status |
+| --- | --- |
+| Fabric 1.20.1 | runs on the FrankRail server; all benchmarks above are from this build |
+| other versions / Forge | compile and pass the unit tests in CI, not play-tested |
+| 1.16.5 | the rail GPU mesh cache is off (its mappings lack MTR's render API), rails use the original renderer; unit tests skipped (Java 8 toolchain) |
+| Forge | without the seated-camera tweak (that mixin is Fabric-only) |
+
 ## Installation
 
-1. Build (below) or take the jar from a release, and put it in `mods/` on **both** the server and every client (Fabric Loader + Fabric API, Minecraft 1.20.1).
+1. Build (below) or take the jar for your Minecraft version and loader from a release, and put it in `mods/` on **both** the server and every client (Fabric: also Fabric API).
 2. Start the server once; it writes `config/mtr.json` and starts generating route textures under `<world>/mtr/route-textures/`.
 3. Optional: put a CDN in front of the server's HTTP port (see below).
 
@@ -99,7 +110,7 @@ Java 21 is required for Gradle (the mod targets Java 17).
 # jar: fabric/build/libs/fabric-4.0.5.jar
 ```
 
-Only Fabric 1.20.1 is built and tested; the Forge project is untouched upstream code.
+Other versions: pass `-PminecraftVersion=<version>`; for Forge run `fabric:setupFiles forge:setupFiles build` (see `.github/workflows/build.yml`). Shared code must stay Java 8 compatible for 1.16.5: use `org.mtr.mod.data.JavaCompat` instead of `List.of`, `Files.readString` and similar.
 
 ## Credits & license
 
