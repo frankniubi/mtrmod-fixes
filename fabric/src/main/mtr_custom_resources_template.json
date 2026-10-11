@@ -330,6 +330,20 @@
 			"flipCustomText": true
 		},
 		{
+			"id": "!free_text",
+			"textureResource": "mtr:textures/block/transparent.png",
+			"customText": "sign.mtr.free_text",
+			"small": true,
+			"flipCustomText": false
+		},
+		{
+			"id": "!free_text_flipped",
+			"textureResource": "mtr:textures/block/transparent.png",
+			"customText": "sign.mtr.free_text",
+			"small": true,
+			"flipCustomText": true
+		},
+		{
 			"id": "!escalator_to_concourse_up",
 			"textureResource": "mtr:textures/block/sign/escalator.png",
 			"customText": "sign.mtr.escalator_to_concourse_up",

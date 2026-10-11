@@ -18,9 +18,11 @@ import org.mtr.libraries.com.google.gson.JsonParser;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.Object2ObjectAVLTreeMap;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.Object2ObjectArrayMap;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import org.mtr.libraries.org.eclipse.jetty.servlet.ServletHolder;
 import org.mtr.mapping.holder.*;
 import org.mtr.mapping.mapper.GameRule;
 import org.mtr.mapping.mapper.MinecraftServerHelper;
+import org.mtr.mapping.mapper.PersistenceStateExtension;
 import org.mtr.mapping.mapper.WorldHelper;
 import org.mtr.mapping.registry.CommandBuilder;
 import org.mtr.mapping.registry.Registry;
@@ -28,11 +30,17 @@ import org.mtr.mapping.tool.DummyClass;
 import org.mtr.mixin.PlayerTeleportationStateAccessor;
 import org.mtr.mod.config.Config;
 import org.mtr.mod.data.ArrivalsCacheServer;
+import org.mtr.mod.data.DestinationSignArrivalsServerCache;
+import org.mtr.mod.data.PersistentStateData;
 import org.mtr.mod.data.RailActionModule;
 import org.mtr.mod.generated.lang.TranslationProvider;
 import org.mtr.mod.packet.*;
 import org.mtr.mod.servlet.MinecraftOperationProcessor;
 import org.mtr.mod.servlet.RequestHelper;
+import org.mtr.mod.servlet.RouteAssetServlet;
+import org.mtr.mod.route.DestinationSignServerTopology;
+import org.mtr.mod.route.RouteAssetProtocol;
+import org.mtr.mod.route.RouteAssetServerManager;
 
 import javax.annotation.Nullable;
 import java.io.InputStream;
@@ -52,6 +60,7 @@ public final class Init implements Utilities {
 
 	private static Main main;
 	private static int serverPort;
+	private static RouteAssetServerManager routeAssetServerManager;
 	private static Runnable sendWorldTimeUpdate;
 	private static boolean canSendWorldTimeUpdate = true;
 	private static boolean isDedicatedServer = true;
@@ -96,29 +105,42 @@ public final class Init implements Utilities {
 		REGISTRY.registerPacket(PacketDepotGenerate.class, PacketDepotGenerate::new);
 		REGISTRY.registerPacket(PacketDriveTrain.class, PacketDriveTrain::new);
 		REGISTRY.registerPacket(PacketFetchArrivals.class, PacketFetchArrivals::new);
+		REGISTRY.registerPacket(PacketFetchDestinationSignArrivals.class, PacketFetchDestinationSignArrivals::new);
 		REGISTRY.registerPacket(PacketForwardClientRequest.class, PacketForwardClientRequest::new);
 		REGISTRY.registerPacket(PacketUpdateKeyDispenserConfig.class, PacketUpdateKeyDispenserConfig::new);
 		REGISTRY.registerPacket(PacketOpenBlockEntityScreen.class, PacketOpenBlockEntityScreen::new);
+		REGISTRY.registerPacket(PacketOpenDestinationSignScreen.class, PacketOpenDestinationSignScreen::new);
 		REGISTRY.registerPacket(PacketOpenDashboardScreen.class, PacketOpenDashboardScreen::new);
 		REGISTRY.registerPacket(PacketOpenLiftCustomizationScreen.class, PacketOpenLiftCustomizationScreen::new);
 		REGISTRY.registerPacket(PacketOpenPIDSConfigScreen.class, PacketOpenPIDSConfigScreen::new);
 		REGISTRY.registerPacket(PacketOpenTicketMachineScreen.class, PacketOpenTicketMachineScreen::new);
 		REGISTRY.registerPacket(PacketPressLiftButton.class, PacketPressLiftButton::new);
 		REGISTRY.registerPacket(PacketRequestData.class, PacketRequestData::new);
+		REGISTRY.registerPacket(PacketRequestInterchangeData.class, PacketRequestInterchangeData::new);
+		REGISTRY.registerPacket(PacketRouteAssetHello.class, PacketRouteAssetHello::new);
+		REGISTRY.registerPacket(PacketRouteAssetManifest.class, PacketRouteAssetManifest::new);
+		REGISTRY.registerPacket(PacketRouteAssetObservedKeys.class, PacketRouteAssetObservedKeys::new);
+		REGISTRY.registerPacket(PacketRouteAssetRefresh.class, PacketRouteAssetRefresh::new);
 		REGISTRY.registerPacket(PacketSetRouteIdHasDisabledAnnouncements.class, PacketSetRouteIdHasDisabledAnnouncements::new);
 		REGISTRY.registerPacket(PacketTurnOnBlockEntity.class, PacketTurnOnBlockEntity::new);
 		REGISTRY.registerPacket(PacketUpdateData.class, PacketUpdateData::new);
+		REGISTRY.registerPacket(PacketUpdateDestinationSignConfig.class, PacketUpdateDestinationSignConfig::new);
+		REGISTRY.registerPacket(PacketUpdateDestinationSignConfigV2.class, PacketUpdateDestinationSignConfigV2::new);
+		REGISTRY.registerPacket(PacketDestinationSignConfigResult.class, PacketDestinationSignConfigResult::new);
 		REGISTRY.registerPacket(PacketUpdateEyeCandyConfig.class, PacketUpdateEyeCandyConfig::new);
 		REGISTRY.registerPacket(PacketUpdateLastRailStyles.class, PacketUpdateLastRailStyles::new);
 		REGISTRY.registerPacket(PacketUpdateLiftTrackFloorConfig.class, PacketUpdateLiftTrackFloorConfig::new);
 		REGISTRY.registerPacket(PacketUpdatePIDSConfig.class, PacketUpdatePIDSConfig::new);
 		REGISTRY.registerPacket(PacketUpdateRailwaySignConfig.class, PacketUpdateRailwaySignConfig::new);
+		REGISTRY.registerPacket(PacketUpdateRouteSignConfig.class, PacketUpdateRouteSignConfig::new);
 		REGISTRY.registerPacket(PacketUpdateSignalConfig.class, PacketUpdateSignalConfig::new);
 		REGISTRY.registerPacket(PacketUpdateTrainAnnouncerConfig.class, PacketUpdateTrainAnnouncerConfig::new);
 		REGISTRY.registerPacket(PacketUpdateTrainScheduleSensorConfig.class, PacketUpdateTrainScheduleSensorConfig::new);
 		REGISTRY.registerPacket(PacketUpdateTrainSensorConfig.class, PacketUpdateTrainSensorConfig::new);
 		REGISTRY.registerPacket(PacketUpdateVehiclesLifts.class, PacketUpdateVehiclesLifts::new);
 		REGISTRY.registerPacket(PacketUpdateVehicleRidingEntities.class, PacketUpdateVehicleRidingEntities::new);
+		REGISTRY.registerPacket(PacketRouteAssetChunkRequest.class, PacketRouteAssetChunkRequest::new);
+		REGISTRY.registerPacket(PacketRouteAssetChunk.class, PacketRouteAssetChunk::new);
 
 		// Register command
 		REGISTRY.registerCommand("mtr", commandBuilderMtr -> {
@@ -128,6 +150,34 @@ public final class Init implements Utilities {
 			commandBuilderMtr.then("clearVehicles", commandBuilderClear -> depotOperationFromCommand(commandBuilderClear, DepotOperation.CLEAR));
 			// Instant deploy depot(s) by name
 			commandBuilderMtr.then("instantDeploy", commandBuilderInstantDeploy -> depotOperationFromCommand(commandBuilderInstantDeploy, DepotOperation.INSTANT_DEPLOY));
+			// Route asset diagnostics and an operator-triggered refresh
+			commandBuilderMtr.then("routeassets", commandBuilderRouteAssets -> {
+				commandBuilderRouteAssets.permissionLevel(2);
+				commandBuilderRouteAssets.then("stats", commandBuilderStats -> commandBuilderStats.executes(contextHandler -> {
+					if (routeAssetServerManager == null) {
+						contextHandler.sendFailure("Route assets are disabled");
+						return 0;
+					}
+					contextHandler.sendSuccess(routeAssetServerManager.formatStats(), false);
+					return 1;
+				}));
+				commandBuilderRouteAssets.then("refresh", commandBuilderRefresh -> {
+					commandBuilderRefresh.permissionLevel(3);
+					commandBuilderRefresh.executes(contextHandler -> {
+						if (routeAssetServerManager == null) {
+							contextHandler.sendFailure("Route assets are disabled");
+							return 0;
+						}
+						if (routeAssetServerManager.isCoordinatorBusySnapshot()) {
+							contextHandler.sendSuccess("Route asset generation is already in progress", false);
+						} else {
+							routeAssetServerManager.requestRefresh(contextHandler.getServer(), "operator");
+							contextHandler.sendSuccess("Route asset refresh queued", false);
+						}
+						return 1;
+					});
+				});
+			});
 			// Force copy a world backup from one folder another
 			commandBuilderMtr.then("restoreWorld", commandBuilderRestoreWorld -> {
 				commandBuilderRestoreWorld.permissionLevel(4);
@@ -171,6 +221,7 @@ public final class Init implements Utilities {
 		// Register events
 		REGISTRY.eventRegistry.registerServerStarted(minecraftServer -> {
 			// Start up the backend
+			DestinationSignServerTopology.clearServerState();
 			RAIL_ACTION_MODULES.clear();
 			WORLD_ID_LIST.clear();
 			MinecraftServerHelper.iterateWorlds(minecraftServer, serverWorld -> {
@@ -181,7 +232,25 @@ public final class Init implements Utilities {
 			Config.init(minecraftServer.getRunDirectory());
 			final int defaultPort = Config.getServer().getWebserverPort();
 			serverPort = defaultPort <= 0 ? -1 : findFreePort(defaultPort);
-			main = new Main(minecraftServer.getSavePath(WorldSavePath.getRootMapped()).resolve("mtr"), serverPort, Config.getServer().getUseThreadedSimulation(), Config.getServer().getUseThreadedFileLoading(), webserverSetup, WORLD_ID_LIST.toArray(new String[0]));
+			final Path mtrRoot = minecraftServer.getSavePath(WorldSavePath.getRootMapped()).resolve("mtr");
+			if (Config.getServer().getRouteTextureAssetsEnabled()) {
+				try {
+					if (Config.getServer().isRouteTextureGenerationMaxTickMillisBelowStageOne()) {
+						LOGGER.warn("route_texture side=server event=config_clamped key=routeTextureGenerationMaxTickMillis requested={} effective=51", Config.getServer().getRouteTextureGenerationMaxTickMillisConfigured());
+					}
+					routeAssetServerManager = new RouteAssetServerManager(mtrRoot.resolve(Config.getServer().getRouteTextureOutputDirectory()), Config.getServer().getRouteTextureGenerationThreads(), Config.getServer().getRouteTextureRetainedRevisions(), Config.getServer().getRouteTextureGenerationMaxTickMillis());
+				} catch (Exception exception) {
+					routeAssetServerManager = null;
+					LOGGER.error("Unable to initialize server route texture assets", exception);
+				}
+			}
+			main = new Main(mtrRoot, serverPort, Config.getServer().getUseThreadedSimulation(), Config.getServer().getUseThreadedFileLoading(), Init::setupWebserver, WORLD_ID_LIST.toArray(new String[0]));
+			if (routeAssetServerManager != null) {
+				if (serverPort >= 0) {
+					routeAssetServerManager.setOriginPort(serverPort);
+				}
+				routeAssetServerManager.start(minecraftServer, Config.getServer().isRouteTextureGenerationThreadsAutomatic() ? "auto" : "explicit");
+			}
 
 			serverTick = 0;
 			lastSavedMillis = System.currentTimeMillis();
@@ -219,19 +288,37 @@ public final class Init implements Utilities {
 		});
 
 		REGISTRY.eventRegistry.registerServerStopping(minecraftServer -> {
+			if (routeAssetServerManager != null) {
+				routeAssetServerManager.close();
+				routeAssetServerManager = null;
+			}
 			if (main != null) {
 				main.stop();
+				main = null;
 			}
 			serverPort = 0;
+			DestinationSignArrivalsServerCache.clearAll();
+			PacketFetchDestinationSignArrivals.clearServerState();
+			DestinationSignServerTopology.clearServerState();
 			RIDING_PLAYERS.clear();
 		});
 
+		REGISTRY.eventRegistry.registerChunkLoad((serverWorld, worldChunk) -> {
+			final PersistentStateData persistentState = (PersistentStateData) PersistenceStateExtension.register(serverWorld, PersistentStateData::new, MOD_ID);
+			if (persistentState.reconcileConfiguredSigns(worldChunk) && routeAssetServerManager != null) {
+				routeAssetServerManager.configuredSignsChanged(new World(serverWorld.data).getServer(), "configured-sign-chunk-reconcile");
+			}
+		});
+
 		REGISTRY.eventRegistry.registerStartServerTick(() -> {
+			if (routeAssetServerManager != null) routeAssetServerManager.tick();
+			DestinationSignServerTopology.tick();
 			if (sendWorldTimeUpdate != null && serverTick % (SECONDS_PER_MC_HOUR * 10) == 0) {
 				sendWorldTimeUpdate.run();
 			}
 
 			ArrivalsCacheServer.tickAll();
+			DestinationSignArrivalsServerCache.tickAll();
 			serverTick++;
 
 			if (main != null) {
@@ -262,7 +349,13 @@ public final class Init implements Utilities {
 		});
 
 		REGISTRY.eventRegistry.registerPlayerJoin((minecraftServer, serverPlayerEntity) -> updatePlayer(serverPlayerEntity, false));
-		REGISTRY.eventRegistry.registerPlayerDisconnect((minecraftServer, serverPlayerEntity) -> RIDING_PLAYERS.remove(serverPlayerEntity.getUuid()));
+		REGISTRY.eventRegistry.registerPlayerDisconnect((minecraftServer, serverPlayerEntity) -> {
+			RIDING_PLAYERS.remove(serverPlayerEntity.getUuid());
+			PacketFetchDestinationSignArrivals.onPlayerDisconnect(serverPlayerEntity.getUuid());
+			if (routeAssetServerManager != null) {
+				routeAssetServerManager.onPlayerDisconnect(serverPlayerEntity.getUuid());
+			}
+		});
 
 		// Finish registration
 		REGISTRY.init();
@@ -285,9 +378,15 @@ public final class Init implements Utilities {
 	}
 
 	public static <T extends SerializedDataBase> void sendMessageC2S(String key, @Nullable MinecraftServer minecraftServer, @Nullable World world, SerializedDataBase data, @Nullable Consumer<T> consumer, @Nullable Class<T> responseDataClass) {
+		trySendMessageC2S(key, minecraftServer, world, data, consumer, responseDataClass);
+	}
+
+	public static <T extends SerializedDataBase> boolean trySendMessageC2S(String key, @Nullable MinecraftServer minecraftServer, @Nullable World world, SerializedDataBase data, @Nullable Consumer<T> consumer, @Nullable Class<T> responseDataClass) {
 		if (main != null) {
 			main.sendMessageC2S(world == null ? null : WORLD_ID_LIST.indexOf(getWorldId(world)), new QueueObject(key, data, consumer == null || minecraftServer == null ? null : responseData -> minecraftServer.execute(() -> consumer.accept(responseData)), responseDataClass));
+			return true;
 		}
+		return false;
 	}
 
 	public static BlockPos positionToBlockPos(Position position) {
@@ -368,6 +467,19 @@ public final class Init implements Utilities {
 
 	public static void createWebserverSetup(Consumer<Webserver> webserverSetup) {
 		Init.webserverSetup = webserverSetup;
+	}
+
+	public static RouteAssetServerManager getRouteAssetServerManager() {
+		return routeAssetServerManager;
+	}
+
+	private static void setupWebserver(Webserver webserver) {
+		if (routeAssetServerManager != null) {
+			webserver.addServlet(new ServletHolder(new RouteAssetServlet(routeAssetServerManager.getRepository().getCas(), RouteAssetProtocol.RENDERER_VERSION)), RouteAssetProtocol.HTTP_PATH + "*");
+		}
+		if (webserverSetup != null) {
+			webserverSetup.accept(webserver);
+		}
 	}
 
 	public static String randomString() {

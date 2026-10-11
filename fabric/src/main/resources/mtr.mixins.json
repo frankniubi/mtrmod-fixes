@@ -5,9 +5,12 @@
 	"compatibilityLevel": "JAVA_8",
 	"refmap": "mtr.refmap.json",
 	"mixins": [
-		"PlayerTeleportationStateAccessor"
+		"PlayerTeleportationStateAccessor",
+		"RailTick1Mixin"
 	],
 	"client": [
+		"CameraSeatedMixin",
+		"ClientChunkLightUpdateMixin",
 		"ClientWorldRenderingMixin",
 		"PlayerRendererOffsetMixin"
 	],

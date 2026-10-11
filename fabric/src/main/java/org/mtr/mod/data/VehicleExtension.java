@@ -1,9 +1,6 @@
 package org.mtr.mod.data;
 
-import org.mtr.core.data.Data;
-import org.mtr.core.data.PathData;
-import org.mtr.core.data.Vehicle;
-import org.mtr.core.data.VehicleCar;
+import org.mtr.core.data.*;
 import org.mtr.core.operation.VehicleUpdate;
 import org.mtr.core.serializer.JsonReader;
 import org.mtr.core.tool.Utilities;
@@ -11,6 +8,7 @@ import org.mtr.core.tool.Vector;
 import org.mtr.libraries.com.google.gson.JsonObject;
 import org.mtr.libraries.it.unimi.dsi.fastutil.doubles.DoubleDoubleImmutablePair;
 import org.mtr.libraries.it.unimi.dsi.fastutil.doubles.DoubleObjectImmutablePair;
+import org.mtr.libraries.it.unimi.dsi.fastutil.ints.IntAVLTreeSet;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectObjectImmutablePair;
 import org.mtr.mapping.holder.*;
@@ -82,6 +80,7 @@ public class VehicleExtension extends Vehicle implements Utilities {
 		final String thisRouteDestination = vehicleExtraData.getThisRouteDestination();
 		final String nextRouteDestination = vehicleExtraData.getNextRouteDestination();
 		final long thisRouteId = vehicleExtraData.getThisRouteId();
+		final long nextStationId = vehicleExtraData.getNextStationId();
 
 		if (VehicleRidingMovement.isRiding(id)) {
 			// Render client action bar floating text
@@ -142,46 +141,39 @@ public class VehicleExtension extends Vehicle implements Utilities {
 						final ObjectArrayList<MutableText> chatTextThisStation = new ObjectArrayList<>();
 						final ObjectArrayList<MutableText> chatTextOtherStations = new ObjectArrayList<>();
 
-						vehicleExtraData.iterateInterchanges((stationName, interchangeColors) -> {
-							final ObjectArrayList<String> combinedRouteNames = new ObjectArrayList<>();
-							final ObjectArrayList<String> globalVisitedRouteNames = new ObjectArrayList<>();
-							final boolean isThisStation = stationName.equals(nextStationName);
-							final boolean[] addedStationName = {false};
+						final Station nextStation = MinecraftClientData.getInterchangeStation(nextStationId);
+						if (nextStation != null) {
+							final IntAVLTreeSet excludedRouteColors = new IntAVLTreeSet();
+							excludedRouteColors.add(InterchangeRouteDisplay.normalizeColor(thisRouteColor));
+							if (!nextRouteName.isEmpty()) {
+								excludedRouteColors.add(InterchangeRouteDisplay.normalizeColor(nextRouteColor));
+							}
+							InterchangeRouteDisplay.deduplicateForBroadcast(InterchangeRouteDisplay.getStationGroups(nextStation, excludedRouteColors), nextStationId).forEach(stationGroup -> {
+								final String stationName = stationGroup.getStationName();
+								final ObjectArrayList<String> combinedRouteNames = new ObjectArrayList<>();
+								final boolean isThisStation = stationGroup.getStationId() == nextStationId;
 
-							interchangeColors.forEach((color, routeNames) -> {
-								final ObjectArrayList<String> visitedRouteNames = new ObjectArrayList<>();
+								if (!isThisStation) {
+									chatTextOtherStations.add(TextHelper.literal(IGui.formatStationName(IGui.insertTranslation(TranslationProvider.GUI_MTR_CONNECTING_STATION_ANNOUNCEMENT_CJK, TranslationProvider.GUI_MTR_CONNECTING_STATION_ANNOUNCEMENT, 1, stationName))));
+								}
 
-								routeNames.forEach(routeName -> {
-									final String routeNameFormatted = formatRouteName(routeName);
-									if (!routeName.isEmpty() && !visitedRouteNames.contains(routeNameFormatted) && (color != thisRouteColor || !routeNameFormatted.equals(thisRouteName)) && (color != nextRouteColor || !routeNameFormatted.equals(nextRouteName))) {
-										if (!isThisStation && !addedStationName[0]) {
-											chatTextOtherStations.add(TextHelper.literal(IGui.formatStationName(IGui.insertTranslation(TranslationProvider.GUI_MTR_CONNECTING_STATION_ANNOUNCEMENT_CJK, TranslationProvider.GUI_MTR_CONNECTING_STATION_ANNOUNCEMENT, 1, stationName))));
-										}
+								stationGroup.getEntries().forEach(entry -> {
+									final String routeNameFormatted = entry.getText();
+									combinedRouteNames.add(routeNameFormatted);
 
-										if (!globalVisitedRouteNames.contains(routeNameFormatted)) {
-											combinedRouteNames.add(routeNameFormatted);
-										}
-
-										(isThisStation ? chatTextThisStation : chatTextOtherStations).add(TextHelper.append(
-												TextHelper.setStyle(TextHelper.literal("-"), Style.getEmptyMapped().withColor(TextColor.fromRgb(color))),
-												TextHelper.setStyle(TextHelper.literal(" " + IGui.formatStationName(routeNameFormatted)), Style.getEmptyMapped().withColor(TextFormatting.getWhiteMapped()))
-										));
-
-										addedStationName[0] = true;
-										globalVisitedRouteNames.add(routeNameFormatted);
-										visitedRouteNames.add(routeNameFormatted);
-									}
+									(isThisStation ? chatTextThisStation : chatTextOtherStations).add(TextHelper.append(
+											TextHelper.setStyle(TextHelper.literal("-"), Style.getEmptyMapped().withColor(TextColor.fromRgb(entry.getColor()))),
+											TextHelper.setStyle(TextHelper.literal(" " + IGui.formatStationName(routeNameFormatted)), Style.getEmptyMapped().withColor(TextFormatting.getWhiteMapped()))
+									));
 								});
-							});
 
-							if (addedStationName[0]) {
 								if (isThisStation) {
 									narrateTextThisStation.add(IGui.insertTranslation(TranslationProvider.GUI_MTR_INTERCHANGE_ANNOUNCEMENT_CJK, TranslationProvider.GUI_MTR_INTERCHANGE_ANNOUNCEMENT, 1, getInterchangeText(combinedRouteNames)));
 								} else {
 									narrateTextOtherStations.add(IGui.insertTranslation(TranslationProvider.GUI_MTR_CONNECTING_STATION_PART_CJK, TranslationProvider.GUI_MTR_CONNECTING_STATION_PART, 1, IGui.insertTranslation(TranslationProvider.GUI_MTR_CONNECTING_STATION_INTERCHANGE_ANNOUNCEMENT_PART_CJK, TranslationProvider.GUI_MTR_CONNECTING_STATION_INTERCHANGE_ANNOUNCEMENT_PART, 2, getInterchangeText(combinedRouteNames), stationName)));
 								}
-							}
-						});
+							});
+						}
 
 						narrateText.addAll(narrateTextThisStation);
 						narrateText.addAll(narrateTextOtherStations);
@@ -296,7 +288,11 @@ public class VehicleExtension extends Vehicle implements Utilities {
 
 	public ObjectArrayList<ObjectObjectImmutablePair<VehicleCar, ObjectArrayList<ObjectObjectImmutablePair<Vector, Vector>>>> getSmoothedVehicleCarsAndPositions(long millisElapsed) {
 		final double oldRailProgress = railProgress;
-		railProgress = persistentVehicleData.getSmoothedRailProgress(railProgress, persistentVehicleData.getDoorValue() > 0 ? 0 : millisElapsed * (speed == 0 ? Integer.MAX_VALUE : speed / 10));
+		railProgress = persistentVehicleData.getSmoothedRailProgress(
+				railProgress,
+				persistentVehicleData.getDoorValue() > 0 ? 0 : millisElapsed * (speed == 0 ? Integer.MAX_VALUE : Math.max(Siding.ACCELERATION_DEFAULT, speed / 10)),
+				!closeToDepot() && railProgress > vehicleExtraData.getStoppingPoint() ? vehicleExtraData.getStoppingPoint() : null
+		);
 		final ObjectArrayList<ObjectObjectImmutablePair<VehicleCar, ObjectArrayList<ObjectObjectImmutablePair<Vector, Vector>>>> vehicleCarsAndPositions = getVehicleCarsAndPositions();
 		railProgress = oldRailProgress;
 		return vehicleCarsAndPositions;

@@ -1,0 +1,207 @@
+package org.mtr.mod.route;
+
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+public final class RouteAssetDependencyCatalogTest {
+
+	private static final String DIMENSION = "minecraft/overworld";
+	private static final long PLATFORM_ID = 7;
+	private static final long ROUTE_ID = 700;
+	private static final String RESOURCE_FINGERPRINT = "f".repeat(64);
+
+	@Test
+	public void fixedCatalogContainsBothPurposesAndIsolatesPlatformRenames() {
+		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
+		final Map<RouteAssetKey, RouteAssetDependencyCatalog.Entry> original = catalog.enumerateFixed(snapshot("U1", "R1"), RESOURCE_FINGERPRINT, "NORMAL");
+		final Map<RouteAssetKey, RouteAssetDependencyCatalog.Entry> selectedRename = catalog.enumerateFixed(snapshot("U2", "R1"), RESOURCE_FINGERPRINT, "NORMAL");
+		final Map<RouteAssetKey, RouteAssetDependencyCatalog.Entry> onwardRename = catalog.enumerateFixed(snapshot("U1", "R2"), RESOURCE_FINGERPRINT, "NORMAL");
+
+		Assertions.assertEquals(36, original.size());
+		for (int resolution = 0; resolution <= 3; resolution++) {
+			final RouteAssetKey generic = RouteAssetCanonicalKeyFactory.routeMap(DIMENSION, PLATFORM_ID, resolution, "NORMAL", RouteMapPurpose.GENERIC, true, false, 37F / 22, false);
+			final RouteAssetKey routeSign = RouteAssetCanonicalKeyFactory.routeMap(DIMENSION, PLATFORM_ID, resolution, "NORMAL", RouteMapPurpose.ROUTE_SIGN, true, false, 37F / 22, false);
+			final RouteAssetKey arrow = RouteAssetCanonicalKeyFactory.directionArrow(DIMENSION, PLATFORM_ID, resolution, "NORMAL", false, false, RouteAssetTextRasterizer.Alignment.CENTER, true, 0.2F, 22F / 5, 0xFF000000, 0xFFFFFFFF, 0);
+			final RouteAssetKey strip = RouteAssetCanonicalKeyFactory.routeColorStrip(DIMENSION, PLATFORM_ID, resolution, "NORMAL");
+			final RouteAssetKey square = RouteAssetCanonicalKeyFactory.routeSquare(DIMENSION, ROUTE_ID, resolution, "NORMAL", RouteAssetTextRasterizer.Alignment.LEFT);
+
+			Assertions.assertEquals(RouteMapPurpose.GENERIC, original.get(generic).getSnapshot().getRouteMapPurpose());
+			Assertions.assertEquals(RouteMapPurpose.ROUTE_SIGN, original.get(routeSign).getSnapshot().getRouteMapPurpose());
+			assertChanged(original, selectedRename, routeSign, arrow);
+			assertUnchanged(original, selectedRename, generic, strip, square);
+			assertChanged(original, onwardRename, routeSign);
+			assertUnchanged(original, onwardRename, generic, arrow, strip, square);
+		}
+	}
+
+	@Test
+	public void localGenericFingerprintIncludesDescriptorResourcesAndServedGenericDependencies() {
+		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
+		final RouteAssetDataMirror.Snapshot originalSnapshot = snapshot("U1", "R1", "R7");
+		final RouteAssetDataMirror.Snapshot renamedRouteSnapshot = snapshot("U1", "R1", "R8");
+		final RouteAssetDataMirror.PlatformSnapshot originalPlatform = platform(originalSnapshot);
+		final RouteAssetDataMirror.PlatformSnapshot renamedRoutePlatform = platform(renamedRouteSnapshot);
+		final String descriptor = "LOCAL_ROUTE_MAP|minecraft/overworld|7|GENERIC|true|false|40000000|false";
+
+		final String original = catalog.resolveLocalGenericFingerprint(descriptor, originalPlatform, RESOURCE_FINGERPRINT);
+		Assertions.assertEquals(original, catalog.resolveLocalGenericFingerprint(descriptor, originalPlatform, RESOURCE_FINGERPRINT));
+		Assertions.assertNotEquals(original, catalog.resolveLocalGenericFingerprint(descriptor + "|changed", originalPlatform, RESOURCE_FINGERPRINT));
+		Assertions.assertNotEquals(original, catalog.resolveLocalGenericFingerprint(descriptor, originalPlatform, "e".repeat(64)));
+		Assertions.assertNotEquals(original, catalog.resolveLocalGenericFingerprint(descriptor, renamedRoutePlatform, RESOURCE_FINGERPRINT));
+
+		final RouteAssetKey generic = RouteAssetCanonicalKeyFactory.routeMap(DIMENSION, PLATFORM_ID, 1, "NORMAL", RouteMapPurpose.GENERIC, true, false, 37F / 22, false);
+		final String servedOriginal = catalog.enumerateFixed(originalSnapshot, RESOURCE_FINGERPRINT, "NORMAL").get(generic).getDependencyFingerprint();
+		final String servedRenamed = catalog.enumerateFixed(renamedRouteSnapshot, RESOURCE_FINGERPRINT, "NORMAL").get(generic).getDependencyFingerprint();
+		Assertions.assertNotEquals(servedOriginal, servedRenamed);
+	}
+
+	@Test
+	public void fixedCatalogUsesAutoAndObservedForcedStylesResolve() {
+		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
+		final RouteAssetDataMirror.Snapshot snapshot = snapshot("U1", "R1");
+		final Map<RouteAssetKey, RouteAssetDependencyCatalog.Entry> fixed = catalog.enumerateFixed(snapshot, RESOURCE_FINGERPRINT, "NORMAL");
+		final RouteAssetKey auto = routeSign(RouteSignStyleMode.AUTO);
+		final RouteAssetKey railway = routeSign(RouteSignStyleMode.RAILWAY);
+		final RouteAssetKey normal = routeSign(RouteSignStyleMode.NORMAL);
+
+		Assertions.assertTrue(fixed.containsKey(auto));
+		Assertions.assertFalse(fixed.containsKey(railway));
+		final RouteAssetDependencyCatalog.Entry railwayEntry = catalog.resolveObserved(railway, snapshot, RESOURCE_FINGERPRINT).orElseThrow();
+		final RouteAssetDependencyCatalog.Entry normalEntry = catalog.resolveObserved(normal, snapshot, RESOURCE_FINGERPRINT).orElseThrow();
+		Assertions.assertNotEquals(fixed.get(auto).getDependencyFingerprint(), railwayEntry.getDependencyFingerprint());
+		Assertions.assertNotEquals(railwayEntry.getDependencyFingerprint(), normalEntry.getDependencyFingerprint());
+	}
+
+	@Test
+	public void configuredRailwaySignMergesSameStationPlatformsAndCustomHeader() {
+		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
+		final RouteAssetDataMirror.Snapshot data = multiPlatformSnapshot(100);
+		final ConfiguredSignAssetIndex index = new ConfiguredSignAssetIndex();
+		index.configureRouteSign(1, Set.of(17L, PLATFORM_ID), RouteSignStyleMode.RAILWAY, "Custom platforms|Custom platforms");
+		final ConfiguredSignAssetIndex.Entry configured = index.snapshot(DIMENSION).get(0);
+
+		final RouteAssetDependencyCatalog.Entry resolved = catalog.resolveConfiguredRouteSign(
+				configured, 1, "NORMAL", data, RESOURCE_FINGERPRINT).orElseThrow();
+		final RouteAssetRenderSnapshot merged = resolved.getSnapshot();
+		Assertions.assertEquals(Set.of(PLATFORM_ID, 17L), merged.getSelectedPlatformIds());
+		Assertions.assertEquals("Custom platforms|Custom platforms", merged.getPlatformDisplayName());
+		Assertions.assertEquals(List.of(700L, 1700L), merged.getRoutes().stream().map(RouteAssetRenderSnapshot.Route::getId).toList());
+		Assertions.assertEquals(2, RouteSignCorridorModel.tryBuild(merged, RouteSignStyleMode.RAILWAY).orElseThrow().getRows().size());
+		Assertions.assertEquals(RouteAssetCanonicalKeyFactory.routeSignMap(
+				DIMENSION, Set.of(17L, PLATFORM_ID), 1, "NORMAL", RouteSignStyleMode.RAILWAY,
+				"Custom platforms|Custom platforms", true, false, 37F / 22, false), resolved.getKey());
+
+		final ConfiguredSignAssetIndex renamed = new ConfiguredSignAssetIndex();
+		renamed.configureRouteSign(1, Set.of(PLATFORM_ID, 17L), RouteSignStyleMode.RAILWAY, "Other|Header");
+		final RouteAssetDependencyCatalog.Entry renamedEntry = catalog.resolveConfiguredRouteSign(
+				renamed.snapshot(DIMENSION).get(0), 1, "NORMAL", data, RESOURCE_FINGERPRINT).orElseThrow();
+		Assertions.assertNotEquals(resolved.getDependencyFingerprint(), renamedEntry.getDependencyFingerprint());
+		Assertions.assertTrue(catalog.resolveConfiguredRouteSign(configured, 1, "NORMAL", multiPlatformSnapshot(101), RESOURCE_FINGERPRINT).isEmpty());
+
+		final ConfiguredSignAssetIndex automatic = new ConfiguredSignAssetIndex();
+		automatic.configureRouteSign(1, Set.of(PLATFORM_ID, 17L), RouteSignStyleMode.RAILWAY, "");
+		final RouteAssetRenderSnapshot automaticSnapshot = catalog.resolveConfiguredRouteSign(
+				automatic.snapshot(DIMENSION).get(0), 1, "NORMAL", data, RESOURCE_FINGERPRINT).orElseThrow().getSnapshot();
+		Assertions.assertEquals("P1 P2 \u6708\u53f0|Platforms P1 P2", automaticSnapshot.getPlatformDisplayName());
+		Assertions.assertEquals(2, automaticSnapshot.getRoutes().size(), "a route exposed by both platforms must be merged only once");
+	}
+
+	@Test
+	public void compatibilityVersionsSeparateTheReadableCorridorAndDynamicValuesAreAbsent() {
+		Assertions.assertEquals(3, RouteAssetProtocol.PROTOCOL_VERSION);
+		Assertions.assertEquals(3, RouteAssetProtocol.RENDERER_VERSION);
+		Assertions.assertEquals(6, RouteAssetProtocol.ROUTE_MAP_RENDERER_VERSION);
+		Assertions.assertEquals(5, RouteAssetProtocol.CORRIDOR_SCHEMA_VERSION);
+		Assertions.assertEquals(6, RouteAssetProtocol.DESTINATION_SIGN_RENDERER_VERSION);
+		Assertions.assertEquals(1, RouteAssetProtocol.MIN_REUSABLE_PNG_RENDERER_VERSION);
+		for (final java.lang.reflect.Field field : RouteAssetRenderSnapshot.class.getDeclaredFields()) {
+			final String name = field.getName().toLowerCase(java.util.Locale.ROOT);
+			Assertions.assertFalse(name.contains("arrival") || name.contains("countdown") || name.contains("departure"), field.getName());
+		}
+	}
+
+	@Test
+	public void destinationDensityChangesDependenciesButPhysicalTerminalDoesNot() {
+		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
+		final RouteAssetKey sparse = RouteAssetCanonicalKeyFactory.destinationSign(
+				DIMENSION, 100, 300, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true, 2);
+		final RouteAssetKey dense = RouteAssetCanonicalKeyFactory.destinationSign(
+				DIMENSION, 100, 300, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true, 4);
+		final RouteAssetDependencyCatalog.Entry sparseEntry = catalog.resolveDestinationSign(sparse, destinationSnapshot("Physical A"), RESOURCE_FINGERPRINT).orElseThrow();
+		final RouteAssetDependencyCatalog.Entry denseEntry = catalog.resolveDestinationSign(dense, destinationSnapshot("Physical A"), RESOURCE_FINGERPRINT).orElseThrow();
+		final RouteAssetDependencyCatalog.Entry renamedTerminal = catalog.resolveDestinationSign(dense, destinationSnapshot("Physical B"), RESOURCE_FINGERPRINT).orElseThrow();
+
+		Assertions.assertNotEquals(sparseEntry.getDependencyFingerprint(), denseEntry.getDependencyFingerprint());
+		Assertions.assertEquals(denseEntry.getDependencyFingerprint(), renamedTerminal.getDependencyFingerprint());
+		Assertions.assertEquals(4, denseEntry.getSnapshot().getDestinationSignAssetSnapshot().orElseThrow().getRoutesPerBlockHeight());
+	}
+
+	private static void assertChanged(Map<RouteAssetKey, RouteAssetDependencyCatalog.Entry> first, Map<RouteAssetKey, RouteAssetDependencyCatalog.Entry> second, RouteAssetKey... keys) {
+		for (final RouteAssetKey key : keys) Assertions.assertNotEquals(first.get(key).getDependencyFingerprint(), second.get(key).getDependencyFingerprint(), key.toString());
+	}
+
+	private static void assertUnchanged(Map<RouteAssetKey, RouteAssetDependencyCatalog.Entry> first, Map<RouteAssetKey, RouteAssetDependencyCatalog.Entry> second, RouteAssetKey... keys) {
+		for (final RouteAssetKey key : keys) Assertions.assertEquals(first.get(key).getDependencyFingerprint(), second.get(key).getDependencyFingerprint(), key.toString());
+	}
+
+	private static RouteAssetDataMirror.Snapshot snapshot(String selectedPlatformName, String onwardPlatformName) {
+		return snapshot(selectedPlatformName, onwardPlatformName, "R7");
+	}
+
+	private static RouteAssetDataMirror.Snapshot snapshot(String selectedPlatformName, String onwardPlatformName, String routeName) {
+		final RouteAssetRenderSnapshot.Interchange interchange = new RouteAssetRenderSnapshot.Interchange(List.of(0x25B407), List.of("I1"), true, false);
+		final List<RouteAssetRenderSnapshot.Station> stations = List.of(
+				new RouteAssetRenderSnapshot.Station(PLATFORM_ID, selectedPlatformName, 100, 100, "Current|Current", "Terminal|Terminal", interchange),
+				new RouteAssetRenderSnapshot.Station(8, onwardPlatformName, 200, 200, "Next|Next", "Terminal|Terminal", interchange),
+				new RouteAssetRenderSnapshot.Station(9, "T1", 300, 300, "Terminal|Terminal", "", RouteAssetRenderSnapshot.Interchange.empty())
+		);
+		final RouteAssetRenderSnapshot.Route route = new RouteAssetRenderSnapshot.Route(ROUTE_ID, routeName, 0x14755E, RouteAssetRenderSnapshot.CircularState.NONE, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED, 0, stations);
+		final RouteAssetDataMirror.PlatformSnapshot platform = new RouteAssetDataMirror.PlatformSnapshot(PLATFORM_ID, selectedPlatformName, 100, List.of(route));
+		final RouteAssetDataMirror.DimensionSnapshot dimension = new RouteAssetDataMirror.DimensionSnapshot(DIMENSION, 1, Map.of(PLATFORM_ID, platform));
+		return new RouteAssetDataMirror.Snapshot(1, Map.of(DIMENSION, dimension));
+	}
+
+	private static RouteAssetDataMirror.Snapshot multiPlatformSnapshot(long secondOwningStationId) {
+		final RouteAssetRenderSnapshot.Interchange interchange = RouteAssetRenderSnapshot.Interchange.empty();
+		final RouteAssetRenderSnapshot.Route firstRoute = new RouteAssetRenderSnapshot.Route(700, "R7", 0x14755E,
+				RouteAssetRenderSnapshot.CircularState.NONE, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED, 0, List.of(
+				new RouteAssetRenderSnapshot.Station(PLATFORM_ID, "P1", 100, 100, "Current|Current", "Terminal|Terminal", interchange),
+				new RouteAssetRenderSnapshot.Station(8, "N1", 200, 200, "Next 1|Next 1", "Terminal|Terminal", interchange)));
+		final RouteAssetRenderSnapshot.Route secondRoute = new RouteAssetRenderSnapshot.Route(1700, "R17", 0x654321,
+				RouteAssetRenderSnapshot.CircularState.NONE, RouteAssetRenderSnapshot.RouteKind.HIGH_SPEED, 0, List.of(
+				new RouteAssetRenderSnapshot.Station(17, "P2", secondOwningStationId, secondOwningStationId, "Current|Current", "Terminal|Terminal", interchange),
+				new RouteAssetRenderSnapshot.Station(18, "N2", 300, 300, "Next 2|Next 2", "Terminal|Terminal", interchange)));
+		final RouteAssetDataMirror.PlatformSnapshot first = new RouteAssetDataMirror.PlatformSnapshot(PLATFORM_ID, "P1", 100, List.of(firstRoute));
+		final RouteAssetDataMirror.PlatformSnapshot second = new RouteAssetDataMirror.PlatformSnapshot(17, "P2", secondOwningStationId, List.of(firstRoute, secondRoute));
+		return new RouteAssetDataMirror.Snapshot(1, Map.of(DIMENSION,
+				new RouteAssetDataMirror.DimensionSnapshot(DIMENSION, 1, Map.of(PLATFORM_ID, first, 17L, second))));
+	}
+
+	private static RouteAssetDataMirror.PlatformSnapshot platform(RouteAssetDataMirror.Snapshot snapshot) {
+		return snapshot.getDimensions().get(DIMENSION).getPlatforms().get(PLATFORM_ID);
+	}
+
+	private static RouteAssetDataMirror.Snapshot destinationSnapshot(String physicalTerminal) {
+		final DestinationSignTopology topology = new DestinationSignTopology(List.of(
+				new DestinationSignTopology.ServiceRoute(900, 0, "R9|Route Nine", 0x14755E, List.of(
+						new DestinationSignTopology.StopOccurrence(90, 100, "U1", "Source|Source EN", physicalTerminal),
+						new DestinationSignTopology.StopOccurrence(91, 200, "M1", "Middle|Middle EN", ""),
+						new DestinationSignTopology.StopOccurrence(92, 300, "D1", "Target|Target EN", ""),
+						new DestinationSignTopology.StopOccurrence(93, 400, "F1", "Following|Following EN", "")))),
+				List.of(new DestinationSignTopology.StationZone(100, "Source|Source EN"),
+						new DestinationSignTopology.StationZone(200, "Middle|Middle EN"),
+						new DestinationSignTopology.StationZone(300, "Target|Target EN"),
+						new DestinationSignTopology.StationZone(400, "Following|Following EN")));
+		return new RouteAssetDataMirror.Snapshot(1, Map.of(DIMENSION,
+				new RouteAssetDataMirror.DimensionSnapshot(DIMENSION, 1, Map.of(), topology)));
+	}
+
+	private static RouteAssetKey routeSign(RouteSignStyleMode styleMode) {
+		return RouteAssetCanonicalKeyFactory.routeMap(DIMENSION, PLATFORM_ID, 0, "NORMAL",
+				RouteMapPurpose.ROUTE_SIGN, styleMode, true, false, 37F / 22, false);
+	}
+}

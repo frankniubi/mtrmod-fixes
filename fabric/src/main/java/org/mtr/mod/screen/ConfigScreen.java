@@ -7,8 +7,10 @@ import org.mtr.mod.Keys;
 import org.mtr.mod.Patreon;
 import org.mtr.mod.client.DynamicTextureCache;
 import org.mtr.mod.client.IDrawing;
+import org.mtr.mod.client.asset.ClientRouteAssetManager;
 import org.mtr.mod.config.Client;
 import org.mtr.mod.config.Config;
+import org.mtr.mod.config.LanguageDisplay;
 import org.mtr.mod.data.IGui;
 import org.mtr.mod.generated.lang.TranslationProvider;
 
@@ -17,6 +19,8 @@ import javax.annotation.Nullable;
 public class ConfigScreen extends MTRScreenBase implements IGui {
 
 	private final Client client = Config.getClient();
+	private final int initialDynamicTextureResolution = client.getDynamicTextureResolution();
+	private final LanguageDisplay initialLanguageDisplay = client.getLanguageDisplay();
 
 	private final ButtonWidgetExtension buttonShowAnnouncementMessages;
 	private final ButtonWidgetExtension buttonUseTTSAnnouncements;
@@ -168,7 +172,10 @@ public class ConfigScreen extends MTRScreenBase implements IGui {
 		super.onClose2();
 		client.setDynamicTextureResolution(sliderDynamicTextureResolution.getIntValue());
 		client.setVehicleOscillationMultiplier(sliderTrainOscillationMultiplier.getIntValue() / 10.0);
-		DynamicTextureCache.instance.refresh();
+		if (initialDynamicTextureResolution != client.getDynamicTextureResolution() || initialLanguageDisplay != client.getLanguageDisplay()) {
+			DynamicTextureCache.instance.onRouteVariantChanged();
+			ClientRouteAssetManager.getInstance().onVariantChanged();
+		}
 		Config.save();
 	}
 

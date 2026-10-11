@@ -15,6 +15,10 @@ public final class RequestHelper {
 	private final OkHttpClient okHttpClient = new OkHttpClient.Builder().connectTimeout(2, TimeUnit.SECONDS).writeTimeout(2, TimeUnit.SECONDS).readTimeout(2, TimeUnit.SECONDS).build();
 
 	public void sendRequest(String url, @Nullable String content, @Nullable BiConsumer<String, String> callback) {
+		sendRequestWithStatus(url, content, callback == null ? null : (response, path, status) -> callback.accept(response, path));
+	}
+
+	public void sendRequestWithStatus(String url, @Nullable String content, @Nullable ResponseCallback callback) {
 		final Request.Builder requestBuilder = new Request.Builder().url(url);
 		final Request request;
 		if (content == null) {
@@ -36,7 +40,7 @@ public final class RequestHelper {
 			public void onResponse(Call call, Response response) {
 				try (final ResponseBody responseBody = response.body()) {
 					if (callback != null) {
-						callback.accept(responseBody.string(), response.request().url().url().getFile());
+						callback.accept(responseBody.string(), response.request().url().url().getFile(), response.code());
 					}
 				} catch (IOException e) {
 					if (!(e instanceof InterruptedIOException)) {
@@ -45,5 +49,10 @@ public final class RequestHelper {
 				}
 			}
 		});
+	}
+
+	@FunctionalInterface
+	public interface ResponseCallback {
+		void accept(String response, String path, int statusCode);
 	}
 }

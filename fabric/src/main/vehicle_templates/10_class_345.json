@@ -48,13 +48,7 @@
 			"hasGangway2": true,
 			"hasBarrier1": false,
 			"hasBarrier2": false,
-			"legacyRiderOffset": 0,
-			"legacySpeedSoundBaseResource": "class_377",
-			"legacySpeedSoundCount": 51,
-			"legacyUseAccelerationSoundsWhenCoasting": false,
-			"legacyConstantPlaybackSpeed": false,
-			"legacyDoorSoundBaseResource": "class_345",
-			"legacyDoorCloseSoundTime": 0.5
+			"bveSoundBaseResource": "aventra"
 		},
 		{
 			"id": "class_345_2_trailer",
@@ -96,13 +90,7 @@
 			"hasGangway2": true,
 			"hasBarrier1": false,
 			"hasBarrier2": false,
-			"legacyRiderOffset": 0,
-			"legacySpeedSoundBaseResource": "class_377",
-			"legacySpeedSoundCount": 51,
-			"legacyUseAccelerationSoundsWhenCoasting": false,
-			"legacyConstantPlaybackSpeed": false,
-			"legacyDoorSoundBaseResource": "class_345",
-			"legacyDoorCloseSoundTime": 0.5
+			"bveSoundBaseResource": "aventra"
 		},
 		{
 			"id": "class_345_cab_1",
@@ -144,13 +132,7 @@
 			"hasGangway2": true,
 			"hasBarrier1": false,
 			"hasBarrier2": false,
-			"legacyRiderOffset": 0,
-			"legacySpeedSoundBaseResource": "class_377",
-			"legacySpeedSoundCount": 51,
-			"legacyUseAccelerationSoundsWhenCoasting": false,
-			"legacyConstantPlaybackSpeed": false,
-			"legacyDoorSoundBaseResource": "class_345",
-			"legacyDoorCloseSoundTime": 0.5
+			"bveSoundBaseResource": "aventra"
 		},
 		{
 			"id": "class_345_cab_2",
@@ -192,13 +174,7 @@
 			"hasGangway2": false,
 			"hasBarrier1": false,
 			"hasBarrier2": false,
-			"legacyRiderOffset": 0,
-			"legacySpeedSoundBaseResource": "class_377",
-			"legacySpeedSoundCount": 51,
-			"legacyUseAccelerationSoundsWhenCoasting": false,
-			"legacyConstantPlaybackSpeed": false,
-			"legacyDoorSoundBaseResource": "class_345",
-			"legacyDoorCloseSoundTime": 0.5
+			"bveSoundBaseResource": "aventra"
 		},
 		{
 			"id": "class_345_cab_3",
@@ -240,13 +216,7 @@
 			"hasGangway2": false,
 			"hasBarrier1": false,
 			"hasBarrier2": false,
-			"legacyRiderOffset": 0,
-			"legacySpeedSoundBaseResource": "class_377",
-			"legacySpeedSoundCount": 51,
-			"legacyUseAccelerationSoundsWhenCoasting": false,
-			"legacyConstantPlaybackSpeed": false,
-			"legacyDoorSoundBaseResource": "class_345",
-			"legacyDoorCloseSoundTime": 0.5
+			"bveSoundBaseResource": "aventra"
 		}
 	]
 }

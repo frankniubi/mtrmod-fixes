@@ -14,10 +14,13 @@ import org.mtr.mod.Init;
 import org.mtr.mod.block.BlockNode;
 import org.mtr.mod.data.PersistentVehicleData;
 import org.mtr.mod.data.VehicleExtension;
+import org.mtr.mod.render.DefaultRailMeshCache;
+import org.mtr.mod.route.RouteAssetDataMirror;
 import org.mtr.mod.screen.DashboardListItem;
 
 import javax.annotation.Nullable;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -37,6 +40,8 @@ public final class MinecraftClientData extends ClientData {
 
 	private static MinecraftClientData instance = new MinecraftClientData();
 	private static MinecraftClientData dashboardInstance = new MinecraftClientData();
+	private static ClientData interchangeData = new ClientData();
+	private static volatile RouteAssetDataMirror.DimensionSnapshot destinationSignDimensionSnapshot;
 
 	public static String DASHBOARD_SEARCH = "";
 	public static String ROUTES_PLATFORMS_SEARCH = "";
@@ -68,12 +73,17 @@ public final class MinecraftClientData extends ClientData {
 		positionsToRail.forEach((startPosition, railMap) -> railMap.forEach((endPosition, rail) -> {
 			final String hexId = rail.getHexId();
 			final RailWrapper railWrapper = railWrapperList.get(hexId);
-			if (railWrapper == null) {
-				railWrapperList.put(hexId, new RailWrapper(rail, hexId));
-			} else {
-				railWrapper.rail = rail;
+			if (railWrapper == null || railWrapper.rail != rail) {
+				final RailWrapper newRailWrapper = new RailWrapper(rail, hexId);
+				if (railWrapper != null) {
+					newRailWrapper.shouldRender = railWrapper.shouldRender;
+				}
+				railWrapperList.put(hexId, newRailWrapper);
 			}
 		}));
+		if (this == getInstance()) {
+			DefaultRailMeshCache.reconcile(railWrapperList.values());
+		}
 
 		simplifiedRoutes.forEach(simplifiedRoute -> simplifiedRouteIdMap.put(simplifiedRoute.getId(), simplifiedRoute));
 	}
@@ -141,9 +151,61 @@ public final class MinecraftClientData extends ClientData {
 		return dashboardInstance;
 	}
 
+	public static ClientData getInterchangeData() {
+		return interchangeData;
+	}
+
+	public static void refreshDestinationSignDimensionSnapshot() {
+		final ClientWorld world = MinecraftClient.getInstance().getWorldMapped();
+		if (world == null) {
+			destinationSignDimensionSnapshot = null;
+			return;
+		}
+		try {
+			interchangeData.sync();
+			final String dimension = Init.getWorldId(new World(world.data));
+			destinationSignDimensionSnapshot = RouteAssetDataMirror.materializeDimension(
+					dimension, interchangeData, 0, interchangeData.stationIdMap::get, interchangeData.platformIdMap::get);
+		} catch (RuntimeException exception) {
+			destinationSignDimensionSnapshot = null;
+		}
+	}
+
+	public static Optional<RouteAssetDataMirror.DimensionSnapshot> getDestinationSignDimensionSnapshot(String dimension) {
+		final RouteAssetDataMirror.DimensionSnapshot snapshot = destinationSignDimensionSnapshot;
+		return snapshot != null && snapshot.getDimension().equals(dimension) ? Optional.of(snapshot) : Optional.empty();
+	}
+
+	static void publishDestinationSignDimensionSnapshot(RouteAssetDataMirror.DimensionSnapshot snapshot) {
+		destinationSignDimensionSnapshot = snapshot;
+	}
+
+	@Nullable
+	public static Station getInterchangeStation(long stationId) {
+		// Nearby data is distance-filtered and can omit platforms and connected stations.
+		// Resolve the complete graph first, retaining local data only as a loading fallback.
+		final Station interchangeStation = interchangeData.stationIdMap.get(stationId);
+		return interchangeStation == null ? instance.stationIdMap.get(stationId) : interchangeStation;
+	}
+
+	@Nullable
+	public static Route getInterchangeRoute(long routeId) {
+		final Route interchangeRoute = interchangeData.routeIdMap.get(routeId);
+		return interchangeRoute == null ? instance.routeIdMap.get(routeId) : interchangeRoute;
+	}
+
+	@Nullable
+	public static Platform getInterchangePlatform(long platformId) {
+		final Platform interchangePlatform = interchangeData.platformIdMap.get(platformId);
+		return interchangePlatform == null ? instance.platformIdMap.get(platformId) : interchangePlatform;
+	}
+
 	public static void reset() {
+		DefaultRailMeshCache.clear();
 		MinecraftClientData.instance = new MinecraftClientData();
 		MinecraftClientData.dashboardInstance = new MinecraftClientData();
+		MinecraftClientData.interchangeData = new ClientData();
+		MinecraftClientData.destinationSignDimensionSnapshot = null;
 	}
 
 	public static boolean hasPermission() {

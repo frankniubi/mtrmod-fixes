@@ -1,0 +1,111 @@
+package org.mtr.mod.block;
+
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+import org.mtr.mapping.holder.CompoundTag;
+import org.mtr.mod.route.DestinationSignStyle;
+import org.mtr.mod.route.RouteAssetProtocol;
+
+import java.util.List;
+import java.util.Set;
+
+public final class DestinationSignConfigTest {
+
+	@Test
+	public void configuredSignedIdsRoundTripExactly() {
+		final DestinationSignConfig config = DestinationSignConfig.configured(-10, -30, 7, 4, DestinationSignStyle.PLATFORM_GROUPS, false, 4);
+		final CompoundTag tag = new CompoundTag();
+		config.write(tag);
+		Assertions.assertEquals(config, DestinationSignConfig.read(tag));
+		Assertions.assertEquals(4, config.getRoutesPerBlockHeight());
+		Assertions.assertEquals(4, tag.getLong("routes_per_block_height"));
+		Assertions.assertTrue(config.isConfigured());
+	}
+
+	@Test
+	public void multipleDestinationsAndCustomHeaderRoundTripInSortedOrder() {
+		final DestinationSignConfig config = DestinationSignConfig.configured(-10, Set.of(-20L, -40L, -30L), 7, 4,
+				DestinationSignStyle.PLATFORM_GROUPS, false, "\u5f80\u4e1c\u7ad9/\u897f\u7ad9\u65b9\u5411|To East/West");
+		final CompoundTag tag = new CompoundTag();
+		config.write(tag);
+
+		Assertions.assertEquals(List.of(-40L, -30L, -20L), List.copyOf(config.getDestinationStationIds()));
+		Assertions.assertEquals(-40, config.getDestinationStationId());
+		Assertions.assertEquals("\u5f80\u4e1c\u7ad9/\u897f\u7ad9\u65b9\u5411|To East/West", config.getCustomHeader());
+		Assertions.assertEquals(3, tag.getLong("destination_station_ids_count"));
+		Assertions.assertEquals(config, DestinationSignConfig.read(tag));
+	}
+
+	@Test
+	public void newlyPlacedSignIsUnconfiguredAndEtaDefaultsToVisible() {
+		final DestinationSignConfig fresh = DestinationSignConfig.unconfigured(3, 2);
+		Assertions.assertFalse(fresh.isConfigured());
+		Assertions.assertEquals(0, fresh.getDestinationStationId());
+		Assertions.assertTrue(fresh.isShowEta());
+		Assertions.assertEquals(RouteAssetProtocol.DEFAULT_DESTINATION_SIGN_ROUTES_PER_BLOCK_HEIGHT, fresh.getRoutesPerBlockHeight());
+
+		final CompoundTag oldTag = new CompoundTag();
+		oldTag.putLong("source_station_id", -20);
+		oldTag.putLong("destination_station_id", -40);
+		oldTag.putLong("width", 3);
+		oldTag.putLong("height", 2);
+		oldTag.putString("style", DestinationSignStyle.ARRIVAL_ORDER.name());
+		Assertions.assertTrue(DestinationSignConfig.read(oldTag).isShowEta());
+		Assertions.assertEquals(3, DestinationSignConfig.read(oldTag).getRoutesPerBlockHeight());
+	}
+
+	@Test
+	public void densityIsBoundedAndMalformedStoredDensityFailsClosed() {
+		Assertions.assertEquals(2, DestinationSignConfig.unconfigured(3, 2, 2).getRoutesPerBlockHeight());
+		Assertions.assertEquals(4, DestinationSignConfig.unconfigured(3, 2, 4).getRoutesPerBlockHeight());
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.unconfigured(3, 2, 1));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.unconfigured(3, 2, 5));
+
+		final CompoundTag invalid = new CompoundTag();
+		invalid.putLong("source_station_id", 5);
+		invalid.putLong("destination_station_id", 6);
+		invalid.putLong("width", 2);
+		invalid.putLong("height", 2);
+		invalid.putLong("routes_per_block_height", 5);
+		invalid.putString("style", DestinationSignStyle.ARRIVAL_ORDER.name());
+		Assertions.assertEquals(DestinationSignConfig.unconfigured(3, 2), DestinationSignConfig.read(invalid));
+	}
+
+	@Test
+	public void rejectsHalfConfiguredAndOutOfBoundsValues() {
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.configured(0, 5, 3, 2, DestinationSignStyle.ARRIVAL_ORDER, true));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.configured(5, 0, 3, 2, DestinationSignStyle.ARRIVAL_ORDER, true));
+		Assertions.assertDoesNotThrow(() -> DestinationSignConfig.configured(5, 6, 2, 2, DestinationSignStyle.DESTINATION_FLAG, true));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.configured(5, Set.of(), 3, 2, DestinationSignStyle.ARRIVAL_ORDER, true, ""));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.configured(5, Set.of(6L, 0L), 3, 2, DestinationSignStyle.ARRIVAL_ORDER, true, ""));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.configured(5,
+				java.util.stream.LongStream.rangeClosed(1, DestinationSignConfig.MAX_DESTINATIONS + 1).boxed().collect(java.util.stream.Collectors.toSet()),
+				3, 2, DestinationSignStyle.ARRIVAL_ORDER, true, ""));
+		final String tooManySegments = String.join("|", java.util.Collections.nCopies(
+				org.mtr.mod.route.RouteAssetProtocol.MAX_DESTINATION_SIGN_PIPE_SEGMENTS + 1, "x"));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.configured(
+				5, Set.of(6L), 3, 2, DestinationSignStyle.ARRIVAL_ORDER, true, tooManySegments));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> DestinationSignConfig.unconfigured(17, 2));
+	}
+
+	@Test
+	public void everyStyleSupportsOneByTwoAndTwoByOne() {
+		for (final DestinationSignStyle style : DestinationSignStyle.values()) {
+			Assertions.assertEquals(1, DestinationSignConfig.configured(5, 6, 1, 2, style, true).getWidth());
+			Assertions.assertEquals(1, DestinationSignConfig.configured(5, 6, 2, 1, style, true).getHeight());
+		}
+		Assertions.assertThrows(IllegalArgumentException.class,
+				() -> DestinationSignConfig.configured(5, 6, 1, 1, DestinationSignStyle.ARRIVAL_ORDER, true));
+	}
+
+	@Test
+	public void malformedNbtFallsBackToSafeUnconfiguredDefaults() {
+		final CompoundTag malformed = new CompoundTag();
+		malformed.putLong("source_station_id", 5);
+		malformed.putLong("destination_station_id", 6);
+		malformed.putLong("width", Long.MAX_VALUE);
+		malformed.putLong("height", -1);
+		malformed.putString("style", "not-a-style");
+		Assertions.assertEquals(DestinationSignConfig.unconfigured(3, 2), DestinationSignConfig.read(malformed));
+	}
+}

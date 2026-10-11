@@ -4,15 +4,24 @@ import org.mtr.core.servlet.MessageQueue;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.Object2LongArrayMap;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
-import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import org.mtr.mapping.holder.*;
 import org.mtr.mapping.mapper.ResourceManagerHelper;
 import org.mtr.mod.Init;
+import org.mtr.mod.client.asset.ClientRouteAssetManager;
+import org.mtr.mod.client.asset.ClientRouteAssetResourceFingerprint;
+import org.mtr.mod.client.asset.ClientRouteAssetResources;
+import org.mtr.mod.client.asset.DynamicTextureDependencyTracker;
+import org.mtr.mod.config.Client;
 import org.mtr.mod.config.Config;
 import org.mtr.mod.config.LanguageDisplay;
 import org.mtr.mod.data.IGui;
 import org.mtr.mod.render.MainRenderer;
 import org.mtr.mod.render.MoreRenderLayers;
+import org.mtr.mod.route.RouteAssetCanonicalKeyFactory;
+import org.mtr.mod.route.RouteAssetKey;
+import org.mtr.mod.route.RouteAssetTextRasterizer;
+import org.mtr.mod.route.RouteMapPurpose;
+import org.mtr.mod.route.RouteSignStyleMode;
 
 import javax.annotation.Nullable;
 import java.awt.*;
@@ -23,6 +32,10 @@ import java.awt.image.BufferedImage;
 import java.awt.image.DataBufferByte;
 import java.text.AttributedString;
 import java.util.Arrays;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 public class DynamicTextureCache implements IGui {
@@ -31,14 +44,20 @@ public class DynamicTextureCache implements IGui {
 	private Font fontCjk;
 
 	private final Object2ObjectLinkedOpenHashMap<String, DynamicResource> dynamicResources = new Object2ObjectLinkedOpenHashMap<>();
-	private final ObjectOpenHashSet<String> generatingResources = new ObjectOpenHashSet<>();
+	private final DynamicTextureGenerationTracker generationTracker = new DynamicTextureGenerationTracker();
+	private final DynamicTextureDependencyTracker dependencyTracker = new DynamicTextureDependencyTracker();
+	private final Set<String> dependencyEvaluations = ConcurrentHashMap.newKeySet();
+	private final ConcurrentHashMap<String, Long> dependencyEvaluationRetryTimes = new ConcurrentHashMap<>();
 	private final MessageQueue<Runnable> resourceRegistryQueue = new MessageQueue<>();
-	private final Object2LongArrayMap<Identifier> deletedResources = new Object2LongArrayMap<>();
+	private final Object2ObjectLinkedOpenHashMap<Identifier, NativeImageBackedTexture> deletedResources = new Object2ObjectLinkedOpenHashMap<>();
+	private final Object2LongArrayMap<Identifier> deletedResourceExpiryTimes = new Object2LongArrayMap<>();
 
 	public static DynamicTextureCache instance = new DynamicTextureCache();
 
 	public static final float LINE_HEIGHT_MULTIPLIER = 1.25F;
 	private static final int COOLDOWN_TIME = 10000; // Images not requested within the last 10 seconds will be unregistered
+	private static final int FAILURE_RETRY_TIME = 1000;
+	private static final String DYNAMIC_TEXTURE_NAME = Init.MOD_ID + "_dynamic_texture";
 	private static final Identifier DEFAULT_BLACK_RESOURCE = new Identifier(Init.MOD_ID, "textures/block/black.png");
 	private static final Identifier DEFAULT_WHITE_RESOURCE = new Identifier(Init.MOD_ID, "textures/block/white.png");
 	private static final Identifier DEFAULT_TRANSPARENT_RESOURCE = new Identifier(Init.MOD_ID, "textures/block/transparent.png");
@@ -50,7 +69,21 @@ public class DynamicTextureCache implements IGui {
 	public void reload() {
 		font = null;
 		fontCjk = null;
-		refresh();
+		dependencyTracker.onResourceReload();
+	}
+
+	public void onWorldReset() {
+		dependencyTracker.onResourceReload();
+		DestinationSignClientState.INSTANCE.clear();
+	}
+
+	public void onRouteDataChanged() {
+		dependencyTracker.onRouteDataChanged();
+		DestinationSignClientState.INSTANCE.invalidateRouteData();
+	}
+
+	public void onRouteVariantChanged() {
+		dependencyTracker.onVariantChanged();
 	}
 
 	/**
@@ -59,7 +92,7 @@ public class DynamicTextureCache implements IGui {
 	public void refresh() {
 		Init.LOGGER.debug("Refreshing dynamic resources; {} textures in memory; {} textures queued to be destroyed", dynamicResources.size(), deletedResources.size());
 		dynamicResources.values().forEach(dynamicResource -> dynamicResource.needsRefresh = true);
-		generatingResources.clear();
+		generationTracker.refresh();
 	}
 
 	public void tick() {
@@ -68,20 +101,26 @@ public class DynamicTextureCache implements IGui {
 		dynamicResources.forEach((checkKey, checkDynamicResource) -> {
 			if (checkDynamicResource.expiryTime < currentTimeMillis) {
 				checkDynamicResource.remove();
-				deletedResources.put(checkDynamicResource.identifier, currentTimeMillis + COOLDOWN_TIME);
+				queueResourceForDeletion(checkDynamicResource, currentTimeMillis);
 				keysToRemove.add(checkKey);
 			}
 		});
-		keysToRemove.forEach(dynamicResources::remove);
+		keysToRemove.forEach(key -> {
+			dynamicResources.remove(key);
+			dependencyTracker.forget(key);
+		});
 
 		final ObjectArrayList<Identifier> deletedResourcesToRemove = new ObjectArrayList<>();
-		deletedResources.forEach((identifier, expiryTime) -> {
+		deletedResourceExpiryTimes.forEach((identifier, expiryTime) -> {
 			if (expiryTime < currentTimeMillis) {
-				MinecraftClient.getInstance().getTextureManager().destroyTexture(identifier);
+				destroyTexture(identifier, deletedResources.get(identifier));
 				deletedResourcesToRemove.add(identifier);
 			}
 		});
-		deletedResourcesToRemove.forEach(deletedResources::removeLong);
+		deletedResourcesToRemove.forEach(identifier -> {
+			deletedResources.remove(identifier);
+			deletedResourceExpiryTimes.removeLong(identifier);
+		});
 	}
 
 	public DynamicResource getPixelatedText(String text, int textColor, int maxWidth, double cjkSizeRatio, boolean fullPixel) {
@@ -89,7 +128,15 @@ public class DynamicTextureCache implements IGui {
 	}
 
 	public DynamicResource getColorStrip(long platformId) {
-		return getResource(String.format("color_%s", platformId), () -> RouteMapGenerator.generateColorStrip(platformId), DefaultRenderingColor.TRANSPARENT);
+		final String localKey = String.format("color_%s", platformId);
+		final Supplier<NativeImage> localSupplier = () -> RouteMapGenerator.generateColorStrip(platformId);
+		final RouteAssetRequestContext context = getRouteAssetRequestContext();
+		if (context == null) return getResource(localKey, localSupplier, DefaultRenderingColor.TRANSPARENT);
+		try {
+			return getRouteAssetResource(RouteAssetCanonicalKeyFactory.routeColorStrip(context.dimension, platformId, context.resolution, context.language), localKey, localSupplier, DefaultRenderingColor.TRANSPARENT);
+		} catch (IllegalArgumentException exception) {
+			return getResource(localKey, localSupplier, DefaultRenderingColor.TRANSPARENT);
+		}
 	}
 
 	public DynamicResource getStationName(String stationName, float aspectRatio) {
@@ -120,16 +167,146 @@ public class DynamicTextureCache implements IGui {
 		return getResource(String.format("exit_sign_letter_%s_%s", exitLetter, exitNumber), () -> RouteMapGenerator.generateExitSignLetter(exitLetter, exitNumber, backgroundColor), DefaultRenderingColor.TRANSPARENT);
 	}
 
-	public DynamicResource getRouteSquare(int color, String routeName, IGui.HorizontalAlignment horizontalAlignment) {
-		return getResource(String.format("route_square_%s_%s_%s", color, routeName, horizontalAlignment), () -> RouteMapGenerator.generateRouteSquare(color, routeName, horizontalAlignment), DefaultRenderingColor.TRANSPARENT);
+	public DynamicResource getRouteSquare(long routeId, int color, String routeName, IGui.HorizontalAlignment horizontalAlignment) {
+		final String localKey = String.format("route_square_%s_%s_%s", color, routeName, horizontalAlignment);
+		final Supplier<NativeImage> localSupplier = () -> RouteMapGenerator.generateRouteSquare(color, routeName, horizontalAlignment);
+		final RouteAssetRequestContext context = getRouteAssetRequestContext();
+		if (context == null) return getResource(localKey, localSupplier, DefaultRenderingColor.TRANSPARENT);
+		try {
+			return getRouteAssetResource(RouteAssetCanonicalKeyFactory.routeSquare(context.dimension, routeId, context.resolution, context.language, routeAssetAlignment(horizontalAlignment)), localKey, localSupplier, DefaultRenderingColor.TRANSPARENT);
+		} catch (IllegalArgumentException exception) {
+			return getResource(localKey, localSupplier, DefaultRenderingColor.TRANSPARENT);
+		}
 	}
 
 	public DynamicResource getDirectionArrow(long platformId, boolean hasLeft, boolean hasRight, IGui.HorizontalAlignment horizontalAlignment, boolean showToString, float paddingScale, float aspectRatio, int backgroundColor, int textColor, int transparentColor) {
-		return getResource(String.format("direction_arrow_%s_%s_%s_%s_%s_%s_%s_%s_%s_%s", platformId, hasLeft, hasRight, horizontalAlignment, showToString, paddingScale, aspectRatio, backgroundColor, textColor, transparentColor), () -> RouteMapGenerator.generateDirectionArrow(platformId, hasLeft, hasRight, horizontalAlignment, showToString, paddingScale, aspectRatio, backgroundColor, textColor, transparentColor), transparentColor == 0 && backgroundColor == ARGB_WHITE ? DefaultRenderingColor.WHITE : DefaultRenderingColor.TRANSPARENT);
+		final String localKey = String.format("direction_arrow_%s_%s_%s_%s_%s_%s_%s_%s_%s_%s", platformId, hasLeft, hasRight, horizontalAlignment, showToString, paddingScale, aspectRatio, backgroundColor, textColor, transparentColor);
+		final Supplier<NativeImage> localSupplier = () -> RouteMapGenerator.generateDirectionArrow(platformId, hasLeft, hasRight, horizontalAlignment, showToString, paddingScale, aspectRatio, backgroundColor, textColor, transparentColor);
+		final DefaultRenderingColor defaultRenderingColor = transparentColor == 0 && backgroundColor == ARGB_WHITE ? DefaultRenderingColor.WHITE : DefaultRenderingColor.TRANSPARENT;
+		final RouteAssetRequestContext context = getRouteAssetRequestContext();
+		if (context == null) return getResource(localKey, localSupplier, defaultRenderingColor);
+		try {
+			return getRouteAssetResource(RouteAssetCanonicalKeyFactory.directionArrow(context.dimension, platformId, context.resolution, context.language, hasLeft, hasRight, routeAssetAlignment(horizontalAlignment), showToString, paddingScale, aspectRatio, backgroundColor, textColor, transparentColor), localKey, localSupplier, defaultRenderingColor);
+		} catch (IllegalArgumentException exception) {
+			return getResource(localKey, localSupplier, defaultRenderingColor);
+		}
 	}
 
-	public DynamicResource getRouteMap(long platformId, boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite) {
-		return getResource(String.format("route_map_%s_%s_%s_%s_%s", platformId, vertical, flip, aspectRatio, transparentWhite), () -> RouteMapGenerator.generateRouteMap(platformId, vertical, flip, aspectRatio, transparentWhite), transparentWhite ? DefaultRenderingColor.TRANSPARENT : DefaultRenderingColor.WHITE);
+	public DynamicResource getRouteMap(long platformId, RouteMapPurpose purpose, boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite) {
+		final String localKey = String.format("route_map_%s_%s_%s_%s_%s_%s", platformId, purpose, vertical, flip, aspectRatio, transparentWhite);
+		return getRouteMap(platformId, purpose, RouteSignStyleMode.AUTO, vertical, flip, aspectRatio, transparentWhite, localKey);
+	}
+
+	public DynamicResource getRouteSignMap(long platformId, RouteSignStyleMode styleMode, float aspectRatio) {
+		return getRouteSignMap(Set.of(platformId), styleMode, "", aspectRatio);
+	}
+
+	public DynamicResource getRouteSignMap(Set<Long> platformIds, RouteSignStyleMode styleMode, String customPlatformHeader, float aspectRatio) {
+		final java.util.TreeSet<Long> checkedPlatformIds = new java.util.TreeSet<>(Objects.requireNonNull(platformIds, "platformIds"));
+		if (checkedPlatformIds.isEmpty()) throw new IllegalArgumentException("Route Sign platform is not set");
+		final long primaryPlatformId = checkedPlatformIds.first();
+		final Supplier<NativeImage> localSupplier = () -> RouteMapGenerator.generateRouteMap(primaryPlatformId, true, false, aspectRatio, false);
+		final String localKey = String.format(Locale.ROOT, "route_sign_map_%s_%s_%d:%s_%08X",
+				checkedPlatformIds, styleMode, customPlatformHeader.length(), customPlatformHeader, Float.floatToRawIntBits(aspectRatio));
+		final RouteAssetRequestContext context = getRouteAssetRequestContext();
+		if (context == null) return getResource(localKey, localSupplier, DefaultRenderingColor.WHITE);
+		try {
+			final RouteAssetKey key = RouteAssetCanonicalKeyFactory.routeSignMap(context.dimension, checkedPlatformIds,
+					context.resolution, context.language, styleMode, customPlatformHeader, true, false, aspectRatio, false);
+			return getRouteAssetResource(key, "route_sign_map_" + key, localSupplier, DefaultRenderingColor.WHITE, true);
+		} catch (IllegalArgumentException exception) {
+			return getResource(localKey, localSupplier, DefaultRenderingColor.WHITE);
+		}
+	}
+
+	public DynamicResource getDestinationSignAtlas(RouteAssetKey key) {
+		if (key.getType() != org.mtr.mod.route.RouteAssetType.DESTINATION_SIGN_ATLAS) throw new IllegalArgumentException("Not a destination sign atlas");
+		return getRouteAssetResource(key, "destination_sign_" + key, () -> ClientRouteAssetRenderer.prepare(key).map(ClientRouteAssetRenderer::render).orElse(null), DefaultRenderingColor.TRANSPARENT, true);
+	}
+
+	public DynamicResource getDestinationSignText(String finalText, int fontSize, boolean semibold, int color, int resolution, int logicalMaxWidth) {
+		final DestinationSignDynamicTextCache.DynamicText request = DestinationSignDynamicTextCache.INSTANCE.resolve(
+				finalText, fontSize, semibold, color, resolution, logicalMaxWidth);
+		final String key = String.format(Locale.ROOT, "destination_sign_text_%d:%s_%d_%s_%08X_%d_%d", request.getText().length(), request.getText(),
+				request.getFontSize(), request.isSemibold(), request.getColor(), request.getResolution(), request.getLogicalMaxWidth());
+		return getResource(key, () -> generateDestinationSignText(request), DefaultRenderingColor.TRANSPARENT);
+	}
+
+	private NativeImage generateDestinationSignText(DestinationSignDynamicTextCache.DynamicText request) {
+		final int scale = 1 << request.getResolution();
+		final int physicalFontSize = Math.multiplyExact(request.getFontSize(), scale);
+		final int physicalMaxWidth = Math.multiplyExact(request.getLogicalMaxWidth(), scale);
+		final String value = DestinationSignDynamicTextCache.ellipsize(request.getText(), physicalMaxWidth, text -> measureDestinationSignText(text, physicalFontSize));
+		final int[] dimensions = new int[2];
+		final byte[] pixels = value.isEmpty() ? new byte[0] : getTextPixels(value, dimensions, physicalMaxWidth,
+				Math.max(1, (int) (physicalFontSize * LINE_HEIGHT_MULTIPLIER)), physicalFontSize, physicalFontSize, 0, null);
+		int minX = dimensions[0];
+		int minY = dimensions[1];
+		int maxX = -1;
+		int maxY = -1;
+		for (int y = 0; y < dimensions[1]; y++) {
+			for (int x = 0; x < dimensions[0]; x++) {
+				if ((pixels[y * dimensions[0] + x] & 0xFF) == 0) continue;
+				minX = Math.min(minX, x);
+				minY = Math.min(minY, y);
+				maxX = Math.max(maxX, x);
+				maxY = Math.max(maxY, y);
+			}
+		}
+		final int width = Math.max(1, maxX - minX + 1);
+		final int height = destinationSignTextCanvasHeight(request.getFontSize(), request.getResolution());
+		final NativeImage image = new NativeImage(NativeImageFormat.getAbgrMapped(), width, height, false);
+		final int sourceAlpha = request.getColor() >>> 24;
+		final int abgr = request.getColor() & 0xFF00FF00 | (request.getColor() & 0xFF) << 16 | (request.getColor() >>> 16 & 0xFF);
+		if (maxX >= minX && maxY >= minY) {
+			final int glyphHeight = maxY - minY + 1;
+			final int destinationTop = (height - glyphHeight) / 2;
+			for (int y = minY; y <= maxY; y++) {
+				for (int x = minX; x <= maxX; x++) {
+					final int destinationY = destinationTop + y - minY;
+					if (destinationY < 0 || destinationY >= height) continue;
+					final int alpha = (pixels[y * dimensions[0] + x] & 0xFF) * sourceAlpha / 255;
+					image.setPixelColor(x - minX, destinationY, alpha << 24 | abgr & 0xFFFFFF);
+				}
+			}
+		}
+		return image;
+	}
+
+	static int destinationSignTextCanvasHeight(int fontSize, int resolution) {
+		if (fontSize <= 0 || resolution < 0 || resolution > 3) throw new IllegalArgumentException("Invalid destination sign text canvas");
+		return Math.multiplyExact(fontSize, 1 << resolution);
+	}
+
+	private int measureDestinationSignText(String value, int physicalFontSize) {
+		if (value.isEmpty()) return 0;
+		final int[] dimensions = new int[2];
+		getTextPixels(value, dimensions, Integer.MAX_VALUE, Math.max(1, (int) (physicalFontSize * LINE_HEIGHT_MULTIPLIER)),
+				physicalFontSize, physicalFontSize, 0, null);
+		return dimensions[0];
+	}
+
+	private DynamicResource getRouteMap(long platformId, RouteMapPurpose purpose, RouteSignStyleMode styleMode,
+			boolean vertical, boolean flip, float aspectRatio, boolean transparentWhite, String localKey) {
+		final Supplier<NativeImage> localSupplier = () -> RouteMapGenerator.generateRouteMap(platformId, vertical, flip, aspectRatio, transparentWhite);
+		final DefaultRenderingColor defaultRenderingColor = transparentWhite ? DefaultRenderingColor.TRANSPARENT : DefaultRenderingColor.WHITE;
+		final RouteAssetRequestContext context = getRouteAssetRequestContext();
+		if (context == null) return getResource(localKey, localSupplier, defaultRenderingColor);
+		try {
+			return getRouteAssetResource(
+					RouteAssetCanonicalKeyFactory.routeMap(context.dimension, platformId, context.resolution, context.language,
+							purpose, styleMode, vertical, flip, aspectRatio, transparentWhite),
+					localKey, localSupplier, defaultRenderingColor, purpose == RouteMapPurpose.ROUTE_SIGN
+			);
+		} catch (IllegalArgumentException exception) {
+			if (purpose != RouteMapPurpose.GENERIC) return getResource(localKey, localSupplier, defaultRenderingColor);
+			final String descriptor = String.format(Locale.ROOT, "LOCAL_ROUTE_MAP|%s|%d|%s|%s|%s|%08X|%s",
+					context.dimension, platformId, purpose, vertical, flip, Float.floatToRawIntBits(aspectRatio), transparentWhite);
+			return getResource(context.dimension + '|' + localKey, localSupplier, defaultRenderingColor, () ->
+					RouteAssetClientSnapshotAdapter.resolveLocalGenericFingerprint(
+							descriptor, platformId, ClientRouteAssetResourceFingerprint.get()
+					).orElse(""));
+		}
 	}
 
 	public byte[] getTextPixels(String text, int[] dimensions, int fontSizeCjk, int fontSize) {
@@ -230,21 +407,208 @@ public class DynamicTextureCache implements IGui {
 		return pixels;
 	}
 
-	private DynamicResource getResource(String key, Supplier<NativeImage> supplier, DefaultRenderingColor defaultRenderingColor) {
-		resourceRegistryQueue.process(Runnable::run);
-		final DynamicResource dynamicResource = dynamicResources.get(key);
+	private DynamicResource getRouteAssetResource(RouteAssetKey key, String localKey, Supplier<NativeImage> localSupplier, DefaultRenderingColor defaultRenderingColor) {
+		return getRouteAssetResource(key, localKey, localSupplier, defaultRenderingColor, false);
+	}
 
-		if (dynamicResource != null && !dynamicResource.needsRefresh) {
-			dynamicResource.expiryTime = System.currentTimeMillis() + COOLDOWN_TIME;
+	private DynamicResource getRouteAssetResource(RouteAssetKey key, String localKey, Supplier<NativeImage> localSupplier,
+			DefaultRenderingColor defaultRenderingColor, boolean preparedSharedFallback) {
+		final ClientRouteAssetManager.RouteTextureLookup lookup = ClientRouteAssetManager.getInstance().lookupRouteTexture(key);
+		switch (lookup.getState()) {
+			case READY:
+				return lookup.getResource();
+			case PENDING:
+				return defaultRenderingColor.dynamicResource;
+			case LOCAL:
+			default:
+				final String dependencyKey = key.getDimension() + '|' + localKey;
+				if (preparedSharedFallback && ClientRouteAssetResources.getActive() != null) {
+					return getPreparedRouteAssetResource(dependencyKey, key, defaultRenderingColor);
+				}
+				return getResource(dependencyKey, localSupplier, defaultRenderingColor, () -> RouteMapGenerator.getRouteAssetFingerprint(key));
+		}
+	}
+
+	@Nullable
+	private static RouteAssetRequestContext getRouteAssetRequestContext() {
+		final ClientRouteAssetManager.RouteTextureVariant variant = ClientRouteAssetManager.getInstance().getRouteTextureVariant();
+		final ClientWorld clientWorld = MinecraftClient.getInstance().getWorldMapped();
+		if (clientWorld == null) return null;
+		try {
+			return new RouteAssetRequestContext(
+					Init.getWorldId(new World(clientWorld.data)),
+					variant == null ? Math.max(0, Math.min(3, Config.getClient().getDynamicTextureResolution())) : variant.getResolution(),
+					variant == null ? routeAssetLanguage(Config.getClient().getLanguageDisplay()) : variant.getLanguage()
+			);
+		} catch (RuntimeException exception) {
+			return null;
+		}
+	}
+
+	private static String routeAssetLanguage(LanguageDisplay languageDisplay) {
+		switch (languageDisplay) {
+			case CJK_ONLY: return "CJK";
+			case NON_CJK_ONLY: return "LATIN";
+			case NORMAL:
+			default: return "NORMAL";
+		}
+	}
+
+	private static RouteAssetTextRasterizer.Alignment routeAssetAlignment(IGui.HorizontalAlignment horizontalAlignment) {
+		return RouteAssetTextRasterizer.Alignment.valueOf(Objects.requireNonNull(horizontalAlignment, "horizontalAlignment").name());
+	}
+
+	private DynamicResource getPreparedRouteAssetResource(String key, RouteAssetKey routeAssetKey, DefaultRenderingColor defaultRenderingColor) {
+		resourceRegistryQueue.process(Runnable::run);
+		final long currentTimeMillis = System.currentTimeMillis();
+		final DynamicResource dynamicResource = dynamicResources.get(key);
+		final DynamicTextureDependencyTracker.Resolution<ClientRouteAssetRenderer.Prepared> resolution =
+				dependencyTracker.currentResolved(key, ClientRouteAssetRenderer.Prepared.class);
+		if (resolution == null) {
+			schedulePreparedRouteAssetEvaluation(key, routeAssetKey, currentTimeMillis);
+			return getExistingOrDefault(dynamicResource, defaultRenderingColor, currentTimeMillis);
+		}
+
+		final DynamicTextureDependencyTracker.Token dependencyToken = resolution.getToken();
+		if (dynamicResource != null && !dynamicResource.needsRefresh && dynamicResource.dependencyToken == dependencyToken) {
+			dynamicResource.expiryTime = currentTimeMillis + COOLDOWN_TIME;
+			return dynamicResource;
+		}
+		if (generationTracker.isActive(key, dependencyToken) || generationTracker.isRetryBlocked(key, dependencyToken, currentTimeMillis)) {
+			return getExistingOrDefault(dynamicResource, defaultRenderingColor, currentTimeMillis);
+		}
+
+		final DynamicTextureGenerationTracker.Token generationToken = generationTracker.start(key, dependencyToken);
+		boolean generationScheduled = false;
+		try {
+			MainRenderer.WORKER_THREAD.scheduleDynamicTextures(() -> generateResource(
+					key, generationToken, dependencyToken, () -> ClientRouteAssetRenderer.render(resolution.getValue()), false
+			));
+			generationScheduled = true;
+		} finally {
+			if (!generationScheduled) generationTracker.completeFailure(
+					key, generationToken, dependencyToken, currentTimeMillis + FAILURE_RETRY_TIME
+			);
+		}
+		return getExistingOrDefault(dynamicResource, defaultRenderingColor, currentTimeMillis);
+	}
+
+	private void schedulePreparedRouteAssetEvaluation(String key, RouteAssetKey routeAssetKey, long currentTimeMillis) {
+		final Long retryTime = dependencyEvaluationRetryTimes.get(key);
+		if (retryTime != null && currentTimeMillis < retryTime || !dependencyEvaluations.add(key)) return;
+		boolean scheduled = false;
+		try {
+			MainRenderer.WORKER_THREAD.scheduleDynamicTextures(() -> {
+				boolean successful = false;
+				try {
+					dependencyTracker.evaluateResolved(
+							key,
+							() -> ClientRouteAssetRenderer.prepare(routeAssetKey).orElseThrow(() -> new IllegalStateException("Route asset resources are unavailable")),
+							ClientRouteAssetRenderer.Prepared::getDependencyFingerprint
+					);
+					successful = true;
+				} finally {
+					final boolean evaluationSuccessful = successful;
+					resourceRegistryQueue.put(() -> {
+						dependencyEvaluations.remove(key);
+						if (evaluationSuccessful) dependencyEvaluationRetryTimes.remove(key);
+						else dependencyEvaluationRetryTimes.put(key, System.currentTimeMillis() + FAILURE_RETRY_TIME);
+					});
+				}
+			});
+			scheduled = true;
+		} finally {
+			if (!scheduled) {
+				dependencyEvaluations.remove(key);
+				dependencyEvaluationRetryTimes.put(key, currentTimeMillis + FAILURE_RETRY_TIME);
+			}
+		}
+	}
+
+	private DynamicResource getResource(String key, Supplier<NativeImage> supplier, DefaultRenderingColor defaultRenderingColor) {
+		return getResource(key, supplier, defaultRenderingColor, () -> key, false);
+	}
+
+	private DynamicResource getResource(String key, Supplier<NativeImage> supplier, DefaultRenderingColor defaultRenderingColor, Supplier<String> fingerprintSupplier) {
+		return getResource(key, supplier, defaultRenderingColor, fingerprintSupplier, true);
+	}
+
+	private DynamicResource getResource(String key, Supplier<NativeImage> supplier, DefaultRenderingColor defaultRenderingColor, Supplier<String> fingerprintSupplier, boolean evaluateFingerprintOffThread) {
+		resourceRegistryQueue.process(Runnable::run);
+		final long currentTimeMillis = System.currentTimeMillis();
+		final DynamicResource dynamicResource = dynamicResources.get(key);
+		final DynamicTextureDependencyTracker.Token dependencyToken;
+		if (evaluateFingerprintOffThread) {
+			dependencyToken = dependencyTracker.current(key);
+			if (dependencyToken == null) {
+				scheduleDependencyEvaluation(key, fingerprintSupplier, currentTimeMillis);
+				return getExistingOrDefault(dynamicResource, defaultRenderingColor, currentTimeMillis);
+			}
+		} else {
+			dependencyToken = dependencyTracker.evaluate(key, fingerprintSupplier);
+		}
+
+		if (dynamicResource != null && !dynamicResource.needsRefresh && dynamicResource.dependencyToken == dependencyToken) {
+			dynamicResource.expiryTime = currentTimeMillis + COOLDOWN_TIME;
 			return dynamicResource;
 		}
 
-		if (generatingResources.contains(key)) {
-			return defaultRenderingColor.dynamicResource;
+		if (generationTracker.isActive(key, dependencyToken) || generationTracker.isRetryBlocked(key, dependencyToken, currentTimeMillis)) {
+			return getExistingOrDefault(dynamicResource, defaultRenderingColor, currentTimeMillis);
 		}
 
-		MainRenderer.WORKER_THREAD.scheduleDynamicTextures(() -> {
-			while (font == null) {
+		final DynamicTextureGenerationTracker.Token generationToken = generationTracker.start(key, dependencyToken);
+		boolean generationScheduled = false;
+		try {
+			RouteMapGenerator.setConstants();
+			MainRenderer.WORKER_THREAD.scheduleDynamicTextures(() -> generateResource(key, generationToken, dependencyToken, supplier));
+			generationScheduled = true;
+		} finally {
+			if (!generationScheduled) {
+				generationTracker.completeFailure(key, generationToken, dependencyToken, currentTimeMillis + FAILURE_RETRY_TIME);
+			}
+		}
+		return getExistingOrDefault(dynamicResource, defaultRenderingColor, currentTimeMillis);
+	}
+
+	private void scheduleDependencyEvaluation(String key, Supplier<String> fingerprintSupplier, long currentTimeMillis) {
+		final Long retryTime = dependencyEvaluationRetryTimes.get(key);
+		if (retryTime != null && currentTimeMillis < retryTime || !dependencyEvaluations.add(key)) return;
+		boolean scheduled = false;
+		try {
+			MainRenderer.WORKER_THREAD.scheduleDynamicTextures(() -> {
+				boolean successful = false;
+				try {
+					dependencyTracker.evaluate(key, fingerprintSupplier);
+					successful = true;
+				} finally {
+					final boolean evaluationSuccessful = successful;
+					resourceRegistryQueue.put(() -> {
+						dependencyEvaluations.remove(key);
+						if (evaluationSuccessful) dependencyEvaluationRetryTimes.remove(key);
+						else dependencyEvaluationRetryTimes.put(key, System.currentTimeMillis() + FAILURE_RETRY_TIME);
+					});
+				}
+			});
+			scheduled = true;
+		} finally {
+			if (!scheduled) {
+				dependencyEvaluations.remove(key);
+				dependencyEvaluationRetryTimes.put(key, currentTimeMillis + FAILURE_RETRY_TIME);
+			}
+		}
+	}
+
+	private void generateResource(String key, DynamicTextureGenerationTracker.Token generationToken, DynamicTextureDependencyTracker.Token dependencyToken, Supplier<NativeImage> supplier) {
+		generateResource(key, generationToken, dependencyToken, supplier, true);
+	}
+
+	private void generateResource(String key, DynamicTextureGenerationTracker.Token generationToken,
+			DynamicTextureDependencyTracker.Token dependencyToken, Supplier<NativeImage> supplier, boolean loadLegacyFonts) {
+		NativeImage nativeImage = null;
+		boolean registryTaskQueued = false;
+		try {
+			while (loadLegacyFonts && font == null) {
 				ResourceManagerHelper.readResource(new Identifier(Init.MOD_ID, "font/noto-sans-semibold.ttf"), inputStream -> {
 					try {
 						font = Font.createFont(Font.TRUETYPE_FONT, inputStream);
@@ -254,7 +618,7 @@ public class DynamicTextureCache implements IGui {
 				});
 			}
 
-			while (fontCjk == null) {
+			while (loadLegacyFonts && fontCjk == null) {
 				ResourceManagerHelper.readResource(new Identifier(Init.MOD_ID, "font/noto-serif-cjk-tc-semibold.ttf"), inputStream -> {
 					try {
 						fontCjk = Font.createFont(Font.TRUETYPE_FONT, inputStream);
@@ -264,49 +628,162 @@ public class DynamicTextureCache implements IGui {
 				});
 			}
 
-			final NativeImage nativeImage = supplier.get();
-
-			resourceRegistryQueue.put(() -> {
-				final DynamicResource staticTextureProviderOld = dynamicResources.get(key);
-				if (staticTextureProviderOld != null) {
-					staticTextureProviderOld.remove();
-					deletedResources.put(staticTextureProviderOld.identifier, System.currentTimeMillis() + COOLDOWN_TIME);
-				}
-
-				final DynamicResource dynamicResourceNew;
+			nativeImage = supplier.get();
+			final NativeImage nativeImageToRegister = nativeImage;
+			resourceRegistryQueue.put(() -> registerResource(key, generationToken, dependencyToken, nativeImageToRegister));
+			registryTaskQueued = true;
+		} finally {
+			if (!registryTaskQueued) {
 				if (nativeImage != null) {
-					final NativeImage newNativeImage;
-					final int newMaxImageSize = MAX_IMAGE_SIZE * (int) Math.pow(2, Config.getClient().getDynamicTextureResolution());
-					if (nativeImage.getWidth() > newMaxImageSize || nativeImage.getHeight() > newMaxImageSize) {
-						newNativeImage = new NativeImage(NativeImageFormat.getAbgrMapped(), Math.min(newMaxImageSize, nativeImage.getWidth()), Math.min(newMaxImageSize, nativeImage.getHeight()), false);
-						for (int x = 0; x < Math.min(newMaxImageSize, nativeImage.getWidth()); x++) {
-							for (int y = 0; y < Math.min(newMaxImageSize, nativeImage.getHeight()); y++) {
-								newNativeImage.setPixelColor(x, y, nativeImage.getColor(x, y));
-							}
-						}
-					} else {
-						newNativeImage = nativeImage;
-					}
-
-					final NativeImageBackedTexture nativeImageBackedTexture = new NativeImageBackedTexture(newNativeImage);
-					final Identifier identifier = new Identifier(Init.MOD_ID, "id_" + Init.randomString());
-					MinecraftClient.getInstance().getTextureManager().registerTexture(identifier, new AbstractTexture(nativeImageBackedTexture.data));
-					dynamicResourceNew = new DynamicResource(identifier, nativeImageBackedTexture);
-					dynamicResources.put(key, dynamicResourceNew);
+					nativeImage.close();
 				}
+				resourceRegistryQueue.put(() -> completeFailedGeneration(key, generationToken, dependencyToken));
+			}
+		}
+	}
 
-				generatingResources.remove(key);
-			});
-		});
-		RouteMapGenerator.setConstants();
-		generatingResources.add(key);
+	private void registerResource(String key, DynamicTextureGenerationTracker.Token generationToken, DynamicTextureDependencyTracker.Token dependencyToken, @Nullable NativeImage nativeImage) {
+		if (!generationTracker.isCurrent(key, generationToken, dependencyToken)) {
+			generationTracker.discard(key, generationToken);
+			if (nativeImage != null) {
+				nativeImage.close();
+			}
+			return;
+		}
 
+		if (nativeImage == null) {
+			completeFailedGeneration(key, generationToken, dependencyToken);
+			return;
+		}
+
+		DynamicResource dynamicResourceNew = null;
+		boolean resourceInstalled = false;
+		try {
+			dynamicResourceNew = registerTexture(nativeImage);
+			dynamicResourceNew.dependencyToken = dependencyToken;
+			final long currentTimeMillis = System.currentTimeMillis();
+			dynamicResourceNew.expiryTime = currentTimeMillis + COOLDOWN_TIME;
+			final DynamicResource dynamicResourceOld = dynamicResources.put(key, dynamicResourceNew);
+			resourceInstalled = true;
+			if (dynamicResourceOld != null) {
+				try {
+					dynamicResourceOld.remove();
+				} finally {
+					queueResourceForDeletion(dynamicResourceOld, currentTimeMillis);
+				}
+			}
+		} catch (RuntimeException e) {
+			Init.LOGGER.error("Unable to register dynamic texture", e);
+		} finally {
+			if (!resourceInstalled && dynamicResourceNew != null) {
+				destroyResource(dynamicResourceNew);
+			}
+			if (resourceInstalled) {
+				generationTracker.completeSuccess(key, generationToken, dependencyToken);
+			} else {
+				generationTracker.completeFailure(key, generationToken, dependencyToken, System.currentTimeMillis() + FAILURE_RETRY_TIME);
+			}
+		}
+	}
+
+	private DynamicResource registerTexture(NativeImage nativeImage) {
+		NativeImage ownedImage = nativeImage;
+		NativeImageBackedTexture ownedTexture = null;
+		Identifier registeredIdentifier = null;
+		try {
+			final int dynamicTextureResolution = Math.max(0, Math.min(Client.DYNAMIC_RESOLUTION_COUNT, Config.getClient().getDynamicTextureResolution()));
+			final int newMaxImageSize = MAX_IMAGE_SIZE << dynamicTextureResolution;
+			if (ownedImage.getWidth() > newMaxImageSize || ownedImage.getHeight() > newMaxImageSize) {
+				final int width = Math.min(newMaxImageSize, ownedImage.getWidth());
+				final int height = Math.min(newMaxImageSize, ownedImage.getHeight());
+				final NativeImage resizedImage = new NativeImage(NativeImageFormat.getAbgrMapped(), width, height, false);
+				boolean copySucceeded = false;
+				try {
+					for (int x = 0; x < width; x++) {
+						for (int y = 0; y < height; y++) {
+							resizedImage.setPixelColor(x, y, ownedImage.getColor(x, y));
+						}
+					}
+					copySucceeded = true;
+				} finally {
+					if (!copySucceeded) {
+						resizedImage.close();
+					}
+				}
+				final NativeImage originalImage = ownedImage;
+				ownedImage = resizedImage;
+				originalImage.close();
+			}
+
+			ownedTexture = new NativeImageBackedTexture(ownedImage);
+			ownedImage = null;
+			registeredIdentifier = MinecraftClient.getInstance().getTextureManager().registerDynamicTexture(DYNAMIC_TEXTURE_NAME, ownedTexture);
+			final DynamicResource dynamicResource = new DynamicResource(registeredIdentifier, ownedTexture);
+			ownedTexture = null;
+			registeredIdentifier = null;
+			return dynamicResource;
+		} finally {
+			if (ownedTexture != null) {
+				if (registeredIdentifier == null) {
+					ownedTexture.close();
+				} else {
+					destroyTexture(registeredIdentifier, ownedTexture);
+				}
+			}
+			if (ownedImage != null) {
+				ownedImage.close();
+			}
+		}
+	}
+
+	public DynamicResource registerRouteAssetTexture(NativeImage nativeImage) {
+		return registerTexture(Objects.requireNonNull(nativeImage, "nativeImage"));
+	}
+
+	public void destroyRouteAssetTexture(DynamicResource dynamicResource) {
+		final DynamicResource resource = Objects.requireNonNull(dynamicResource, "dynamicResource");
+		try {
+			resource.remove();
+		} finally {
+			destroyResource(resource);
+		}
+	}
+
+	private DynamicResource getExistingOrDefault(@Nullable DynamicResource dynamicResource, DefaultRenderingColor defaultRenderingColor, long currentTimeMillis) {
 		if (dynamicResource == null) {
 			return defaultRenderingColor.dynamicResource;
-		} else {
-			dynamicResource.expiryTime = System.currentTimeMillis() + COOLDOWN_TIME;
-			dynamicResource.needsRefresh = false;
-			return dynamicResource;
+		}
+		dynamicResource.expiryTime = currentTimeMillis + COOLDOWN_TIME;
+		return dynamicResource;
+	}
+
+	private void completeFailedGeneration(String key, DynamicTextureGenerationTracker.Token generationToken, DynamicTextureDependencyTracker.Token dependencyToken) {
+		generationTracker.completeFailure(key, generationToken, dependencyToken, System.currentTimeMillis() + FAILURE_RETRY_TIME);
+	}
+
+	private void queueResourceForDeletion(DynamicResource dynamicResource, long currentTimeMillis) {
+		if (dynamicResource.texture != null) {
+			deletedResources.put(dynamicResource.identifier, dynamicResource.texture);
+			deletedResourceExpiryTimes.put(dynamicResource.identifier, currentTimeMillis + COOLDOWN_TIME);
+		}
+	}
+
+	private static void destroyResource(DynamicResource dynamicResource) {
+		destroyTexture(dynamicResource.identifier, dynamicResource.texture);
+	}
+
+	private static void destroyTexture(Identifier identifier, @Nullable NativeImageBackedTexture texture) {
+		try {
+			MinecraftClient.getInstance().getTextureManager().destroyTexture(identifier);
+		} catch (RuntimeException e) {
+			Init.LOGGER.error("Unable to destroy dynamic texture", e);
+		}
+		if (texture != null) {
+			try {
+				texture.close();
+			} catch (RuntimeException e) {
+				Init.LOGGER.error("Unable to close dynamic texture", e);
+			}
 		}
 	}
 
@@ -314,12 +791,15 @@ public class DynamicTextureCache implements IGui {
 
 		private long expiryTime;
 		private boolean needsRefresh;
+		private DynamicTextureDependencyTracker.Token dependencyToken;
+		private final NativeImageBackedTexture texture;
 		public final int width;
 		public final int height;
 		public final Identifier identifier;
 
 		private DynamicResource(Identifier identifier, @Nullable NativeImageBackedTexture nativeImageBackedTexture) {
 			this.identifier = identifier;
+			texture = nativeImageBackedTexture;
 			if (nativeImageBackedTexture != null) {
 				final NativeImage nativeImage = nativeImageBackedTexture.getImage();
 				if (nativeImage != null) {
@@ -339,6 +819,10 @@ public class DynamicTextureCache implements IGui {
 			MainRenderer.cancelRender(identifier);
 			MoreRenderLayers.removeFromCache(identifier);
 		}
+
+		public boolean isReady() {
+			return texture != null;
+		}
 	}
 
 	private enum DefaultRenderingColor {
@@ -350,6 +834,18 @@ public class DynamicTextureCache implements IGui {
 
 		DefaultRenderingColor(Identifier identifier) {
 			dynamicResource = new DynamicResource(identifier, null);
+		}
+	}
+
+	private static final class RouteAssetRequestContext {
+		private final String dimension;
+		private final int resolution;
+		private final String language;
+
+		private RouteAssetRequestContext(String dimension, int resolution, String language) {
+			this.dimension = dimension;
+			this.resolution = resolution;
+			this.language = language;
 		}
 	}
 }

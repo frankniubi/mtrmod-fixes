@@ -1,10 +1,11 @@
 package org.mtr.mod.client;
 
+import org.apache.commons.io.IOUtils;
 import org.mtr.core.data.*;
 import org.mtr.core.tool.Utilities;
 import org.mtr.libraries.it.unimi.dsi.fastutil.ints.Int2ObjectAVLTreeMap;
-import org.mtr.libraries.it.unimi.dsi.fastutil.ints.IntAVLTreeSet;
 import org.mtr.libraries.it.unimi.dsi.fastutil.ints.IntArrayList;
+import org.mtr.libraries.it.unimi.dsi.fastutil.ints.IntAVLTreeSet;
 import org.mtr.libraries.it.unimi.dsi.fastutil.longs.LongArrayList;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArrayList;
@@ -16,8 +17,14 @@ import org.mtr.mapping.mapper.ResourceManagerHelper;
 import org.mtr.mod.Init;
 import org.mtr.mod.config.Config;
 import org.mtr.mod.data.IGui;
+import org.mtr.mod.data.InterchangeRouteDisplay;
 import org.mtr.mod.generated.lang.TranslationProvider;
+import org.mtr.mod.route.RouteAssetImage;
+import org.mtr.mod.route.RouteAssetKey;
+import org.mtr.mod.route.RouteAssetRenderSnapshot;
+import org.mtr.mod.route.RouteAssetSourceImages;
 
+import java.io.IOException;
 import java.util.Locale;
 import java.util.function.BiConsumer;
 
@@ -35,6 +42,10 @@ public class RouteMapGenerator implements IGui {
 	private static final String EXIT_RESOURCE = "textures/block/sign/exit_letter_blank.png";
 	private static final String ARROW_RESOURCE = "textures/block/sign/arrow.png";
 	private static final String CIRCLE_RESOURCE = "textures/block/sign/circle.png";
+	private static final String RAILWAY_INTERCHANGE_RESOURCE = "textures/block/sign/railway_interchange.png";
+	private static final String AIRPORT_INTERCHANGE_RESOURCE = "textures/block/sign/airplane.png";
+	private static final int RAILWAY_INTERCHANGE_COLOR = 0x21679F;
+	private static final RouteAssetSourceImages ROUTE_ASSET_SOURCE_IMAGES = new RouteAssetSourceImages(RouteMapGenerator::loadRouteAssetSource);
 	private static final String TEMP_CIRCULAR_MARKER_CLOCKWISE = String.format("temp_circular_marker_%s_clockwise", Init.randomString());
 	private static final String TEMP_CIRCULAR_MARKER_ANTICLOCKWISE = String.format("temp_circular_marker_%s_anticlockwise", Init.randomString());
 	private static final int PIXEL_RESOLUTION = 24;
@@ -45,6 +56,14 @@ public class RouteMapGenerator implements IGui {
 		lineSpacing = lineSize * 3 / 2;
 		fontSizeBig = lineSize * 2;
 		fontSizeSmall = fontSizeBig / 2;
+	}
+
+	public static String getRouteAssetFingerprint(RouteAssetKey key) {
+		return RouteAssetClientSnapshotAdapter.resolve(key).map(RouteAssetClientSnapshotAdapter.ResolvedSnapshot::getFingerprint).orElse("");
+	}
+
+	public static RouteAssetRenderSnapshot getRouteAssetSnapshot(RouteAssetKey key) {
+		return RouteAssetClientSnapshotAdapter.resolve(key).map(RouteAssetClientSnapshotAdapter.ResolvedSnapshot::getSnapshot).orElse(null);
 	}
 
 	public static NativeImage generatePixelatedText(String text, int textColor, int maxWidth, double cjkSizeRatio, boolean fullPixel) {
@@ -69,19 +88,15 @@ public class RouteMapGenerator implements IGui {
 
 	public static NativeImage generateColorStrip(long platformId) {
 		try {
-			final IntArrayList colors = getRouteStream(platformId, (simplifiedRoute, currentStationIndex) -> {
-			});
+			final IntArrayList colors = getRouteStream(platformId, (simplifiedRoute, currentStationIndex) -> { });
 			if (colors.isEmpty()) {
 				final NativeImage nativeImage = new NativeImage(NativeImageFormat.getAbgrMapped(), 1, 1, false);
 				nativeImage.setPixelColor(0, 0, 0);
 				return nativeImage;
-			} else {
-				final NativeImage nativeImage = new NativeImage(NativeImageFormat.getAbgrMapped(), 1, colors.size(), false);
-				for (int i = 0; i < colors.size(); i++) {
-					drawPixelSafe(nativeImage, 0, i, ARGB_BLACK | colors.getInt(i));
-				}
-				return nativeImage;
 			}
+			final NativeImage nativeImage = new NativeImage(NativeImageFormat.getAbgrMapped(), 1, colors.size(), false);
+			for (int index = 0; index < colors.size(); index++) drawPixelSafe(nativeImage, 0, index, ARGB_BLACK | colors.getInt(index));
+			return nativeImage;
 		} catch (Exception e) {
 			Init.LOGGER.error("", e);
 		}
@@ -263,7 +278,6 @@ public class RouteMapGenerator implements IGui {
 			final int padding = scale / 32;
 			final int[] dimensions = new int[2];
 			final byte[] pixels = DynamicTextureCache.instance.getTextPixels(routeName, dimensions, Integer.MAX_VALUE, (int) ((fontSizeBig + fontSizeSmall) * DynamicTextureCache.LINE_HEIGHT_MULTIPLIER), fontSizeBig, fontSizeSmall, padding, horizontalAlignment);
-
 			final int width = dimensions[0] + padding * 2;
 			final int height = dimensions[1] + padding * 2;
 			final NativeImage nativeImage = new NativeImage(NativeImageFormat.getAbgrMapped(), width, height, false);
@@ -381,7 +395,11 @@ public class RouteMapGenerator implements IGui {
 
 		try {
 			final ObjectArrayList<ObjectIntImmutablePair<SimplifiedRoute>> routeDetails = new ObjectArrayList<>();
-			getRouteStream(platformId, (simplifiedRoute, currentStationIndex) -> routeDetails.add(new ObjectIntImmutablePair<>(simplifiedRoute, currentStationIndex)));
+			final IntAVLTreeSet excludedRouteColors = new IntAVLTreeSet();
+			getRouteStream(platformId, (simplifiedRoute, currentStationIndex) -> {
+				routeDetails.add(new ObjectIntImmutablePair<>(simplifiedRoute, currentStationIndex));
+				excludedRouteColors.add(InterchangeRouteDisplay.normalizeColor(simplifiedRoute.getColor()));
+			});
 			final int routeCount = routeDetails.size();
 
 			if (routeCount > 0) {
@@ -389,7 +407,6 @@ public class RouteMapGenerator implements IGui {
 				final ObjectArrayList<LongArrayList> stationsIdsBefore = new ObjectArrayList<>();
 				final ObjectArrayList<LongArrayList> stationsIdsAfter = new ObjectArrayList<>();
 				final ObjectArrayList<Int2ObjectAVLTreeMap<StationPosition>> stationPositions = new ObjectArrayList<>();
-				final IntAVLTreeSet colors = new IntAVLTreeSet();
 				final int[] colorIndices = new int[routeCount];
 				int colorIndex = -1;
 				int previousColor = -1;
@@ -413,7 +430,6 @@ public class RouteMapGenerator implements IGui {
 					}
 
 					final int color = routeDetail.left().getColor();
-					colors.add(color);
 					if (color != previousColor) {
 						colorIndex++;
 						previousColor = color;
@@ -486,13 +502,22 @@ public class RouteMapGenerator implements IGui {
 						if (!stationPosition.isCommon || stationPositionsGrouped.getOrDefault(key, new ObjectOpenHashSet<>()).stream().noneMatch(stationPosition2 -> stationPosition2.stationPosition.x == stationPosition.x)) {
 							final IntArrayList interchangeColors = new IntArrayList();
 							final ObjectArrayList<String> interchangeNames = new ObjectArrayList<>();
-							simplifiedRoutePlatform.forEach((color, interchangeRouteNamesForColor) -> {
-								if (!colors.contains(color)) {
-									interchangeColors.add(color);
-									interchangeRouteNamesForColor.forEach(interchangeNames::add);
-								}
-							});
-							Data.put(stationPositionsGrouped, key, new StationPositionGrouped(stationPosition, stationIndex - currentIndex, interchangeColors, interchangeNames), ObjectOpenHashSet::new);
+							final Station station = MinecraftClientData.getInterchangeStation(simplifiedRoutePlatform.getStationId());
+							final boolean hasRailwayInterchange;
+							final boolean hasAirportInterchange;
+							if (station != null) {
+								final InterchangeRouteDisplay.RouteMapDisplay routeMapDisplay = InterchangeRouteDisplay.getRouteMapDisplay(InterchangeRouteDisplay.getStationGroups(station, excludedRouteColors), station.getId());
+								routeMapDisplay.getEntries().forEach(entry -> {
+									interchangeColors.add(entry.getColor());
+									interchangeNames.add(entry.getText());
+								});
+								hasRailwayInterchange = routeMapDisplay.hasRailwayInterchange();
+								hasAirportInterchange = routeMapDisplay.hasAirportInterchange();
+							} else {
+								hasRailwayInterchange = false;
+								hasAirportInterchange = false;
+							}
+							Data.put(stationPositionsGrouped, key, new StationPositionGrouped(stationPosition, stationIndex - currentIndex, interchangeColors, interchangeNames, hasRailwayInterchange, hasAirportInterchange), ObjectOpenHashSet::new);
 						}
 					}
 				}
@@ -506,8 +531,16 @@ public class RouteMapGenerator implements IGui {
 					final boolean currentStation = stationPositionGrouped.stationOffset == 0;
 					final boolean passed = stationPositionGrouped.stationOffset < 0;
 
-					final IntArrayList interchangeColors = stationPositionGrouped.interchangeColors;
-					if (!interchangeColors.isEmpty() && !currentStation) {
+					final IntArrayList interchangeColors = new IntArrayList();
+					final ObjectArrayList<String> interchangeNames = new ObjectArrayList<>();
+					for (int index = 0; index < stationPositionGrouped.interchangeNames.size(); index++) {
+						final String name = stationPositionGrouped.interchangeNames.get(index);
+						if (!currentStation || name.startsWith(InterchangeRouteDisplay.NEARBY_DISPLAY_PREFIX)) {
+							interchangeColors.add(stationPositionGrouped.interchangeColors.getInt(index));
+							interchangeNames.add(name);
+						}
+					}
+					if (!interchangeColors.isEmpty()) {
 						final int lineHeight = lineSize * 2;
 						final int lineWidth = (int) Math.ceil((float) lineSize / interchangeColors.size());
 						for (int i = 0; i < interchangeColors.size(); i++) {
@@ -519,15 +552,38 @@ public class RouteMapGenerator implements IGui {
 						}
 
 						final int[] dimensions = new int[2];
-						final byte[] pixels = clientCache.getTextPixels(IGui.mergeStations(stationPositionGrouped.interchangeNames), dimensions, maxStringWidth - (vertical ? lineHeight : 0), (int) ((fontSizeBig + fontSizeSmall) * DynamicTextureCache.LINE_HEIGHT_MULTIPLIER / 2), fontSizeBig / 2, fontSizeSmall / 2, 0, vertical ? HorizontalAlignment.LEFT : HorizontalAlignment.CENTER);
+						final byte[] pixels = clientCache.getTextPixels(IGui.mergeStations(interchangeNames), dimensions, maxStringWidth - (vertical ? lineHeight : 0), (int) ((fontSizeBig + fontSizeSmall) * DynamicTextureCache.LINE_HEIGHT_MULTIPLIER / 2), fontSizeBig / 2, fontSizeSmall / 2, 0, vertical ? HorizontalAlignment.LEFT : HorizontalAlignment.CENTER);
 						drawString(nativeImage, pixels, x, y + (textBelow ? -1 - lineHeight : lines * lineSpacing + lineHeight), dimensions, HorizontalAlignment.CENTER, textBelow ? VerticalAlignment.BOTTOM : VerticalAlignment.TOP, 0, passed ? ARGB_LIGHT_GRAY : ARGB_BLACK, vertical);
 					}
 
 					drawStation(nativeImage, x, y, heightScale, lines, passed);
 
+					final boolean showRailwayIcon = stationPositionGrouped.hasRailwayInterchange && !currentStation;
+					final boolean showAirportIcon = stationPositionGrouped.hasAirportInterchange && !currentStation;
+					final int iconCount = (showRailwayIcon ? 1 : 0) + (showAirportIcon ? 1 : 0);
+					final int railwayIconSize = lineSize * 3 / 2;
+					final int railwayIconGap = Math.max(1, lineSize / 2);
+					final int stationNameY = y + (textBelow ? lines * lineSpacing : -1) + (textBelow ? 1 : -1) * lineSize * 5 / 4;
 					final int[] dimensions = new int[2];
-					final byte[] pixels = clientCache.getTextPixels(key.split("\\|\\|")[0], dimensions, maxStringWidth, (int) ((fontSizeBig + fontSizeSmall) * DynamicTextureCache.LINE_HEIGHT_MULTIPLIER), fontSizeBig, fontSizeSmall, fontSizeSmall / 4, vertical ? HorizontalAlignment.RIGHT : HorizontalAlignment.CENTER);
-					drawString(nativeImage, pixels, x, y + (textBelow ? lines * lineSpacing : -1) + (textBelow ? 1 : -1) * lineSize * 5 / 4, dimensions, HorizontalAlignment.CENTER, textBelow ? VerticalAlignment.TOP : VerticalAlignment.BOTTOM, currentStation ? ARGB_BLACK : 0, passed ? ARGB_LIGHT_GRAY : currentStation ? ARGB_WHITE : ARGB_BLACK, vertical);
+					final int stationNameMaxWidth = Math.max(1, maxStringWidth - iconCount * (railwayIconSize + railwayIconGap));
+					final byte[] pixels = clientCache.getTextPixels(key.split("\\|\\|")[0], dimensions, stationNameMaxWidth, (int) ((fontSizeBig + fontSizeSmall) * DynamicTextureCache.LINE_HEIGHT_MULTIPLIER), fontSizeBig, fontSizeSmall, fontSizeSmall / 4, vertical ? HorizontalAlignment.RIGHT : HorizontalAlignment.CENTER);
+
+					int stationNameX = x;
+					int adjustedStationNameY = stationNameY;
+					if (iconCount > 0) {
+						final RouteMapStationNameLayout.Layout layout = vertical ? RouteMapStationNameLayout.getVertical(nativeImage.getWidth(), nativeImage.getHeight(), x, stationNameY, dimensions[0], dimensions[1], iconCount, railwayIconSize, railwayIconGap) : RouteMapStationNameLayout.getHorizontal(nativeImage.getWidth(), nativeImage.getHeight(), x, stationNameY, dimensions[0], dimensions[1], iconCount, railwayIconSize, railwayIconGap, textBelow);
+						stationNameX = layout.getTextX();
+						adjustedStationNameY = layout.getTextY();
+						int iconIndex = 0;
+						if (showRailwayIcon) {
+							drawResource(nativeImage, RAILWAY_INTERCHANGE_RESOURCE, layout.getIconX(iconIndex), layout.getIconY(iconIndex), railwayIconSize, railwayIconSize, false, 0, 1, passed ? ARGB_LIGHT_GRAY : RAILWAY_INTERCHANGE_COLOR, false, vertical);
+							iconIndex++;
+						}
+						if (showAirportIcon) {
+							drawResource(nativeImage, AIRPORT_INTERCHANGE_RESOURCE, layout.getIconX(iconIndex), layout.getIconY(iconIndex), railwayIconSize, railwayIconSize, false, 0, 1, passed ? ARGB_LIGHT_GRAY : RAILWAY_INTERCHANGE_COLOR, false, vertical);
+						}
+					}
+					drawString(nativeImage, pixels, stationNameX, adjustedStationNameY, dimensions, HorizontalAlignment.CENTER, textBelow ? VerticalAlignment.TOP : VerticalAlignment.BOTTOM, currentStation ? ARGB_BLACK : 0, passed ? ARGB_LIGHT_GRAY : currentStation ? ARGB_WHITE : ARGB_BLACK, vertical);
 				}));
 
 				if (transparentWhite) {
@@ -772,44 +828,69 @@ public class RouteMapGenerator implements IGui {
 	}
 
 	private static void drawResource(NativeImage nativeImage, String resource, int x, int y, int width, int height, boolean flipX, float v1, float v2, int color, boolean useActualColor) {
+		drawResource(nativeImage, resource, x, y, width, height, flipX, v1, v2, color, useActualColor, false);
+	}
+
+	private static void drawResource(NativeImage nativeImage, String resource, int x, int y, int width, int height, boolean flipX, float v1, float v2, int color, boolean useActualColor, boolean rotate90) {
+		try {
+			final RouteAssetImage nativeImageResource = ROUTE_ASSET_SOURCE_IMAGES.get(resource);
+			final int resourceWidth = nativeImageResource.getWidth();
+			final int resourceHeight = nativeImageResource.getHeight();
+			for (int drawX = 0; drawX < width; drawX++) {
+				for (int drawY = Math.round(v1 * height); drawY < Math.round(v2 * height); drawY++) {
+					final float pixelX = rotate90 ? (float) (height - drawY - 1) / height * resourceWidth : (float) drawX / width * resourceWidth;
+					final float pixelY = rotate90 ? (float) drawX / width * resourceHeight : (float) drawY / height * resourceHeight;
+					final int floorX = (int) pixelX;
+					final int floorY = (int) pixelY;
+					final int ceilX = floorX + 1;
+					final int ceilY = floorY + 1;
+					final float percentX1 = ceilX - pixelX;
+					final float percentY1 = ceilY - pixelY;
+					final float percentX2 = pixelX - floorX;
+					final float percentY2 = pixelY - floorY;
+					final int pixel1 = nativeImageResource.getPixel(MathHelper.clamp(floorX, 0, resourceWidth - 1), MathHelper.clamp(floorY, 0, resourceHeight - 1));
+					final int pixel2 = nativeImageResource.getPixel(MathHelper.clamp(ceilX, 0, resourceWidth - 1), MathHelper.clamp(floorY, 0, resourceHeight - 1));
+					final int pixel3 = nativeImageResource.getPixel(MathHelper.clamp(floorX, 0, resourceWidth - 1), MathHelper.clamp(ceilY, 0, resourceHeight - 1));
+					final int pixel4 = nativeImageResource.getPixel(MathHelper.clamp(ceilX, 0, resourceWidth - 1), MathHelper.clamp(ceilY, 0, resourceHeight - 1));
+					final int newColor;
+					if (useActualColor) {
+						newColor = invertColor(pixel1);
+					} else {
+						final float luminance1 = ((pixel1 >> 24) & 0xFF) * percentX1 * percentY1;
+						final float luminance2 = ((pixel2 >> 24) & 0xFF) * percentX2 * percentY1;
+						final float luminance3 = ((pixel3 >> 24) & 0xFF) * percentX1 * percentY2;
+						final float luminance4 = ((pixel4 >> 24) & 0xFF) * percentX2 * percentY2;
+						newColor = (color & RGB_WHITE) + ((int) (luminance1 + luminance2 + luminance3 + luminance4) << 24);
+					}
+					blendPixel(nativeImage, (flipX ? width - drawX - 1 : drawX) + x, drawY + y, newColor);
+				}
+			}
+		} catch (Exception e) {
+			Init.LOGGER.error("", e);
+		}
+	}
+
+	public static void clearSourceImages() {
+		ROUTE_ASSET_SOURCE_IMAGES.clear();
+	}
+
+	private static byte[] loadRouteAssetSource(String resource) throws IOException {
+		final byte[][] bytes = {null};
+		final IOException[] exception = {null};
 		ResourceManagerHelper.readResource(new Identifier(Init.MOD_ID, resource), inputStream -> {
 			try {
-				final NativeImage nativeImageResource = NativeImage.read(NativeImageFormat.getAbgrMapped(), inputStream);
-				final int resourceWidth = nativeImageResource.getWidth();
-				final int resourceHeight = nativeImageResource.getHeight();
-				for (int drawX = 0; drawX < width; drawX++) {
-					for (int drawY = Math.round(v1 * height); drawY < Math.round(v2 * height); drawY++) {
-						final float pixelX = (float) drawX / width * resourceWidth;
-						final float pixelY = (float) drawY / height * resourceHeight;
-						final int floorX = (int) pixelX;
-						final int floorY = (int) pixelY;
-						final int ceilX = floorX + 1;
-						final int ceilY = floorY + 1;
-						final float percentX1 = ceilX - pixelX;
-						final float percentY1 = ceilY - pixelY;
-						final float percentX2 = pixelX - floorX;
-						final float percentY2 = pixelY - floorY;
-						final int pixel1 = nativeImageResource.getColor(MathHelper.clamp(floorX, 0, resourceWidth - 1), MathHelper.clamp(floorY, 0, resourceHeight - 1));
-						final int pixel2 = nativeImageResource.getColor(MathHelper.clamp(ceilX, 0, resourceWidth - 1), MathHelper.clamp(floorY, 0, resourceHeight - 1));
-						final int pixel3 = nativeImageResource.getColor(MathHelper.clamp(floorX, 0, resourceWidth - 1), MathHelper.clamp(ceilY, 0, resourceHeight - 1));
-						final int pixel4 = nativeImageResource.getColor(MathHelper.clamp(ceilX, 0, resourceWidth - 1), MathHelper.clamp(ceilY, 0, resourceHeight - 1));
-						final int newColor;
-						if (useActualColor) {
-							newColor = invertColor(pixel1);
-						} else {
-							final float luminance1 = ((pixel1 >> 24) & 0xFF) * percentX1 * percentY1;
-							final float luminance2 = ((pixel2 >> 24) & 0xFF) * percentX2 * percentY1;
-							final float luminance3 = ((pixel3 >> 24) & 0xFF) * percentX1 * percentY2;
-							final float luminance4 = ((pixel4 >> 24) & 0xFF) * percentX2 * percentY2;
-							newColor = (color & RGB_WHITE) + ((int) (luminance1 + luminance2 + luminance3 + luminance4) << 24);
-						}
-						blendPixel(nativeImage, (flipX ? width - drawX - 1 : drawX) + x, drawY + y, newColor);
-					}
-				}
-			} catch (Exception e) {
-				Init.LOGGER.error("", e);
+				bytes[0] = IOUtils.toByteArray(inputStream);
+			} catch (IOException ioException) {
+				exception[0] = ioException;
 			}
 		});
+		if (exception[0] != null) {
+			throw exception[0];
+		}
+		if (bytes[0] == null) {
+			throw new IOException("Missing route asset source: " + resource);
+		}
+		return bytes[0];
 	}
 
 	private static void blendPixel(NativeImage nativeImage, int x, int y, int color) {
@@ -870,12 +951,16 @@ public class RouteMapGenerator implements IGui {
 		private final int stationOffset;
 		private final IntArrayList interchangeColors;
 		private final ObjectArrayList<String> interchangeNames;
+		private final boolean hasRailwayInterchange;
+		private final boolean hasAirportInterchange;
 
-		private StationPositionGrouped(StationPosition stationPosition, int stationOffset, IntArrayList interchangeColors, ObjectArrayList<String> interchangeNames) {
+		private StationPositionGrouped(StationPosition stationPosition, int stationOffset, IntArrayList interchangeColors, ObjectArrayList<String> interchangeNames, boolean hasRailwayInterchange, boolean hasAirportInterchange) {
 			this.stationPosition = stationPosition;
 			this.stationOffset = stationOffset;
 			this.interchangeColors = interchangeColors;
 			this.interchangeNames = interchangeNames;
+			this.hasRailwayInterchange = hasRailwayInterchange;
+			this.hasAirportInterchange = hasAirportInterchange;
 		}
 	}
 }

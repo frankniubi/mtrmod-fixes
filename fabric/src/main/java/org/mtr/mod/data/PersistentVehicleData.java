@@ -16,6 +16,7 @@ import org.mtr.mod.resource.Interpolation;
 import org.mtr.mod.resource.VehicleResource;
 import org.mtr.mod.sound.VehicleSoundBase;
 
+import javax.annotation.Nullable;
 import java.util.function.Supplier;
 
 public final class PersistentVehicleData {
@@ -53,18 +54,25 @@ public final class PersistentVehicleData {
 	 */
 	public void update(double newRailProgress, double totalVehicleLength) {
 		railProgressSmoothingAdjustment = newRailProgress - smoothedRailProgress;
-		if (Math.abs(railProgressSmoothingAdjustment) > totalVehicleLength - 1) {
+		if (Math.abs(railProgressSmoothingAdjustment) > Math.max(totalVehicleLength - 1, 10)) {
 			railProgressSmoothingAdjustment = 0;
 		}
 	}
 
-	public double getSmoothedRailProgress(double railProgress, double adjustmentAmount) {
+	public double getSmoothedRailProgress(double railProgress, double adjustmentAmount, @Nullable Double maxClamp) {
 		if (railProgressSmoothingAdjustment > 0) {
 			railProgressSmoothingAdjustment = Math.max(railProgressSmoothingAdjustment - adjustmentAmount, 0);
 		} else if (railProgressSmoothingAdjustment < 0) {
 			railProgressSmoothingAdjustment = Math.min(railProgressSmoothingAdjustment + adjustmentAmount, 0);
 		}
+
 		smoothedRailProgress = railProgress - railProgressSmoothingAdjustment;
+
+		if (maxClamp != null && smoothedRailProgress > maxClamp) {
+			smoothedRailProgress = maxClamp;
+			railProgressSmoothingAdjustment = 0;
+		}
+
 		return smoothedRailProgress;
 	}
 

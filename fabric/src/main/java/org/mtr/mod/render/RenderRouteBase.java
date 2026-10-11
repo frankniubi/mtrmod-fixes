@@ -10,6 +10,7 @@ import org.mtr.mod.block.IBlock;
 import org.mtr.mod.client.DynamicTextureCache;
 import org.mtr.mod.client.IDrawing;
 import org.mtr.mod.data.IGui;
+import org.mtr.mod.route.RouteMapPurpose;
 
 public abstract class RenderRouteBase<T extends BlockPSDTop.BlockEntityBase> extends BlockEntityRenderer<T> implements IGui, IBlock {
 
@@ -41,6 +42,9 @@ public abstract class RenderRouteBase<T extends BlockPSDTop.BlockEntityBase> ext
 
 		final BlockPos blockPos = entity.getPos2();
 		final BlockState state = world.getBlockState(blockPos);
+		if (!shouldRenderRoute(state)) {
+			return;
+		}
 		final Direction facing = IBlock.getStatePropertySafe(state, DirectionHelper.FACING);
 
 		final StoredMatrixTransformations storedMatrixTransformations = new StoredMatrixTransformations(0.5 + entity.getPos2().getX(), entity.getPos2().getY(), 0.5 + entity.getPos2().getZ());
@@ -57,8 +61,8 @@ public abstract class RenderRouteBase<T extends BlockPSDTop.BlockEntityBase> ext
 				graphicsHolderNew.translate(-0.5, -getAdditionalOffset(state), z);
 			});
 
-			final int leftBlocks = getTextureNumber(world, blockPos, facing, true);
-			final int rightBlocks = getTextureNumber(world, blockPos, facing, false);
+			final int leftBlocks = getTextureNumber(world, blockPos, state, facing, true);
+			final int rightBlocks = getTextureNumber(world, blockPos, state, facing, false);
 			final int color = getShadingColor(facing, ARGB_WHITE);
 			final RenderType renderType = getRenderType(world, blockPos.offset(facing.rotateYCounterclockwise(), leftBlocks), state);
 
@@ -71,7 +75,7 @@ public abstract class RenderRouteBase<T extends BlockPSDTop.BlockEntityBase> ext
 				if (renderType == RenderType.ARROW) {
 					identifier = DynamicTextureCache.instance.getDirectionArrow(platformId, (arrowDirection & 0b01) > 0, (arrowDirection & 0b10) > 0, HorizontalAlignment.CENTER, true, 0.25F, width / height, ARGB_WHITE, ARGB_BLACK, transparentWhite ? ARGB_WHITE : 0).identifier;
 				} else {
-					identifier = DynamicTextureCache.instance.getRouteMap(platformId, false, arrowDirection == 2, width / height, transparentWhite).identifier;
+					identifier = DynamicTextureCache.instance.getRouteMap(platformId, RouteMapPurpose.GENERIC, false, arrowDirection == 2, width / height, transparentWhite).identifier;
 				}
 
 				MainRenderer.scheduleRender(identifier, false, QueuedRenderLayer.EXTERIOR, (graphicsHolderNew, offset) -> {
@@ -97,6 +101,10 @@ public abstract class RenderRouteBase<T extends BlockPSDTop.BlockEntityBase> ext
 		return 0;
 	}
 
+	protected boolean shouldRenderRoute(BlockState state) {
+		return true;
+	}
+
 	protected boolean isLeft(BlockState state) {
 		return IBlock.getStatePropertySafe(state, SIDE_EXTENDED) == IBlock.EnumSide.LEFT;
 	}
@@ -109,18 +117,22 @@ public abstract class RenderRouteBase<T extends BlockPSDTop.BlockEntityBase> ext
 
 	protected abstract void renderAdditional(StoredMatrixTransformations storedMatrixTransformations, long platformId, BlockState state, int leftBlocks, int rightBlocks, Direction facing, int color, int light);
 
-	private int getTextureNumber(World world, BlockPos pos, Direction facing, boolean searchLeft) {
-		int number = 0;
-		final Block thisBlock = world.getBlockState(pos).getBlock();
+	private int getTextureNumber(World world, BlockPos pos, BlockState initialState, Direction facing, boolean searchLeft) {
+		if (searchLeft ? isLeft(initialState) : isRight(initialState)) {
+			return 0;
+		}
+		int number = 1;
+		final Block thisBlock = initialState.getBlock();
+		final Direction searchDirection = searchLeft ? facing.rotateYCounterclockwise() : facing.rotateYClockwise();
 
 		while (true) {
-			final BlockState state = world.getBlockState(pos.offset(searchLeft ? facing.rotateYCounterclockwise() : facing.rotateYClockwise(), number));
+			final BlockState state = world.getBlockState(pos.offset(searchDirection, number));
 
 			if (state.getBlock().equals(thisBlock)) {
 				final boolean isLeft = isLeft(state);
 				final boolean isRight = isRight(state);
 
-				if (number == 0 || (searchLeft ? !isRight : !isLeft)) {
+				if (searchLeft ? !isRight : !isLeft) {
 					number++;
 					if (searchLeft ? isLeft : isRight) {
 						break;

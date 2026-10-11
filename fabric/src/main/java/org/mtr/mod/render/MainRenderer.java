@@ -13,6 +13,7 @@ import org.mtr.mod.client.CustomResourceLoader;
 import org.mtr.mod.client.DynamicTextureCache;
 import org.mtr.mod.client.MinecraftClientData;
 import org.mtr.mod.client.VehicleRidingMovement;
+import org.mtr.mod.client.asset.ClientRouteAssetManager;
 import org.mtr.mod.config.Config;
 import org.mtr.mod.data.ArrivalsCacheClient;
 import org.mtr.mod.data.IGui;
@@ -82,8 +83,9 @@ public class MainRenderer extends EntityRenderer<EntityRendering> implements IGu
 			return;
 		}
 
+		final boolean renderingShadows = OptimizedRenderer.renderingShadows();
 		final long millisElapsed;
-		if (OptimizedRenderer.renderingShadows()) {
+		if (renderingShadows) {
 			if (Config.getClient().getDisableShadowsForShaders()) {
 				return;
 			}
@@ -103,6 +105,7 @@ public class MainRenderer extends EntityRenderer<EntityRendering> implements IGu
 			lastRenderedMillis = InitClient.getGameMillis();
 			WORKER_THREAD.start();
 			DynamicTextureCache.instance.tick();
+			ClientRouteAssetManager.getInstance().beginRenderFrame(8, 2_000_000L);
 			// Tick the riding cool down (dismount player if they are no longer riding a vehicle) and store the player offset cache
 			VehicleRidingMovement.tick();
 			ArrivalsCacheClient.INSTANCE.tick();
@@ -111,7 +114,10 @@ public class MainRenderer extends EntityRenderer<EntityRendering> implements IGu
 		final Vector3d cameraShakeOffset = clientPlayerEntity.getPos().subtract(offset);
 		RenderVehicles.render(millisElapsed, cameraShakeOffset);
 		RenderLifts.render(millisElapsed, cameraShakeOffset);
+		DefaultRailMeshCache.beginFrame(clientWorld, renderingShadows);
 		RenderRails.render();
+		DefaultRailMeshCache.finishFrame(clientWorld);
+		DefaultRailMeshCache.scheduleRender();
 
 		for (int i = 0; i < TOTAL_RENDER_STAGES; i++) {
 			for (int j = 0; j < QueuedRenderLayer.values().length; j++) {

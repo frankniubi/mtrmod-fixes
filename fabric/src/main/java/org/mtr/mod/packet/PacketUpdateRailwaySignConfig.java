@@ -11,12 +11,14 @@ import org.mtr.mapping.tool.PacketBufferSender;
 import org.mtr.mod.Init;
 import org.mtr.mod.block.BlockRailwaySign;
 import org.mtr.mod.block.BlockRouteSignBase;
+import org.mtr.mod.block.RailwaySignTextData;
 
 public final class PacketUpdateRailwaySignConfig extends PacketHandler {
 
 	private final BlockPos blockPos;
 	private final LongAVLTreeSet selectedIds;
 	private final String[] signIds;
+	private final String[] customTexts;
 
 	public PacketUpdateRailwaySignConfig(PacketBufferReceiver packetBufferReceiver) {
 		blockPos = BlockPos.fromLong(packetBufferReceiver.readLong());
@@ -31,12 +33,18 @@ public final class PacketUpdateRailwaySignConfig extends PacketHandler {
 			final String signId = packetBufferReceiver.readString();
 			signIds[i] = signId.isEmpty() ? null : signId;
 		}
+		final int customTextsLength = packetBufferReceiver.readInt();
+		customTexts = new String[customTextsLength];
+		for (int i = 0; i < customTextsLength; i++) {
+			customTexts[i] = RailwaySignTextData.sanitize(packetBufferReceiver.readString());
+		}
 	}
 
-	public PacketUpdateRailwaySignConfig(BlockPos blockPos, LongAVLTreeSet selectedIds, String[] signIds) {
+	public PacketUpdateRailwaySignConfig(BlockPos blockPos, LongAVLTreeSet selectedIds, String[] signIds, String[] customTexts) {
 		this.blockPos = blockPos;
 		this.selectedIds = selectedIds;
 		this.signIds = signIds;
+		this.customTexts = customTexts;
 	}
 
 	@Override
@@ -47,6 +55,10 @@ public final class PacketUpdateRailwaySignConfig extends PacketHandler {
 		packetBufferSender.writeInt(signIds.length);
 		for (final String signType : signIds) {
 			packetBufferSender.writeString(signType == null ? "" : signType);
+		}
+		packetBufferSender.writeInt(customTexts.length);
+		for (final String customText : customTexts) {
+			packetBufferSender.writeString(RailwaySignTextData.sanitize(customText));
 		}
 	}
 
@@ -59,7 +71,7 @@ public final class PacketUpdateRailwaySignConfig extends PacketHandler {
 		final BlockEntity entity = serverPlayerEntity.getEntityWorld().getBlockEntity(blockPos);
 		if (entity != null) {
 			if (entity.data instanceof BlockRailwaySign.BlockEntity) {
-				((BlockRailwaySign.BlockEntity) entity.data).setData(selectedIds, signIds);
+				((BlockRailwaySign.BlockEntity) entity.data).setData(selectedIds, signIds, customTexts);
 			} else if (entity.data instanceof BlockRouteSignBase.BlockEntityBase) {
 				final long platformId = selectedIds.isEmpty() ? 0 : (long) selectedIds.toArray()[0];
 				((BlockRouteSignBase.BlockEntityBase) entity.data).setPlatformId(platformId);

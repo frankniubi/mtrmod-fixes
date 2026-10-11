@@ -59,7 +59,8 @@ public class RenderVehicleHelper {
 	}
 
 	public static double getDoorBlockedAmount(Box doorway, double playerX, double playerY, double playerZ) {
-		if (playerX > doorway.getMinXMapped() - HALF_PLAYER_WIDTH && playerX < doorway.getMaxXMapped() + HALF_PLAYER_WIDTH && Utilities.isBetween(playerY, doorway.getMinYMapped(), doorway.getMaxYMapped()) && playerZ > doorway.getMinZMapped() - HALF_PLAYER_WIDTH && playerZ < doorway.getMaxZMapped() + HALF_PLAYER_WIDTH) {
+		// TODO disable door holding for now
+		if (false && playerX > doorway.getMinXMapped() - HALF_PLAYER_WIDTH && playerX < doorway.getMaxXMapped() + HALF_PLAYER_WIDTH && Utilities.isBetween(playerY, doorway.getMinYMapped(), doorway.getMaxYMapped()) && playerZ > doorway.getMinZMapped() - HALF_PLAYER_WIDTH && playerZ < doorway.getMaxZMapped() + HALF_PLAYER_WIDTH) {
 			final double halfWidth = (doorway.getMaxZMapped() - doorway.getMinZMapped()) / 2;
 			final double distance = Math.min(playerZ - HALF_PLAYER_WIDTH - doorway.getMinZMapped(), doorway.getMaxZMapped() - HALF_PLAYER_WIDTH - playerZ);
 			return Utilities.clamp((halfWidth - distance) / halfWidth, 0, 1);

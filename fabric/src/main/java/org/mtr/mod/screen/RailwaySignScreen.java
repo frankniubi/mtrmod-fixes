@@ -8,9 +8,11 @@ import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectArraySet;
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectImmutableList;
 import org.mtr.mapping.holder.*;
 import org.mtr.mapping.mapper.*;
+import org.mtr.mapping.tool.TextCase;
 import org.mtr.mod.InitClient;
 import org.mtr.mod.block.BlockRailwaySign;
 import org.mtr.mod.block.BlockRouteSignBase;
+import org.mtr.mod.block.RailwaySignTextData;
 import org.mtr.mod.client.CustomResourceLoader;
 import org.mtr.mod.client.IDrawing;
 import org.mtr.mod.client.MinecraftClientData;
@@ -34,6 +36,7 @@ public class RailwaySignScreen extends ScreenExtension implements IGui {
 	private final boolean isRailwaySign;
 	private final int length;
 	private final String[] signIds;
+	private final String[] customTexts;
 	private final LongAVLTreeSet selectedIds;
 	private final ObjectImmutableList<DashboardListItem> exitsForList;
 	private final ObjectImmutableList<DashboardListItem> platformsForList;
@@ -46,6 +49,7 @@ public class RailwaySignScreen extends ScreenExtension implements IGui {
 	private final ButtonWidgetExtension buttonClear;
 	private final TexturedButtonWidgetExtension buttonPrevPage;
 	private final TexturedButtonWidgetExtension buttonNextPage;
+	private final TextFieldWidgetExtension textFieldCustomText;
 
 	private static final int SIGN_SIZE = 32;
 	private static final int SIGN_BUTTON_SIZE = 16;
@@ -90,10 +94,12 @@ public class RailwaySignScreen extends ScreenExtension implements IGui {
 			final BlockEntity entity = world.getBlockEntity(signPos);
 			if (entity != null && entity.data instanceof BlockRailwaySign.BlockEntity) {
 				signIds = ((BlockRailwaySign.BlockEntity) entity.data).getSignIds();
+				customTexts = ((BlockRailwaySign.BlockEntity) entity.data).getCustomTexts();
 				selectedIds = ((BlockRailwaySign.BlockEntity) entity.data).getSelectedIds();
 				isRailwaySign = true;
 			} else {
 				signIds = new String[0];
+				customTexts = new String[0];
 				selectedIds = new LongAVLTreeSet();
 				isRailwaySign = false;
 				if (entity != null && entity.data instanceof BlockRouteSignBase.BlockEntityBase) {
@@ -109,6 +115,7 @@ public class RailwaySignScreen extends ScreenExtension implements IGui {
 		} else {
 			length = 0;
 			signIds = new String[0];
+			customTexts = new String[0];
 			selectedIds = new LongAVLTreeSet();
 			isRailwaySign = false;
 		}
@@ -128,6 +135,12 @@ public class RailwaySignScreen extends ScreenExtension implements IGui {
 		buttonClear = new ButtonWidgetExtension(0, 0, 0, SQUARE_SIZE, TranslationProvider.GUI_MTR_RESET_SIGN.getMutableText(), button -> setNewSignId(null));
 		buttonPrevPage = TexturedButtonWidgetHelper.create(0, 0, 0, SQUARE_SIZE, new Identifier("textures/gui/sprites/mtr/icon_left.png"), new Identifier("textures/gui/sprites/mtr/icon_left_highlighted.png"), button -> setPage(page - 1));
 		buttonNextPage = TexturedButtonWidgetHelper.create(0, 0, 0, SQUARE_SIZE, new Identifier("textures/gui/sprites/mtr/icon_right.png"), new Identifier("textures/gui/sprites/mtr/icon_right_highlighted.png"), button -> setPage(page + 1));
+		textFieldCustomText = new TextFieldWidgetExtension(0, 0, 0, SQUARE_SIZE, RailwaySignTextData.MAX_TEXT_LENGTH, TextCase.DEFAULT, null, TextHelper.translatable("sign.mtr.free_text").getString());
+		textFieldCustomText.setChangedListener2(text -> {
+			if (editingIndex >= 0 && editingIndex < signIds.length && RailwaySignTextData.isFreeText(signIds[editingIndex])) {
+				customTexts[editingIndex] = RailwaySignTextData.sanitize(text);
+			}
+		});
 	}
 
 	@Override
@@ -140,7 +153,7 @@ public class RailwaySignScreen extends ScreenExtension implements IGui {
 		}
 
 		columns = Math.max((width - SIGN_BUTTON_SIZE * 3) / (SIGN_BUTTON_SIZE * 8) * 2, 1);
-		rows = Math.max((height - SIGN_SIZE - SQUARE_SIZE * 4) / SIGN_BUTTON_SIZE, 1);
+		rows = Math.max((height - SIGN_SIZE - SQUARE_SIZE * 6) / SIGN_BUTTON_SIZE, 1);
 
 		final int xOffsetSmall = (width - SIGN_BUTTON_SIZE * (columns * 4 + 3)) / 2 + SIGN_BUTTON_SIZE;
 		final int xOffsetBig = xOffsetSmall + SIGN_BUTTON_SIZE * (columns + 1);
@@ -165,6 +178,10 @@ public class RailwaySignScreen extends ScreenExtension implements IGui {
 		buttonNextPage.visible = false;
 		addChild(new ClickableWidget(buttonNextPage));
 
+		IDrawing.setPositionAndWidth(textFieldCustomText, SQUARE_SIZE + TEXT_FIELD_PADDING / 2, height - SQUARE_SIZE * 4 + TEXT_FIELD_PADDING / 2, width - SQUARE_SIZE * 2 - TEXT_FIELD_PADDING);
+		textFieldCustomText.visible = false;
+		addChild(new ClickableWidget(textFieldCustomText));
+
 		if (!isRailwaySign) {
 			MinecraftClient.getInstance().openScreen(new Screen(new DashboardListSelectorScreen(this::onClose2, platformsForList, selectedIds, true, false, null)));
 		}
@@ -177,7 +194,7 @@ public class RailwaySignScreen extends ScreenExtension implements IGui {
 
 		for (int i = 0; i < signIds.length; i++) {
 			if (signIds[i] != null) {
-				RenderRailwaySign.drawSign(graphicsHolder, null, signPos, signIds[i], (width - SIGN_SIZE * length) / 2F + i * SIGN_SIZE, 0, SIGN_SIZE, RenderRailwaySign.getMaxWidth(signIds, i, false), RenderRailwaySign.getMaxWidth(signIds, i, true), selectedIds, Direction.UP, 0, (textureId, x, y, size, flipTexture) -> {
+				RenderRailwaySign.drawSign(graphicsHolder, null, signPos, signIds[i], customTexts[i], (width - SIGN_SIZE * length) / 2F + i * SIGN_SIZE, 0, SIGN_SIZE, RenderRailwaySign.getMaxWidth(signIds, i, false), RenderRailwaySign.getMaxWidth(signIds, i, true), selectedIds, Direction.UP, 0, (textureId, x, y, size, flipTexture) -> {
 					final GuiDrawing guiDrawing = new GuiDrawing(graphicsHolder);
 					guiDrawing.beginDrawingTexture(textureId);
 					guiDrawing.drawTexture(x, y, x + size, y + size, flipTexture ? 1 : 0, 0, flipTexture ? 0 : 1, 1);
@@ -195,7 +212,7 @@ public class RailwaySignScreen extends ScreenExtension implements IGui {
 				final SignResource sign = RenderRailwaySign.getSign(signId);
 				if (sign != null) {
 					final boolean moveRight = sign.hasCustomText && sign.getFlipCustomText();
-					RenderRailwaySign.drawSign(graphicsHolder, null, signPos, signId, (isBig ? xOffsetBig : xOffsetSmall) + x + (moveRight ? SIGN_BUTTON_SIZE * 2 : 0), BUTTON_Y_START + y, SIGN_BUTTON_SIZE, 2, 2, selectedIds, Direction.UP, 0, (textureId, x1, y1, size, flipTexture) -> {
+					RenderRailwaySign.drawSign(graphicsHolder, null, signPos, signId, null, (isBig ? xOffsetBig : xOffsetSmall) + x + (moveRight ? SIGN_BUTTON_SIZE * 2 : 0), BUTTON_Y_START + y, SIGN_BUTTON_SIZE, 2, 2, selectedIds, Direction.UP, 0, (textureId, x1, y1, size, flipTexture) -> {
 						final GuiDrawing guiDrawing = new GuiDrawing(graphicsHolder);
 						guiDrawing.beginDrawingTexture(sign.getTexture());
 						guiDrawing.drawTexture(x1, y1, x1 + size, y1 + size, flipTexture ? 1 : 0, 0, flipTexture ? 0 : 1, 1);
@@ -216,8 +233,13 @@ public class RailwaySignScreen extends ScreenExtension implements IGui {
 
 	@Override
 	public void onClose2() {
-		InitClient.REGISTRY_CLIENT.sendPacketToServer(new PacketUpdateRailwaySignConfig(signPos, selectedIds, signIds));
+		InitClient.REGISTRY_CLIENT.sendPacketToServer(new PacketUpdateRailwaySignConfig(signPos, selectedIds, signIds, customTexts));
 		super.onClose2();
+	}
+
+	@Override
+	public void tick2() {
+		textFieldCustomText.tick2();
 	}
 
 	@Override
@@ -234,6 +256,7 @@ public class RailwaySignScreen extends ScreenExtension implements IGui {
 		for (ButtonWidgetExtension button : buttonsSelection) {
 			button.visible = false;
 		}
+		textFieldCustomText.visible = false;
 		editingIndex = -1;
 	}
 
@@ -298,11 +321,16 @@ public class RailwaySignScreen extends ScreenExtension implements IGui {
 		buttonClear.visible = true;
 		setPage(page);
 		buttonsEdit[editingIndex].active = false;
+		updateCustomTextField();
 	}
 
 	private void setNewSignId(@Nullable String newSignId) {
 		if (editingIndex >= 0 && editingIndex < signIds.length) {
 			signIds[editingIndex] = newSignId;
+			if (!RailwaySignTextData.isFreeText(newSignId)) {
+				customTexts[editingIndex] = "";
+			}
+			updateCustomTextField();
 			final boolean isExitLetter = newSignId != null && (newSignId.equals("exit_letter") || newSignId.equals("exit_letter_flipped"));
 			final boolean isPlatform = newSignId != null && (newSignId.equals("platform") || newSignId.equals("platform_flipped"));
 			final boolean isLine = newSignId != null && (newSignId.equals("line") || newSignId.equals("line_flipped"));
@@ -310,6 +338,14 @@ public class RailwaySignScreen extends ScreenExtension implements IGui {
 			if ((isExitLetter || isPlatform || isLine || isStation)) {
 				MinecraftClient.getInstance().openScreen(new Screen(new DashboardListSelectorScreen(new ObjectImmutableList<>(isExitLetter ? exitsForList : isPlatform ? platformsForList : isLine ? routesForList : stationsForList), selectedIds, false, false, this)));
 			}
+		}
+	}
+
+	private void updateCustomTextField() {
+		final boolean visible = editingIndex >= 0 && editingIndex < signIds.length && RailwaySignTextData.isFreeText(signIds[editingIndex]);
+		textFieldCustomText.visible = visible;
+		if (visible) {
+			textFieldCustomText.setText2(customTexts[editingIndex]);
 		}
 	}
 

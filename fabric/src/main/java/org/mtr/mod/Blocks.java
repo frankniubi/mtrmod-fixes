@@ -89,6 +89,7 @@ public final class Blocks {
 		PLATFORM_UK_1_SLAB = registerBlockWithBlockItem(new Identifier(Init.MOD_ID, "platform_uk_1_slab"), () -> new Block(new BlockPlatformSlab(createDefaultBlockSettings(false))), CreativeModeTabs.STATION_BUILDING_BLOCKS);
 
 		// Signs
+		DESTINATION_STATION_SIGN = registerBlockWithBlockItem(new Identifier(Init.MOD_ID, "destination_station_sign"), () -> new Block(new BlockDestinationSign()), CreativeModeTabs.RAILWAY_FACILITIES);
 		RAILWAY_SIGN_2_EVEN = registerBlockWithBlockItem(new Identifier(Init.MOD_ID, "railway_sign_2_even"), () -> new Block(new BlockRailwaySign(2, false)), CreativeModeTabs.RAILWAY_FACILITIES);
 		RAILWAY_SIGN_2_ODD = registerBlockWithBlockItem(new Identifier(Init.MOD_ID, "railway_sign_2_odd"), () -> new Block(new BlockRailwaySign(2, true)), CreativeModeTabs.RAILWAY_FACILITIES);
 		RAILWAY_SIGN_3_EVEN = registerBlockWithBlockItem(new Identifier(Init.MOD_ID, "railway_sign_3_even"), () -> new Block(new BlockRailwaySign(3, false)), CreativeModeTabs.RAILWAY_FACILITIES);
@@ -270,6 +271,7 @@ public final class Blocks {
 	public static final BlockRegistryObject CLOCK;
 	public static final BlockRegistryObject CLOCK_POLE;
 	public static final BlockRegistryObject DRIVER_KEY_DISPENSER;
+	public static final BlockRegistryObject DESTINATION_STATION_SIGN;
 	public static final BlockRegistryObject ESCALATOR_SIDE;
 	public static final BlockRegistryObject ESCALATOR_STEP;
 	public static final BlockRegistryObject GLASS_FENCE_CIO;

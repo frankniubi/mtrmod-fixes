@@ -20,17 +20,24 @@ import org.mtr.mod.block.BlockStationNameTallStanding;
 import org.mtr.mod.block.BlockTactileMap;
 import org.mtr.mod.block.BlockTrainAnnouncer;
 import org.mtr.mod.client.CustomResourceLoader;
+import org.mtr.mod.client.DestinationSignClientState;
 import org.mtr.mod.client.DynamicTextureCache;
 import org.mtr.mod.client.IDrawing;
 import org.mtr.mod.client.MinecraftClientData;
+import org.mtr.mod.client.asset.ClientRouteAssetManager;
 import org.mtr.mod.config.Config;
 import org.mtr.mod.data.IGui;
+import org.mtr.mod.data.DestinationSignArrivalsClientCache;
 import org.mtr.mod.entity.EntityRendering;
 import org.mtr.mod.generated.WebserverResources;
 import org.mtr.mod.generated.lang.TranslationProvider;
 import org.mtr.mod.item.ItemBlockClickingBase;
 import org.mtr.mod.item.ItemDriverKey;
+import org.mtr.mod.packet.ClientPacketHelper;
 import org.mtr.mod.packet.PacketRequestData;
+import org.mtr.mod.packet.PacketRequestInterchangeData;
+import org.mtr.mod.block.DestinationSignConfigResult;
+import org.mtr.mod.screen.DestinationSignConfigScreen;
 import org.mtr.mod.render.*;
 import org.mtr.mod.resource.CachedResource;
 import org.mtr.mod.screen.BetaWarningScreen;
@@ -44,6 +51,7 @@ import javax.annotation.Nullable;
 import java.util.Comparator;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 public final class InitClient {
 
@@ -55,10 +63,18 @@ public final class InitClient {
 	private static long lastUpdatePacketMillis = 0;
 	private static Runnable movePlayer;
 	private static ClientWorld lastClientWorld;
+	private static Supplier<String> multiplayerAddressSupplier = () -> "";
 
 	public static final RegistryClient REGISTRY_CLIENT = new RegistryClient(Init.REGISTRY);
 	public static final int MILLIS_PER_SPEED_SOUND = 200;
 	public static final LoopingSoundInstance TACTILE_MAP_SOUND_INSTANCE = new LoopingSoundInstance("tactile_map_music");
+
+	public static void handleDestinationSignConfigResult(BlockPos anchor, long requestId, DestinationSignConfigResult result) {
+		final Screen currentScreen = MinecraftClient.getInstance().getCurrentScreenMapped();
+		if (currentScreen != null && currentScreen.data instanceof DestinationSignConfigScreen) {
+			((DestinationSignConfigScreen) currentScreen.data).handleConfigResult(anchor, requestId, result);
+		}
+	}
 
 	static {
 		Init.createWebserverSetup(InitClient::setupWebserver);
@@ -169,6 +185,7 @@ public final class InitClient {
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.ROUTE_SIGN_STANDING_METAL, RenderRouteSign::new);
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.ROUTE_SIGN_WALL_LIGHT, RenderRouteSign::new);
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.ROUTE_SIGN_WALL_METAL, RenderRouteSign::new);
+		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.DESTINATION_STATION_SIGN, RenderDestinationSign::new);
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.SIGNAL_LIGHT_2_ASPECT_1, dispatcher -> new RenderSignalLight2Aspect<>(dispatcher, false, 0xFF0000FF));
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.SIGNAL_LIGHT_2_ASPECT_2, dispatcher -> new RenderSignalLight2Aspect<>(dispatcher, false, 0xFF0000FF));
 		REGISTRY_CLIENT.registerBlockEntityRenderer(BlockEntityTypes.SIGNAL_LIGHT_2_ASPECT_3, dispatcher -> new RenderSignalLight2Aspect<>(dispatcher, true, 0xFF00FF00));
@@ -370,7 +387,8 @@ public final class InitClient {
 			lastMillis = System.currentTimeMillis();
 			gameMillis = 0;
 			lastUpdatePacketMillis = 0;
-			DynamicTextureCache.instance.refresh();
+			DynamicTextureCache.instance.onWorldReset();
+			ClientRouteAssetManager.getInstance().onJoin(multiplayerAddressSupplier.get());
 
 			// Clientside webserver for locally hosting the online system map
 			// Only start clientside webserver if not in singleplayer
@@ -392,6 +410,12 @@ public final class InitClient {
 		});
 
 		REGISTRY_CLIENT.eventRegistryClient.registerClientDisconnect(() -> {
+			ClientRouteAssetManager.getInstance().onDisconnect();
+			org.mtr.mod.screen.DestinationSignSaveState.clearClientSession();
+			DestinationSignClientState.INSTANCE.clear();
+			DestinationSignArrivalsClientCache.INSTANCE.clear();
+			org.mtr.mod.client.DestinationSignDynamicTextCache.INSTANCE.clear();
+			DefaultRailMeshCache.clear();
 			if (webserver != null) {
 				webserver.stop();
 				webserver = null;
@@ -401,6 +425,9 @@ public final class InitClient {
 
 		REGISTRY_CLIENT.eventRegistryClient.registerStartClientTick(() -> {
 			final long currentMillis = System.currentTimeMillis();
+			ClientRouteAssetManager.getInstance().tick(currentMillis);
+			DestinationSignClientState.INSTANCE.tick();
+			DestinationSignArrivalsClientCache.INSTANCE.tick();
 			final long millisElapsed = currentMillis - lastMillis;
 			lastMillis = currentMillis;
 			gameMillis += millisElapsed;
@@ -424,6 +451,10 @@ public final class InitClient {
 				if (lastClientWorld == null || !lastClientWorld.equals(clientWorld)) {
 					lastClientWorld = clientWorld;
 					MinecraftClientData.reset();
+					DestinationSignArrivalsClientCache.INSTANCE.clear();
+					org.mtr.mod.client.DestinationSignDynamicTextCache.INSTANCE.clear();
+					DynamicTextureCache.instance.onWorldReset();
+					REGISTRY_CLIENT.sendPacketToServer(new PacketRequestInterchangeData());
 				}
 			}
 
@@ -449,16 +480,20 @@ public final class InitClient {
 		});
 
 		REGISTRY_CLIENT.eventRegistryClient.registerChunkLoad((clientWorld, worldChunk) -> {
+			final ChunkPos chunkPos = worldChunk.getPos();
+			DefaultRailMeshCache.invalidateChunk(chunkPos.getXMapped(), chunkPos.getZMapped());
 			if (lastUpdatePacketMillis == 0) {
 				lastUpdatePacketMillis = getGameMillis() + 500;
 			}
 		});
-
 		REGISTRY_CLIENT.eventRegistryClient.registerResourceReloadEvent(CustomResourceLoader::reload);
 
 		REGISTRY_CLIENT.eventRegistryClient.registerGuiRendering(DrivingGuiRenderer::render);
 
 		Config.init(MinecraftClient.getInstance().getRunDirectoryMapped());
+		ClientPacketHelper.setRouteAssetManifestHandler(payload -> ClientRouteAssetManager.getInstance().handleManifest(payload));
+		ClientPacketHelper.setRouteAssetChunkHandler(payload -> ClientRouteAssetManager.getInstance().handlePacketFallbackChunk(payload));
+		ClientPacketHelper.setDestinationSignArrivalsHandler(DestinationSignArrivalsClientCache.INSTANCE::accept);
 
 		BlockTactileMap.BlockEntity.updateSoundSource = TACTILE_MAP_SOUND_INSTANCE::setPos;
 		BlockTactileMap.BlockEntity.onUse = blockPos -> {
@@ -471,6 +506,10 @@ public final class InitClient {
 
 		// Finish registration
 		REGISTRY_CLIENT.init();
+	}
+
+	public static void setMultiplayerAddressSupplier(Supplier<String> supplier) {
+		multiplayerAddressSupplier = supplier == null ? () -> "" : supplier;
 	}
 
 	public static int getStationColor(@Nullable BlockPos blockPos) {
@@ -500,7 +539,7 @@ public final class InitClient {
 
 	public static void findClosePlatform(BlockPos blockPos, int radius, Consumer<Platform> consumer) {
 		final Position position = Init.blockPosToPosition(blockPos);
-		MinecraftClientData.getInstance().platforms.stream().filter(platform -> platform.closeTo(Init.blockPosToPosition(blockPos), radius)).min(Comparator.comparingDouble(platform -> platform.getApproximateClosestDistance(position, MinecraftClientData.getInstance()))).ifPresent(consumer);
+		MinecraftClientData.getInstance().platforms.stream().filter(platform -> platform.closeTo(position, radius)).min(Comparator.comparingDouble(platform -> platform.getApproximateClosestDistance(position, MinecraftClientData.getInstance()))).ifPresent(consumer);
 	}
 
 	@Nullable

@@ -16,6 +16,33 @@ import java.util.function.Predicate;
  * Since packets are registered serverside, they will fail if any client classes are used (e.g. screens).
  */
 public final class ClientPacketHelper {
+	private static Consumer<PacketRouteAssetManifest.ManifestPayload> routeAssetManifestHandler = payload -> { };
+	private static Consumer<PacketRouteAssetChunk.ChunkPayload> routeAssetChunkHandler = payload -> { };
+	private static Consumer<PacketFetchDestinationSignArrivals.ResponsePayload> destinationSignArrivalsHandler = payload -> { };
+
+	public static void setRouteAssetManifestHandler(Consumer<PacketRouteAssetManifest.ManifestPayload> handler) {
+		routeAssetManifestHandler = handler;
+	}
+
+	public static void handleRouteAssetManifest(PacketRouteAssetManifest.ManifestPayload manifestPayload) {
+		routeAssetManifestHandler.accept(manifestPayload);
+	}
+
+	public static void setRouteAssetChunkHandler(Consumer<PacketRouteAssetChunk.ChunkPayload> handler) {
+		routeAssetChunkHandler = handler;
+	}
+
+	public static void handleRouteAssetChunk(PacketRouteAssetChunk.ChunkPayload chunkPayload) {
+		routeAssetChunkHandler.accept(chunkPayload);
+	}
+
+	public static void setDestinationSignArrivalsHandler(Consumer<PacketFetchDestinationSignArrivals.ResponsePayload> handler) {
+		destinationSignArrivalsHandler = handler;
+	}
+
+	public static void handleDestinationSignArrivals(PacketFetchDestinationSignArrivals.ResponsePayload payload) {
+		destinationSignArrivalsHandler.accept(payload);
+	}
 
 	public static void openBlockEntityScreen(BlockPos blockPos) {
 		getBlockEntity(blockPos, blockEntity -> {
@@ -25,7 +52,9 @@ public final class ClientPacketHelper {
 				openScreen(new TrainScheduleSensorScreen(blockPos, (BlockTrainScheduleSensor.BlockEntity) blockEntity.data), screenExtension -> screenExtension instanceof TrainScheduleSensorScreen);
 			} else if (blockEntity.data instanceof BlockTrainSensorBase.BlockEntityBase) {
 				openScreen(new TrainBasicSensorScreen(blockPos), screenExtension -> screenExtension instanceof TrainBasicSensorScreen);
-			} else if (blockEntity.data instanceof BlockRailwaySign.BlockEntity || blockEntity.data instanceof BlockRouteSignBase.BlockEntityBase) {
+			} else if (blockEntity.data instanceof BlockRouteSignBase.BlockEntityBase) {
+				openScreen(new RouteSignConfigScreen(blockPos), screenExtension -> screenExtension instanceof RouteSignConfigScreen);
+			} else if (blockEntity.data instanceof BlockRailwaySign.BlockEntity) {
 				openScreen(new RailwaySignScreen(blockPos), screenExtension -> screenExtension instanceof RailwaySignScreen);
 			} else if (blockEntity.data instanceof BlockLiftTrackFloor.BlockEntity) {
 				openScreen(new LiftTrackFloorScreen(blockPos, (BlockLiftTrackFloor.BlockEntity) blockEntity.data), screenExtension -> screenExtension instanceof LiftTrackFloorScreen);
@@ -35,6 +64,14 @@ public final class ClientPacketHelper {
 				openScreen(new DriverKeyDispenserScreen(blockPos, (BlockDriverKeyDispenser.BlockEntity) blockEntity.data), screenExtension -> screenExtension instanceof DriverKeyDispenserScreen);
 			} else if (blockEntity.data instanceof BlockEyeCandy.BlockEntity) {
 				openScreen(new EyeCandyScreen(blockPos, (BlockEyeCandy.BlockEntity) blockEntity.data), screenExtension -> screenExtension instanceof EyeCandyScreen);
+			}
+		});
+	}
+
+	public static void openDestinationSignScreen(BlockPos blockPos) {
+		getBlockEntity(blockPos, blockEntity -> {
+			if (blockEntity.data instanceof BlockDestinationSign.BlockEntity) {
+				openScreen(new DestinationSignConfigScreen(blockPos), screenExtension -> screenExtension instanceof DestinationSignConfigScreen);
 			}
 		});
 	}

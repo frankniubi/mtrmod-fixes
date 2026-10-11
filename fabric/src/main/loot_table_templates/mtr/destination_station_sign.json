@@ -1,0 +1,27 @@
+{
+	"type": "minecraft:block",
+	"pools": [
+		{
+			"rolls": 1,
+			"entries": [
+				{
+					"type": "minecraft:item",
+					"conditions": [
+						{
+							"condition": "minecraft:block_state_property",
+							"block": "mtr:destination_station_sign",
+							"properties": {
+								"horizontal_offset": "0",
+								"vertical_offset": "0"
+							}
+						}
+					],
+					"name": "mtr:destination_station_sign"
+				}
+			],
+			"conditions": [
+				{ "condition": "minecraft:survives_explosion" }
+			]
+		}
+	]
+}

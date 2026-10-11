@@ -8,6 +8,7 @@ import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectBooleanImmutablePai
 import org.mtr.libraries.it.unimi.dsi.fastutil.objects.ObjectObjectImmutablePair;
 import org.mtr.mapping.holder.*;
 import org.mtr.mapping.mapper.EntityHelper;
+import org.mtr.mapping.mapper.TextHelper;
 import org.mtr.mod.InitClient;
 import org.mtr.mod.KeyBindings;
 import org.mtr.mod.generated.lang.TranslationProvider;
@@ -49,12 +50,16 @@ public class VehicleRidingMovement {
 	private static int pressingDoorsTicks = 0;
 	private static int pressingAtoTicks = 0;
 	private static int doorOverrideTicks;
+	// Client-only seated view: lowers the first-person camera (see CameraSeatedMixin); other players still see the player standing
+	private static boolean seated;
+	private static boolean sitKeyWasDown;
 
 	public static final int SEND_UPDATE_FREQUENCY = 1000;
 	private static final float VEHICLE_WALKING_SPEED_MULTIPLIER = 0.005F;
 	private static final int RIDING_COOLDOWN = 5;
 	private static final int SHIFT_ACTIVATE_TICKS = 30;
 	private static final int DISMOUNT_PROGRESS_BAR_LENGTH = 30;
+	public static final double SEATED_EYE_DROP = 0.55;
 
 	public static void tick() {
 		final MinecraftClient minecraftClient = MinecraftClient.getInstance();
@@ -90,9 +95,18 @@ public class VehicleRidingMovement {
 			doorOverrideTicks--;
 		}
 
+		final boolean sitKeyDown = KeyBindings.VEHICLE_SIT.isPressed();
+		final boolean sitKeyPressed = sitKeyDown && !sitKeyWasDown;
+		sitKeyWasDown = sitKeyDown;
+
 		if (ridingVehicleId == 0) {
 			shiftHoldingTicks = 0;
+			seated = false;
 		} else {
+			if (sitKeyPressed && minecraftClient.getCurrentScreenMapped() == null) {
+				setSeated(!seated);
+			}
+
 			if (KeyBindings.LIFT_MENU.isPressed()) {
 				final Screen currentScreen = minecraftClient.getCurrentScreenMapped();
 				if (MinecraftClientData.getLift(ridingVehicleId) != null && (currentScreen == null || !(currentScreen.data instanceof LiftSelectionScreen))) {
@@ -118,6 +132,9 @@ public class VehicleRidingMovement {
 				if (RenderVehicleHelper.boxContains(floorOrDoorway, x, y, z)) {
 					ridingDepotId = depotId;
 					ridingSidingId = sidingId;
+					if (ridingVehicleId != vehicleId) {
+						seated = false;
+					}
 					ridingVehicleId = vehicleId;
 					ridingVehicleCarNumber = carNumber;
 					ridingVehicleX = x;
@@ -161,6 +178,11 @@ public class VehicleRidingMovement {
 			), (vector, pitch) -> vector, (vector, yaw) -> vector.rotateY((float) (yaw - Math.toRadians(entityYawOld))), (vector, x, y, z) -> vector);
 			final double movementX = movement.getXMapped();
 			final double movementZ = movement.getZMapped();
+
+			if (seated && (movementX != 0 || movementZ != 0)) {
+				// Walking stands the player up
+				setSeated(false);
+			}
 
 			if (sendPositionUpdateTime == 0 && (movementX != 0 || movementZ != 0)) {
 				sendPositionUpdateTime = System.currentTimeMillis() + SEND_UPDATE_FREQUENCY;
@@ -284,6 +306,18 @@ public class VehicleRidingMovement {
 		return isRiding(vehicleId) ? new IntObjectImmutablePair<>(ridingVehicleCarNumberCacheOld, new ObjectObjectImmutablePair<>(ridingPositionCacheOld, ridingYawDifference)) : null;
 	}
 
+	public static boolean isSeated() {
+		return seated && ridingVehicleId != 0;
+	}
+
+	private static void setSeated(boolean newSeated) {
+		seated = newSeated;
+		final ClientPlayerEntity clientPlayerEntity = MinecraftClient.getInstance().getPlayerMapped();
+		if (clientPlayerEntity != null) {
+			clientPlayerEntity.sendMessage(new Text(TextHelper.literal(newSeated ? "已坐下 · 再按一次坐下键或移动即可站起" : "已站起").data), true);
+		}
+	}
+
 	public static boolean isRiding(long vehicleId) {
 		return vehicleId == ridingVehicleId;
 	}
@@ -398,7 +432,7 @@ public class VehicleRidingMovement {
 
 	private static void sendUpdate(boolean dismount) {
 		if (ridingVehicleId != 0) {
-			InitClient.REGISTRY_CLIENT.sendPacketToServer(PacketUpdateVehicleRidingEntities.create(ridingSidingId, ridingVehicleId, dismount ? -1 : ridingVehicleCarNumber, ridingVehicleX, ridingVehicleY, ridingVehicleZ, isOnGangway, isHoldingDriverKey, pressingAccelerateTicks == 1, pressingBrakeTicks == 1, pressingDoorsTicks == 1, pressingAtoTicks == 1, doorOverrideTicks > 1));
+			InitClient.REGISTRY_CLIENT.sendPacketToServer(PacketUpdateVehicleRidingEntities.create(ridingSidingId, ridingVehicleId, dismount ? -1 : ridingVehicleCarNumber, ridingVehicleX, ridingVehicleY, ridingVehicleZ, isOnGangway, isHoldingDriverKey, pressingAccelerateTicks == 1, pressingBrakeTicks == 1, pressingDoorsTicks == 1, pressingAtoTicks == 1));
 			sendPositionUpdateTime = 0;
 		}
 	}

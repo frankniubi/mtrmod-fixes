@@ -176,7 +176,8 @@
 		{
 			"names": [
 				"floor_head",
-				"floor_end"
+				"floor_end",
+				"floor_cockpit"
 			],
 			"positionDefinitions": [
 				"main"

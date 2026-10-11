@@ -32,14 +32,8 @@ public final class MqoModelConverter {
 	}
 
 	private static int findStringEnd(String text, int startIndex) {
-		boolean escaped = false;
 		for (int i = startIndex; i < text.length(); i++) {
-			final char character = text.charAt(i);
-			if (escaped) {
-				escaped = false;
-			} else if (character == '\\') {
-				escaped = true;
-			} else if (character == '"') {
+			if (text.charAt(i) == '"') {
 				return i;
 			}
 		}
@@ -182,8 +176,13 @@ public final class MqoModelConverter {
 					}
 				}
 
+				String lastMaterialName = null;
 				for (final Triangle triangle : triangles) {
-					objBuilder.append("usemtl ").append(triangle.materialIndex >= 0 && triangle.materialIndex < materials.size() ? getMaterialName(triangle.materialIndex) : "mqo_default").append('\n');
+					final String materialName = triangle.materialIndex >= 0 && triangle.materialIndex < materials.size() ? getMaterialName(triangle.materialIndex) : "mqo_default";
+					if (!materialName.equals(lastMaterialName)) {
+						objBuilder.append("usemtl ").append(materialName).append('\n');
+						lastMaterialName = materialName;
+					}
 					for (int i = 0; i < 3; i++) {
 						if (triangle.hasUv) {
 							objBuilder.append(String.format(Locale.US, "vt %.6f %.6f%n", triangle.u[i], triangle.v[i]));
@@ -234,7 +233,11 @@ public final class MqoModelConverter {
 
 		private void parseObjectChunk() {
 			final String objectHeader = lines[index++].trim();
-			final MqoObject object = new MqoObject(extractQuotedOrFirstToken(objectHeader.substring("Object".length()).replace("{", "").trim()));
+			String objectName = objectHeader.substring("Object".length()).trim();
+			if (objectName.endsWith("{")) {
+				objectName = objectName.substring(0, objectName.length() - 1).trim();
+			}
+			final MqoObject object = new MqoObject(extractQuotedOrFirstToken(objectName));
 
 			while (index < lines.length) {
 				final String line = lines[index].trim();

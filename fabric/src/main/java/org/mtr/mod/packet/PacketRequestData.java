@@ -7,6 +7,7 @@ import org.mtr.core.serializer.SerializedDataBase;
 import org.mtr.core.servlet.OperationProcessor;
 import org.mtr.core.tool.Utilities;
 import org.mtr.mapping.tool.PacketBufferReceiver;
+import org.mtr.mod.client.DynamicTextureCache;
 import org.mtr.mod.client.MinecraftClientData;
 
 import javax.annotation.Nonnull;
@@ -27,7 +28,18 @@ public final class PacketRequestData extends PacketRequestResponseBase {
 
 	@Override
 	protected void runClientInbound(JsonReader jsonReader) {
-		new DataResponse(jsonReader, MinecraftClientData.getInstance()).write();
+		final MinecraftClientData clientData = MinecraftClientData.getInstance();
+		final int simplifiedRouteCount = clientData.simplifiedRoutes.size();
+		final int platformCount = clientData.platformIdMap.size();
+		final int stationCount = clientData.stationIdMap.size();
+		final boolean[] routeDataReceived = {false};
+		jsonReader.iterateReaderArray("stations", () -> { }, ignored -> routeDataReceived[0] = true);
+		jsonReader.iterateReaderArray("platforms", () -> { }, ignored -> routeDataReceived[0] = true);
+		jsonReader.iterateReaderArray("simplifiedRoutes", () -> { }, ignored -> routeDataReceived[0] = true);
+		new DataResponse(jsonReader, clientData).write();
+		if (routeDataReceived[0] || simplifiedRouteCount != clientData.simplifiedRoutes.size() || platformCount != clientData.platformIdMap.size() || stationCount != clientData.stationIdMap.size()) {
+			DynamicTextureCache.instance.onRouteDataChanged();
+		}
 	}
 
 	@Override

@@ -1,0 +1,138 @@
+package org.mtr.mod.route;
+
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
+	import java.util.Set;
+
+public final class DestinationSignAssetIdentityTest {
+
+	private static final String DIMENSION = "minecraft/overworld";
+	private static final String FINGERPRINT = "f".repeat(64);
+
+	@Test
+	public void canonicalKeyContainsOnlyStaticConfigurationAndAllowsSignedIds() {
+		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		Assertions.assertEquals("minecraft/overworld|DESTINATION_SIGN_ATLAS|10|1|MULTI|d=30,eta=1,h=2,hdr=-,rpb=3,s=ARRIVAL_ORDER,v=1,w=3", key.toString());
+		final RouteAssetKey signed = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, -10, -30, 0, DestinationSignStyle.DESTINATION_FLAG, 3, 2, false);
+		Assertions.assertEquals(-10, signed.getPrimaryId());
+		Assertions.assertEquals("-30", signed.getVariant().getParameters().get("d"));
+		Assertions.assertThrows(IllegalArgumentException.class, () -> RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 0, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true));
+		for (final DestinationSignStyle style : DestinationSignStyle.values()) {
+			final RouteAssetKey portrait = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, 30, 1, style, 1, 2, true);
+			final RouteAssetKey landscape = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, 30, 1, style, 2, 1, true);
+			Assertions.assertEquals("1", portrait.getVariant().getParameters().get("w"));
+			Assertions.assertEquals("1", landscape.getVariant().getParameters().get("h"));
+		}
+		Assertions.assertThrows(IllegalArgumentException.class,
+				() -> RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 1, 1, true));
+	}
+
+	@Test
+	public void multiDestinationKeyIsOrderIndependentAndRoundTripsHeader() {
+		final String header = "\u5f80\u4e1c/\u897f\u65b9\u5411|To East/West";
+		final RouteAssetKey first = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, -10, Set.of(-20L, -30L), header,
+				1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		final RouteAssetKey second = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, -10, Set.of(-30L, -20L), header,
+				1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		final RouteAssetCanonicalKeyFactory.DestinationSignParameters decoded = RouteAssetCanonicalKeyFactory.decodeDestinationSign(first);
+
+		Assertions.assertEquals(first, second);
+		Assertions.assertEquals("-30:-20", first.getVariant().getParameters().get("d"));
+		Assertions.assertNotNull(decoded);
+		Assertions.assertEquals(Set.of(-30L, -20L), decoded.destinationStationIds);
+		Assertions.assertEquals(header, decoded.customHeader);
+		Assertions.assertEquals(3, decoded.routesPerBlockHeight);
+	}
+
+	@Test
+	public void fingerprintsSeparateStylesButRemainIndependentOfLiveTrainState() {
+		final RouteAssetDataMirror.Snapshot data = snapshot();
+		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
+		final RouteAssetKey arrival = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		final RouteAssetKey grouped = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, 30, 1, DestinationSignStyle.PLATFORM_GROUPS, 3, 2, true);
+		final RouteAssetDependencyCatalog.Entry first = catalog.resolveDestinationSign(arrival, data, FINGERPRINT).orElseThrow();
+		final RouteAssetDependencyCatalog.Entry repeated = catalog.resolveDestinationSign(arrival, data, FINGERPRINT).orElseThrow();
+		final RouteAssetDependencyCatalog.Entry otherStyle = catalog.resolveDestinationSign(grouped, data, FINGERPRINT).orElseThrow();
+		Assertions.assertEquals(first.getDependencyFingerprint(), repeated.getDependencyFingerprint());
+		Assertions.assertNotEquals(first.getDependencyFingerprint(), otherStyle.getDependencyFingerprint());
+		Assertions.assertTrue(catalog.resolveObserved(arrival, data, FINGERPRINT).isEmpty(), "clients may not request arbitrary destination atlases");
+		for (final Class<?> type : List.of(DestinationSignAssetSnapshot.class, RouteAssetRenderSnapshot.class, RouteAssetCanonicalKeyFactory.DestinationSignParameters.class)) {
+			for (final java.lang.reflect.Field field : type.getDeclaredFields()) {
+				final String name = field.getName().toLowerCase(java.util.Locale.ROOT);
+				Assertions.assertFalse(name.contains("countdown") || name.contains("arrivalmillis") || name.contains("physicaltrain") || name.contains("languagephase") || name.contains("pagephase"), type.getSimpleName() + '.' + field.getName());
+			}
+		}
+	}
+
+	@Test
+	public void snapshotsAndFingerprintsIncludeDensityMetricsAndSelectedStripRecords() {
+		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
+		final RouteAssetKey sparseKey = RouteAssetCanonicalKeyFactory.destinationSign(
+				DIMENSION, 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true, 2);
+		final RouteAssetKey denseKey = RouteAssetCanonicalKeyFactory.destinationSign(
+				DIMENSION, 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true, 4);
+		final RouteAssetDependencyCatalog.Entry sparse = catalog.resolveDestinationSign(sparseKey, snapshot(), FINGERPRINT).orElseThrow();
+		final RouteAssetDependencyCatalog.Entry dense = catalog.resolveDestinationSign(denseKey, snapshot(), FINGERPRINT).orElseThrow();
+		final DestinationSignAssetSnapshot resolved = dense.getSnapshot().getDestinationSignAssetSnapshot().orElseThrow();
+
+		Assertions.assertEquals(4, resolved.getRoutesPerBlockHeight());
+		Assertions.assertEquals(26, resolved.getLayout().getRowHeight());
+		Assertions.assertEquals(resolved.getModel().getOptions().size(), resolved.getRouteStrips().size());
+		final DestinationSignAssetSnapshot.RouteStripRecord strip = resolved.getRouteStrips().get(0);
+		Assertions.assertEquals(List.of(
+				DestinationSignRouteStripLayout.MarkerRole.CURRENT,
+				DestinationSignRouteStripLayout.MarkerRole.TARGET,
+				DestinationSignRouteStripLayout.MarkerRole.FOLLOWING),
+				strip.getRouteStrip().getMarkers().stream().map(DestinationSignRouteStripLayout.Marker::getRole).toList());
+		Assertions.assertEquals(List.of(0, 1, 2), strip.getRouteStrip().getMarkers().stream()
+				.map(DestinationSignRouteStripLayout.Marker::getOccurrenceIndex).toList());
+		Assertions.assertThrows(UnsupportedOperationException.class, () -> resolved.getRouteStrips().clear());
+		Assertions.assertNotEquals(sparse.getDependencyFingerprint(), dense.getDependencyFingerprint());
+	}
+
+	@Test
+	public void renderedStationNamesChangeDependenciesAndRowLanguageCycles() {
+		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
+		final RouteAssetKey key = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, 30, 1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		final RouteAssetDependencyCatalog.Entry first = catalog.resolveDestinationSign(key, snapshot("Source A", "Unused A|Unused B|Unused C"), FINGERPRINT).orElseThrow();
+		final RouteAssetDependencyCatalog.Entry second = catalog.resolveDestinationSign(key, snapshot("Source B", "Changed A|Changed B|Changed C|Changed D"), FINGERPRINT).orElseThrow();
+		Assertions.assertNotEquals(first.getDependencyFingerprint(), second.getDependencyFingerprint());
+		final long rowSprites = first.getSnapshot().getDestinationSignAssetSnapshot().orElseThrow().getSprites().stream()
+				.filter(sprite -> sprite.getKind() == DestinationSignAssetSnapshot.SpriteKind.ROW).count();
+		Assertions.assertEquals(3, rowSprites, "selected station labels participate in every static language phase");
+	}
+
+	@Test
+	public void configuredMultiDestinationSnapshotAndFingerprintIncludeHeaderAndEveryId() {
+		final RouteAssetDependencyCatalog catalog = new RouteAssetDependencyCatalog();
+		final RouteAssetKey firstKey = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, Set.of(30L, 40L), "Custom|Header",
+				1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		final RouteAssetKey secondKey = RouteAssetCanonicalKeyFactory.destinationSign(DIMENSION, 10, Set.of(30L, 40L), "Other|Header",
+				1, DestinationSignStyle.ARRIVAL_ORDER, 3, 2, true);
+		final RouteAssetDependencyCatalog.Entry first = catalog.resolveDestinationSign(firstKey, snapshot(), FINGERPRINT).orElseThrow();
+		final RouteAssetDependencyCatalog.Entry second = catalog.resolveDestinationSign(secondKey, snapshot(), FINGERPRINT).orElseThrow();
+		final DestinationSignAssetSnapshot resolved = first.getSnapshot().getDestinationSignAssetSnapshot().orElseThrow();
+
+		Assertions.assertEquals(Set.of(30L, 40L), resolved.getDestinationStationIds());
+		Assertions.assertEquals("Custom|Header", resolved.getDestinationStationName());
+		Assertions.assertNotEquals(first.getDependencyFingerprint(), second.getDependencyFingerprint());
+	}
+
+	private static RouteAssetDataMirror.Snapshot snapshot() {
+		return snapshot("Source|Source EN", "Target|Target EN");
+	}
+
+	private static RouteAssetDataMirror.Snapshot snapshot(String sourceStationName, String unusedDestinationOccurrenceName) {
+		final DestinationSignTopology topology = new DestinationSignTopology(List.of(
+				new DestinationSignTopology.ServiceRoute(100, 0, "R1|Route One", 0x14755E, List.of(
+						new DestinationSignTopology.StopOccurrence(1000, 10, "U1", sourceStationName, "Target|Target EN"),
+						new DestinationSignTopology.StopOccurrence(2000, 30, "D1", unusedDestinationOccurrenceName, ""),
+						new DestinationSignTopology.StopOccurrence(3000, 40, "D2", "Other|Other EN", "")))
+		), List.of(new DestinationSignTopology.StationZone(10, sourceStationName),
+				new DestinationSignTopology.StationZone(30, "Target|Target EN"), new DestinationSignTopology.StationZone(40, "Other|Other EN")));
+		return new RouteAssetDataMirror.Snapshot(1, Map.of(DIMENSION, new RouteAssetDataMirror.DimensionSnapshot(DIMENSION, 1, Map.of(), topology)));
+	}
+}
